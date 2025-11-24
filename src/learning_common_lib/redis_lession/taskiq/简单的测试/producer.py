@@ -1,5 +1,12 @@
 # producer.py
 import asyncio
+
+
+# `from .taskiq_app import broker` 是显式相对导入：只有当 `worker.py` 被视为包里的模块时才成立。
+# 也就是说，Python 需要知道它的 `__package__`（或 `__spec__`）是 `learning_common_lib.redis_lession.taskiq.简单的测试`才能把 `.` 解析成“同级包”。
+# 当你直接 `python worker.py` 时，这个脚本处在裸运行环境，没有父包，`__package__ == None`，`.` 就无处可指，所以报错 “attempted relative import with no known parent package”，
+# 本案例需要 cd learning_common_lib.redis_lession.taskiq 也就是父目录`简单的测试` 的同级目录，
+# 使用 `python -m 简单的测试.worker` 才能正常运行（大型项目中推荐使用这种方案）
 from .taskiq_app import send_email, process_data, heavy_calculation
 
 

@@ -4,7 +4,7 @@ from taskiq_redis import ListQueueBroker
 
 # 创建 Redis Broker（任务队列）
 broker = ListQueueBroker(
-    url="redis://localhost:6379/0"
+    url="redis://default:123456@localhost:6379/0"
 )
 
 # 定义任务 1：发送邮件
