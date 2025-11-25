@@ -1,4 +1,12 @@
 # ==================== 示例 2: FastAPI 依赖注入中使用 ====================
+# 异步上下文管理器 AsyncExitStack 用法
+# AsyncExitStack 的作用
+# AsyncExitStack 是 Python 标准库 contextlib 中的异步上下文管理器，它的主要作用是：
+
+# 动态管理多个异步上下文管理器：可以在运行时动态地进入多个异步上下文
+# 确保资源正确清理：即使发生异常，也能保证所有资源按正确顺序清理
+# 简化嵌套上下文管理：避免多层嵌套的 async with 语句
+
 
 from fastapi import FastAPI, Depends, APIRouter
 from contextlib import AsyncExitStack
@@ -31,6 +39,7 @@ class AsyncDatabase:
     async def query(self, sql: str):
         if not self.connected:
             raise Exception(f"{self.name} 未连接")
+        await asyncio.sleep(8)  # 模拟查询延迟
         return f"[{self.name}] 查询结果: {sql}"
 
 
@@ -46,12 +55,25 @@ async def get_multiple_resources():
         db = await stack.enter_async_context(AsyncDatabase("MainDB"))
         cache = await stack.enter_async_context(AsyncDatabase("Cache"))
         
-        # 返回所有资源
-        yield ResourceDict(
+        
+        yield ResourceDict(   # ⚠️ 这个 yield 是特殊的, FastAPI 会在这里"暂停"函数执行, 等待路由函数处理完请求后再继续
             db=db,
             cache=cache
         )
         # 函数结束时，所有资源自动清理
+        # 执行过程：
+            # 1. 依赖函数开始
+            # 2. 进入 AsyncExitStack
+            # 数据库 进入上下文（__aenter__）
+            # 缓存 进入上下文（__aenter__）
+            # 3. 所有资源已创建，准备 yield
+            # 路由函数执行中
+            # 数据库状态: True  ✅
+            # 缓存状态: True    ✅
+            # 4. 路由函数已执行完，准备清理
+            # 缓存 退出上下文（__aexit__）
+            # 数据库 退出上下文（__aexit__）
+            # 5. AsyncExitStack 已退出，所有资源已清理
 
 
 
@@ -61,11 +83,14 @@ async def get_user(
     resources: ResourceDict = Depends(get_multiple_resources)
 ):
     """使用多个资源的端点"""
-    # 先检查缓存
-    cache_result = await resources["cache"].query(f"GET user:{user_id}")
-    
-    # 从数据库查询
-    db_result = await resources["db"].query(f"SELECT * FROM users WHERE id={user_id}")
+    print(f"当前的user：{user_id}")
+    results = await asyncio.gather(
+        # 检查缓存
+        resources["cache"].query(f"GET user:{user_id}"),
+        # 从数据库查询
+        resources["db"].query(f"SELECT * FROM users WHERE id={user_id}")
+    )
+    cache_result, db_result = results
     
     return {
         "user_id": user_id,
