@@ -80,7 +80,7 @@ async def get_multiple_resources():
 @app.get("/user/{user_id}")
 async def get_user(
     user_id: int,
-    resources: ResourceDict = Depends(get_multiple_resources)
+    resources: ResourceDict = Depends(get_multiple_resources)  # 加入fastapi 依赖注入
 ):
     """使用多个资源的端点"""
     print(f"当前的user：{user_id}")
