@@ -2,7 +2,7 @@
 
 **User**
 
-请问 from .taskiq_app import broker  与 from taskiq_app import broker 导入的区别是什么，我cd到 src/learning_common_lib/redis_lession/taskiq/简单的测试 路径下，python worker.py 时 from taskiq_app import broker 这种导入可以工作， from .taskiq_app import broker 不能工作
+请问 from .taskiq_app import broker  与 from taskiq_app import broker 导入的区别是什么，我cd到 src/learning_common_lib/redis_lession/taskiq/简单的测试 路径下，python taskiq_app.py 时 from taskiq_app import broker 这种导入可以工作， from .taskiq_app import broker 不能工作
 
 
 **回答**
