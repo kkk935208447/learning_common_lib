@@ -11,3 +11,5 @@ uv sync
 uv pip install -e .
 ```
 
+3. 运行代码使用 uv run 的方式
+
