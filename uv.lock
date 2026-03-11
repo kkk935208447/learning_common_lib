@@ -109,6 +109,22 @@ wheels = [
 ]
 
 [[package]]
+name = "asyncmy"
+version = "0.2.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/3c/d8297584c40f3d1af55365026bcdca7844ecfea1d917ad19df48f8331a26/asyncmy-0.2.11.tar.gz", hash = "sha256:c3d65d959dde62c911e39ecd1ad0f1339a5e6929fc411d48cfc2f82846190bf4", size = 62865, upload-time = "2026-01-15T11:32:30.368Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/58/ec29057913334cacaa2be98eacb21ad468bc58214ff25aab28b78487d697/asyncmy-0.2.11-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:6b324b70438120cabdb1b0d8789082b8a2770257e7beaa7d036322ba5f603f25", size = 1757174, upload-time = "2026-01-15T11:31:43.006Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/46/7939167e05143c8feba1812dbdd478579d215d4b6d7f84856981ab71db7c/asyncmy-0.2.11-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:919811ec4157506632a354047b943b995c71f31182d430ab87c60ccee844c1d9", size = 1724357, upload-time = "2026-01-15T11:31:44.826Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/a0/5cfc1bdeb6166ea26eac97d3cefb574d490aabc052478a3f65730b7379d9/asyncmy-0.2.11-cp311-cp311-manylinux_2_17_i686.manylinux_2_5_i686.manylinux1_i686.manylinux2014_i686.whl", hash = "sha256:8f416fba944dad20d47eb9a4db1a1853a0f7856b12b0a3b52c1a2fba2f447851", size = 5100925, upload-time = "2026-01-15T11:31:46.842Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/37/d9bda68844e6741a7e7e1e449da6cc7926b7ccbf11af26a806b19fd7e7ae/asyncmy-0.2.11-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:905a6693e3dbaf4280dfced96131bada108554754df40d75a7ff91961ba7331a", size = 5303964, upload-time = "2026-01-15T11:31:48.719Z" },
+    { url = "https://files.pythonhosted.org/packages/57/da/358b6e50148a808e05963acd2ae47c1fbef4cdead0157ce2fc90fd4ecf7d/asyncmy-0.2.11-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:ff3ac9feb09e4e80c227280f6350c8015cfed018efe9090f41e2fb4ab8cbf163", size = 5116361, upload-time = "2026-01-15T11:31:50.26Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/e8/6b11d62b0e164adbff5ed882d650c8b60fa710001965c54c70c77cffc941/asyncmy-0.2.11-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:be18725eeccb616b5769ed8cbcabb2758a47e162c4232d7bef98b978950228ad", size = 5241238, upload-time = "2026-01-15T11:31:51.708Z" },
+    { url = "https://files.pythonhosted.org/packages/34/6b/d28fe93160900aba9573cbbf9be5291ac2f1a37eab4fd85e366d5ecbfd84/asyncmy-0.2.11-cp311-cp311-win32.whl", hash = "sha256:d32e03278b72f7ef80c0692797e0ce1c03a63ac0192f858d804a6ecd471754e3", size = 1583714, upload-time = "2026-01-15T11:31:52.968Z" },
+    { url = "https://files.pythonhosted.org/packages/09/29/39effc0c56fea76b695490b95df0da4dd0b6f040ed160ad40740e1358265/asyncmy-0.2.11-cp311-cp311-win_amd64.whl", hash = "sha256:adfe7d271f9ef52c5f96ffd716ed7726839ec7c39fccf98748803f871b399dbd", size = 1655038, upload-time = "2026-01-15T11:31:54.161Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -291,6 +307,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
+    { name = "asyncmy" },
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "httpx" },
@@ -306,6 +323,7 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.2" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "asyncmy", specifier = ">=0.2.9" },
     { name = "fastapi", specifier = ">=0.121.3" },
     { name = "greenlet", specifier = ">=3.2.4" },
     { name = "httpx", specifier = ">=0.28.1" },
