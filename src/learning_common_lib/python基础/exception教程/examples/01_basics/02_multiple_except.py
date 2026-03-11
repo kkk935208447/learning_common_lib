@@ -48,6 +48,8 @@ def demo_match_order() -> None:
     except AppError as e:
         print(f"  [AppError] 捕获了本应由 ConnectionError_ 处理的异常: {e}")
         print("  → 子类 except 分支被跳过了！")
+    except ConnectionError_ as e:
+        print(f"  [ConnectionError_] 跳过: {e}")
 
 
 # ── 第二部分：合并写法 ──
