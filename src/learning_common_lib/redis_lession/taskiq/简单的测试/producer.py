@@ -7,7 +7,13 @@ import asyncio
 # 当你直接 `python worker.py` 时，这个脚本处在裸运行环境，没有父包，`__package__ == None`，`.` 就无处可指，所以报错 “attempted relative import with no known parent package”，
 # 本案例需要 cd learning_common_lib.redis_lession.taskiq 也就是父目录`简单的测试` 的同级目录，
 # 使用 `python -m 简单的测试.worker` 才能正常运行（大型项目中推荐使用这种方案）
-from .taskiq_app import send_email, process_data, heavy_calculation
+# 更简单的方法就是 使用 try-except 捕获 ImportError 异常，如下所示可以支持项目运行的相对导入，同时也支持 IDE 直接运行.py脚本时的绝对导入。
+
+try:
+    from .taskiq_app import send_email, process_data, heavy_calculation
+except ImportError:
+    # IDE直接运行.py脚本时，改为绝对导入，确保在任何环境下都能正常运行
+    from taskiq_app import send_email, process_data, heavy_calculation
 
 
 async def main():
