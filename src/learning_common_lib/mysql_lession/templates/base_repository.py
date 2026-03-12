@@ -14,14 +14,14 @@ import asyncio
 from datetime import datetime
 from typing import TypeVar, Generic
 
-from sqlalchemy import select, update as sa_update, func as sa_func
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import inspect as sa_inspect, select, update as sa_update, func as sa_func
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
     from .base_model import Base
     from .error_base import (
-        NotFoundError, DuplicateError, DatabaseError,
+        AppValidationError, NotFoundError, DuplicateError, DatabaseError,
         OptimisticLockError, AppError,
     )
 except ImportError:
@@ -30,7 +30,7 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from templates.base_model import Base  # type: ignore[no-redef]
     from templates.error_base import (  # type: ignore[no-redef]
-        NotFoundError, DuplicateError, DatabaseError,
+        AppValidationError, NotFoundError, DuplicateError, DatabaseError,
         OptimisticLockError, AppError,
     )
 
@@ -56,6 +56,88 @@ class BaseRepository(Generic[T]):
         self.session = session
         self.model = model
 
+    @staticmethod
+    def _extract_dbapi_code(error: SQLAlchemyError) -> int | None:
+        """提取底层 DBAPI/MySQL 错误码，用于细分异常类型。"""
+        original = getattr(error, "orig", None)
+        args = getattr(original, "args", ()) or getattr(error, "args", ())
+        if not args:
+            return None
+        code = args[0]
+        return code if isinstance(code, int) else None
+
+    def _build_model_detail(self, *, id: int | None = None) -> dict[str, object]:
+        detail: dict[str, object] = {"model": self.model.__name__}
+        if id is not None:
+            detail["id"] = id
+        return detail
+
+    def _mapped_column_keys(self) -> set[str]:
+        mapper = sa_inspect(self.model)
+        return {attr.key for attr in mapper.column_attrs}
+
+    def _validate_update_fields(self, kwargs: dict[str, object]) -> None:
+        invalid_fields = sorted(set(kwargs) - self._mapped_column_keys())
+        if invalid_fields:
+            raise AppValidationError(
+                message="存在未映射的更新字段",
+                detail={
+                    "model": self.model.__name__,
+                    "invalid_fields": invalid_fields,
+                },
+            )
+
+    def _apply_default_ordering(self, stmt):
+        """分页查询默认按主键升序，避免无序分页带来的不稳定结果。"""
+        if hasattr(self.model, "id"):
+            return stmt.order_by(self.model.id.asc())
+        return stmt
+
+    def _map_integrity_error(
+        self,
+        error: IntegrityError,
+        *,
+        id: int | None = None,
+    ) -> AppError:
+        """按 MySQL 错误码细分 IntegrityError，避免全部误判为重复数据。"""
+        mysql_code = self._extract_dbapi_code(error)
+        detail = self._build_model_detail(id=id)
+        internal_message = str(error)
+
+        if mysql_code == 1062:
+            return DuplicateError(
+                message="资源已存在（唯一约束冲突）",
+                detail=detail,
+                internal_message=internal_message,
+            )
+
+        if mysql_code in {1048, 1451, 1452}:
+            return AppValidationError(
+                message="数据约束校验失败，请检查关联关系和必填字段",
+                detail={**detail, "db_error_code": mysql_code},
+                internal_message=internal_message,
+            )
+
+        return DatabaseError(
+            detail={**detail, "db_error_code": mysql_code} if mysql_code is not None else detail,
+            internal_message=internal_message,
+            log_extra={"model": self.model.__name__, "id": id, "db_error_code": mysql_code},
+        )
+
+    def _map_data_error(
+        self,
+        error: DataError,
+        *,
+        id: int | None = None,
+    ) -> AppValidationError:
+        mysql_code = self._extract_dbapi_code(error)
+        detail = self._build_model_detail(id=id)
+        return AppValidationError(
+            message="数据格式或长度不符合数据库约束",
+            detail={**detail, "db_error_code": mysql_code} if mysql_code is not None else detail,
+            internal_message=str(error),
+        )
+
     async def get_by_id(self, id: int, *, strict: bool = False) -> T | None:
         """根据主键 ID 查询单条记录。
 
@@ -77,7 +159,9 @@ class BaseRepository(Generic[T]):
     async def list_all(self, offset: int = 0, limit: int = 100) -> list[T]:
         """分页查询所有记录。"""
         try:
-            stmt = select(self.model).offset(offset).limit(limit)
+            stmt = self._apply_default_ordering(
+                select(self.model).offset(offset).limit(limit)
+            )
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
         except SQLAlchemyError as e:
@@ -99,12 +183,10 @@ class BaseRepository(Generic[T]):
             if refresh:
                 await self.session.refresh(obj)
             return obj
+        except DataError as e:
+            raise self._map_data_error(e) from e
         except IntegrityError as e:
-            raise DuplicateError(
-                message="资源已存在（唯一约束冲突）",
-                detail={"model": self.model.__name__},
-                internal_message=str(e),
-            ) from e
+            raise self._map_integrity_error(e) from e
         except SQLAlchemyError as e:
             raise DatabaseError(
                 internal_message=str(e),
@@ -121,6 +203,7 @@ class BaseRepository(Generic[T]):
         obj = await self.get_by_id(id, strict=strict)
         if obj is None:
             return None
+        self._validate_update_fields(kwargs)
         try:
             for key, value in kwargs.items():
                 setattr(obj, key, value)
@@ -128,11 +211,10 @@ class BaseRepository(Generic[T]):
             if refresh:
                 await self.session.refresh(obj)
             return obj
+        except DataError as e:
+            raise self._map_data_error(e, id=id) from e
         except IntegrityError as e:
-            raise DuplicateError(
-                detail={"model": self.model.__name__, "id": id},
-                internal_message=str(e),
-            ) from e
+            raise self._map_integrity_error(e, id=id) from e
         except SQLAlchemyError as e:
             raise DatabaseError(
                 internal_message=str(e),
@@ -148,6 +230,8 @@ class BaseRepository(Generic[T]):
             await self.session.delete(obj)
             await self.session.flush()
             return True
+        except IntegrityError as e:
+            raise self._map_integrity_error(e, id=id) from e
         except SQLAlchemyError as e:
             raise DatabaseError(
                 internal_message=str(e),
@@ -181,12 +265,51 @@ class SoftDeleteRepository(BaseRepository[T]):
         await repo.list_deleted()     # 查询已删除记录
     """
 
+    def __init__(self, session: AsyncSession, model: type[T]) -> None:
+        super().__init__(session, model)
+        missing_fields = [
+            field_name
+            for field_name in ("is_deleted", "deleted_at")
+            if not hasattr(model, field_name)
+        ]
+        if missing_fields:
+            joined = ", ".join(missing_fields)
+            raise TypeError(
+                f"{type(self).__name__} requires model {model.__name__} "
+                f"to define fields: {joined}"
+            )
+
+    async def get_by_id(
+        self,
+        id: int,
+        *,
+        strict: bool = False,
+        include_deleted: bool = False,
+    ) -> T | None:
+        """默认忽略软删除数据；恢复/物理删除场景可显式 include_deleted。"""
+        try:
+            stmt = select(self.model).where(self.model.id == id)
+            if not include_deleted:
+                stmt = stmt.where(self.model.is_deleted.is_(False))
+            result = await self.session.execute(stmt)
+            obj = result.scalar_one_or_none()
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                internal_message=str(e),
+                log_extra={"model": self.model.__name__, "id": id},
+            ) from e
+        if obj is None and strict:
+            raise NotFoundError(
+                detail={"resource": self.model.__name__, "id": id},
+            )
+        return obj
+
     async def list_all(self, offset: int = 0, limit: int = 100) -> list[T]:
         """分页查询所有未删除记录。"""
         try:
-            stmt = (
+            stmt = self._apply_default_ordering(
                 select(self.model)
-                .where(self.model.is_deleted == False)  # noqa: E712
+                .where(self.model.is_deleted.is_(False))
                 .offset(offset)
                 .limit(limit)
             )
@@ -216,9 +339,9 @@ class SoftDeleteRepository(BaseRepository[T]):
 
     async def restore(self, id: int) -> T:
         """恢复软删除记录。不存在则抛出 NotFoundError。"""
-        obj = await self.get_by_id(id, strict=True)
+        obj = await self.get_by_id(id, strict=True, include_deleted=True)
         if not getattr(obj, "is_deleted", False):
-            raise NotFoundError(
+            raise AppValidationError(
                 message="记录未被删除，无需恢复",
                 detail={"resource": self.model.__name__, "id": id},
             )
@@ -236,14 +359,27 @@ class SoftDeleteRepository(BaseRepository[T]):
 
     async def hard_delete(self, id: int, *, strict: bool = False) -> bool:
         """物理删除：真正从数据库中移除记录。"""
-        return await super().delete(id, strict=strict)
+        obj = await self.get_by_id(id, strict=strict, include_deleted=True)
+        if obj is None:
+            return False
+        try:
+            await self.session.delete(obj)
+            await self.session.flush()
+            return True
+        except IntegrityError as e:
+            raise self._map_integrity_error(e, id=id) from e
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                internal_message=str(e),
+                log_extra={"model": self.model.__name__, "id": id},
+            ) from e
 
     async def list_deleted(self, offset: int = 0, limit: int = 100) -> list[T]:
         """查询已软删除的记录。"""
         try:
-            stmt = (
+            stmt = self._apply_default_ordering(
                 select(self.model)
-                .where(self.model.is_deleted == True)  # noqa: E712
+                .where(self.model.is_deleted.is_(True))
                 .offset(offset)
                 .limit(limit)
             )
@@ -261,7 +397,7 @@ class SoftDeleteRepository(BaseRepository[T]):
             stmt = (
                 select(sa_func.count())
                 .select_from(self.model)
-                .where(self.model.is_deleted == False)  # noqa: E712
+                .where(self.model.is_deleted.is_(False))
             )
             result = await self.session.execute(stmt)
             return result.scalar_one()
@@ -284,12 +420,28 @@ class VersionedRepository(SoftDeleteRepository[T]):
         product = await repo.update(1, stock=90)  # 自动检查并递增 version
     """
 
-    async def update(self, id: int, *, refresh: bool = True, strict: bool = False, **kwargs) -> T | None:
-        """乐观锁更新：WHERE version = current_version, SET version = version + 1。"""
+    def __init__(self, session: AsyncSession, model: type[T]) -> None:
+        super().__init__(session, model)
+        if not hasattr(model, "version"):
+            raise TypeError(
+                f"{type(self).__name__} requires model {model.__name__} to define field: version"
+            )
+
+    async def update(
+        self,
+        id: int,
+        *,
+        expected_version: int | None = None,
+        refresh: bool = True,
+        strict: bool = False,
+        **kwargs,
+    ) -> T | None:
+        """乐观锁更新：可显式传入 expected_version，适配跨请求的并发更新。"""
         obj = await self.get_by_id(id, strict=strict)
         if obj is None:
             return None
-        current_version = obj.version
+        current_version = expected_version if expected_version is not None else obj.version
+        self._validate_update_fields(kwargs)
         try:
             values = {**kwargs, "version": current_version + 1}
             stmt = (
@@ -304,13 +456,22 @@ class VersionedRepository(SoftDeleteRepository[T]):
                         "resource": self.model.__name__,
                         "id": id,
                         "expected_version": current_version,
+                        "current_version": getattr(obj, "version", None),
                     },
                 )
             # 刷新 ORM 对象以反映数据库中的最新状态
-            await self.session.refresh(obj)
+            if refresh:
+                await self.session.refresh(obj)
+            else:
+                for key, value in values.items():
+                    setattr(obj, key, value)
             return obj
         except AppError:
             raise
+        except DataError as e:
+            raise self._map_data_error(e, id=id) from e
+        except IntegrityError as e:
+            raise self._map_integrity_error(e, id=id) from e
         except SQLAlchemyError as e:
             raise DatabaseError(
                 internal_message=str(e),
@@ -395,6 +556,7 @@ async def _demo() -> None:
 
             await repo.delete(a1.id)
             print(f"  软删除后 count={await repo.count()}")
+            print(f"  get_by_id(已删除) -> {await repo.get_by_id(a1.id)}")
             print(f"  已删除列表: {[a.title for a in await repo.list_deleted()]}")
 
             restored = await repo.restore(a1.id)
@@ -413,19 +575,28 @@ async def _demo() -> None:
 
     # 模拟乐观锁冲突
     async with factory() as session1, factory() as session2:
+        repo1 = VersionedRepository(session1, Product)
+        repo2 = VersionedRepository(session2, Product)
+
         async with session1.begin():
-            repo1 = VersionedRepository(session1, Product)
             p1 = await repo1.get_by_id(1)
-            print(f"\n  用户A 读取: version={p1.version}")
-            p1 = await repo1.update(p1.id, stock=80)
+            version1 = p1.version
+            print(f"\n  用户A 读取: version={version1}")
+
+        async with session2.begin():
+            p2 = await repo2.get_by_id(1)
+            version2 = p2.version
+            print(f"  用户B 读取: version={version2}")
+
+        async with session1.begin():
+            p1 = await repo1.update(1, expected_version=version1, stock=80)
             print(f"  用户A 更新成功: stock={p1.stock}, version={p1.version}")
 
         async with session2.begin():
-            repo2 = VersionedRepository(session2, Product)
-            p2 = await repo2.get_by_id(1)
-            # p2.version 此时已经是 3（被 session1 更新过），但如果是真正并发场景
-            # 两个 session 同时读到 version=2，其中一个会失败
-            print(f"  用户B 读取: version={p2.version}, stock={p2.stock}")
+            try:
+                await repo2.update(1, expected_version=version2, stock=70)
+            except OptimisticLockError as e:
+                print(f"  用户B 更新失败: {e}")
 
     # 清理
     async with engine.begin() as conn:

@@ -52,7 +52,7 @@
 | 会话层 | AsyncSession 状态机、expire_on_commit | `04_session_lifecycle/01, 02` | `db_session.py` |
 | 查询层 | select/insert/update/delete、过滤分页聚合 | `03_crud_basics/01, 02`、`06_query_patterns/01, 02, 03` | — |
 | 事务层 | commit/rollback、begin_nested savepoint | `07_transactions/01, 02` | — |
-| 仓储层 | 泛型 Repository、软删除、乐观锁、Unit of Work | `08_repository_pattern/01, 02, 03, 04` | `base_repository.py` |
+| 仓储层 | 泛型 Repository、软删除、乐观锁、Unit of Work | `08_repository_pattern/01, 02, 03, 04` | `base_repository.py`, `mixins.py` |
 | 异常处理层 | 错误码注册、异常层级树、全局异常处理器 | — | `error_registry.py`, `error_base.py`, `error_handler.py` |
 | API 集成层 | Depends 注入 Session、完整 CRUD API | `10_fastapi_integration/01, 02` | `fastapi_db_middleware.py` |
 
@@ -178,6 +178,7 @@ async with session.begin():
 - **Repository 只负责数据访问**，不包含业务逻辑
 - 使用泛型基类 `BaseRepository[T]` 封装通用 CRUD，具体 Repository 继承并扩展
 - Repository 接收 Session 作为构造参数，不自己创建 Session
+- 软删除仓储应默认过滤已删除记录；乐观锁仓储应允许传入 `expected_version`
 - Unit of Work 协调多个 Repository 的事务边界
 
 ```python
@@ -198,14 +199,16 @@ class BaseRepository(Generic[T]):
 
 - **Session 通过 `Depends` 注入**，不要在路由函数中手动创建
 - 使用 `async generator` 依赖实现请求级 Session 生命周期
+- FastAPI 中优先把 Engine / SessionFactory 挂到 `app.state`，避免模块级全局变量
 - 路由函数只负责参数解析和调用 Service/Repository，不直接操作 Session
 - 应用启动时创建 Engine，关闭时 dispose
 
 ```python
-from fastapi import Depends
+from fastapi import Depends, Request
 
-async def get_session():
-    async with async_session() as session:
+async def get_session(request: Request):
+    session_factory = request.app.state.session_factory
+    async with session_factory() as session:
         yield session
 
 @router.get("/users/{user_id}")
@@ -270,10 +273,13 @@ FastAPI 路由匹配 → Depends(get_session) 触发
 会话层：session.flush() → MySQL 返回 IntegrityError
   │
   ▼
-仓储层：捕获 IntegrityError → raise DuplicateError(...) from e
-  │                           (internal_message=原始SQL错误, 不泄漏给客户端)
+仓储层：按错误码分类
+  │  1062 → DuplicateError(...)
+  │  1451/1452/1048 → AppValidationError(...)
+  │  其他 → DatabaseError(...)
+  │  (internal_message=原始SQL错误, 不泄漏给客户端)
   ▼
-异常处理层：handle_app_error() 捕获 DuplicateError
+异常处理层：handle_app_error() 捕获 AppError
   │  → ClientError → logger.info (不打印堆栈)
   │  → 构造 ErrorResponse(code="DUPLICATE", message="资源已存在", request_id=...)
   ▼
@@ -288,7 +294,7 @@ FastAPI 路由匹配 → Depends(get_session) 触发
 | 仓储层 | 返回 ORM 对象 | `raise from` 转换为业务异常 |
 | 异常处理层 | 不介入 | 捕获 AppError → 统一 ErrorResponse |
 | 日志级别 | 无 | 4xx→info, 5xx→error+堆栈 |
-| 响应格式 | `{"code":"OK", "data":{...}}` | `{"code":"NOT_FOUND", "data":null}` |
+| 响应格式 | `{"code":"OK","message":"success","data":{...},"request_id":"..."}` | `{"code":"NOT_FOUND","message":"资源不存在","data":null,"request_id":"..."}` |
 
 ---
 

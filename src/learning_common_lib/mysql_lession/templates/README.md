@@ -8,12 +8,15 @@
 
 ## 分层设计
 
-模板分为 core 层和集成层，避免框架绑定：
+模板分为 core 层和集成层，便于理解复用边界：
 
 - **core 层**（无 FastAPI/Pydantic 依赖）：`error_registry`, `error_base`, `mixins`, `base_model`, `base_repository`, `db_engine`, `db_session`
 - **集成层**（需要 FastAPI/Pydantic）：`error_handler`, `fastapi_db_middleware`
 
-`from templates import ...` 默认只导出 core 层符号。FastAPI 集成层按需显式导入：
+当前实现已把 FastAPI 集成符号做成可选导入；如果环境里没有安装 FastAPI/Pydantic，core 层仍可正常使用。
+如果你在非 FastAPI 项目里想最小化依赖，仍然推荐优先从具体子模块导入，例如 `templates.base_repository`、`templates.base_model`。
+
+FastAPI 集成层推荐显式导入：
 
 ```python
 # core 层 — 任何项目都能用
@@ -24,10 +27,17 @@ from templates.error_handler import register_exception_handlers, RequestIdMiddle
 from templates.fastapi_db_middleware import db_lifespan, get_db_session
 ```
 
+## 当前边界
+
+- `db_engine.py` 里的单例 helper 更适合简单应用或教程演示；复杂项目通常会把 Engine 生命周期放到应用装配层
+- `BaseRepository` 适合标准 CRUD；复杂检索、聚合统计、读写分离仍应由具体 Repository 或 Query Service 扩展
+- `base_model.py` 目前没有强制统一时区策略；生产项目应明确选择 UTC 存储策略并在全团队统一
+
 ## 模块说明
 
 | 文件 | 说明 |
 |------|------|
+| `__init__.py` | 公开 API 导出，分 core 层和集成层，附 `__all__` 列表 |
 | `db_engine.py` | 引擎创建与连接池配置，支持单例模式和环境变量读取 |
 | `db_session.py` | 异步 Session 工厂与生命周期管理（open/close），事务由调用方控制 |
 | `base_model.py` | 声明式基类与公共字段混入（id、created_at、updated_at） |
@@ -36,7 +46,7 @@ from templates.fastapi_db_middleware import db_lifespan, get_db_session
 | `error_base.py` | 异常层级树，AppError → ClientError/ServerError → 具体异常类 |
 | `error_handler.py` | FastAPI 全局异常处理器 + RequestIdMiddleware + ErrorResponse 统一响应 |
 | `base_repository.py` | 泛型 CRUD 仓储 + 异常转换 + SoftDeleteRepository + VersionedRepository |
-| `fastapi_db_middleware.py` | FastAPI 生命周期管理 + Session 依赖注入 + 自动注册异常处理器 |
+| `fastapi_db_middleware.py` | FastAPI 生命周期管理 + `app.state` 挂载 Engine/SessionFactory + Session 依赖注入 |
 
 ## 依赖关系
 
@@ -125,6 +135,7 @@ class Article(SoftDeleteMixin, TimestampMixin, Base):
 
 repo = SoftDeleteRepository(session, Article)
 await repo.delete(1)          # 软删除
+await repo.get_by_id(1)       # None（默认不返回已删除记录）
 await repo.restore(1)         # 恢复
 await repo.hard_delete(1)     # 物理删除
 ```
@@ -139,7 +150,8 @@ class Product(VersionMixin, SoftDeleteMixin, TimestampMixin, Base):
 
 repo = VersionedRepository(session, Product)
 try:
-    await repo.update(1, stock=90)  # 自动检查 version
+    product = await repo.get_by_id(1, strict=True)
+    await repo.update(1, expected_version=product.version, stock=90)
 except OptimisticLockError:
     # 重新读取最新版本后重试
     pass
@@ -165,6 +177,7 @@ except OptimisticLockError:
 - [ ] 全局异常处理器已注册（`register_exception_handlers`）
 - [ ] RequestIdMiddleware 已添加（链路追踪）
 - [ ] Repository 层异常已转换（不泄漏 SQLAlchemy 异常给客户端）
+- [ ] `IntegrityError` 已按错误码细分，不把所有约束错误都误判为重复数据
 - [ ] 软删除数据有定期归档策略
-- [ ] 乐观锁更新有重试机制
+- [ ] 乐观锁更新明确携带 `expected_version`，并配套重试机制
 - [ ] 表结构变更使用 Alembic 迁移

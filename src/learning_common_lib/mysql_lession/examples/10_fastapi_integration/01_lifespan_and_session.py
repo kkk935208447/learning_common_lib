@@ -10,7 +10,7 @@ Python 版本: 3.11+
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Integer, String, select
 from sqlalchemy.ext.asyncio import (
@@ -21,10 +21,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DATABASE_URL = "mysql+asyncmy://root:123456@localhost:3306/tutorial_db"
-
-# ── 全局变量 (lifespan 中初始化) ──────────────────────────
-engine = None
-session_factory: async_sessionmaker[AsyncSession] | None = None
+ENGINE_STATE_KEY = "engine"
+SESSION_FACTORY_STATE_KEY = "session_factory"
 
 
 # ── ORM 模型 ──────────────────────────────────────────────
@@ -60,26 +58,33 @@ class ItemResponse(BaseModel):
 # ── Lifespan: 管理引擎生命周期 ────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global engine, session_factory
     print("🚀 启动: 创建引擎和表...")
     engine = create_async_engine(DATABASE_URL, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    setattr(app.state, ENGINE_STATE_KEY, engine)
+    setattr(app.state, SESSION_FACTORY_STATE_KEY, session_factory)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
-    yield  # 应用运行中
-
-    print("🛑 关闭: 销毁引擎...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        yield  # 应用运行中
+    finally:
+        print("🛑 关闭: 销毁引擎...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        setattr(app.state, ENGINE_STATE_KEY, None)
+        setattr(app.state, SESSION_FACTORY_STATE_KEY, None)
 
 
 # ── Session 依赖注入 ──────────────────────────────────────
-async def get_db_session():
+async def get_db_session(request: Request):
     """每个请求一个 session，请求结束自动关闭"""
+    session_factory = getattr(request.app.state, SESSION_FACTORY_STATE_KEY, None)
+    if session_factory is None:
+        raise RuntimeError("数据库未初始化，请确保 FastAPI 已正确配置 lifespan")
     async with session_factory() as session:
         yield session
 
@@ -91,10 +96,11 @@ app = FastAPI(title="Item API", lifespan=lifespan)
 @app.post("/items", response_model=ItemResponse, status_code=201)
 async def create_item(body: ItemCreate, session: AsyncSession = Depends(get_db_session)):
     """创建物品"""
-    item = Item(name=body.name, description=body.description)
-    session.add(item)
-    await session.commit()
-    await session.refresh(item)
+    async with session.begin():
+        item = Item(name=body.name, description=body.description)
+        session.add(item)
+        await session.flush()
+        await session.refresh(item)
     return item
 
 

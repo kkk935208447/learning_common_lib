@@ -8,6 +8,7 @@ Python 版本: 3.11+
 """
 
 import asyncio
+from decimal import Decimal
 from typing import Generic, TypeVar, Sequence
 
 from sqlalchemy import ForeignKey, Integer, String, Numeric, select
@@ -42,7 +43,7 @@ class Order(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("ex08_02_user.id"))
     product: Mapped[str] = mapped_column(String(100))
-    amount: Mapped[float] = mapped_column(Numeric(10, 2))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
 
     def __repr__(self) -> str:
         return f"Order(id={self.id}, user_id={self.user_id}, product={self.product!r}, amount={self.amount})"
@@ -147,8 +148,16 @@ async def main() -> None:
         user = await uow.users.create(name="张三")
         print(f"  创建用户: {user}")
 
-        o1 = await uow.orders.create(user_id=user.id, product="机械键盘", amount=599)
-        o2 = await uow.orders.create(user_id=user.id, product="无线鼠标", amount=199)
+        o1 = await uow.orders.create(
+            user_id=user.id,
+            product="机械键盘",
+            amount=Decimal("599.00"),
+        )
+        o2 = await uow.orders.create(
+            user_id=user.id,
+            product="无线鼠标",
+            amount=Decimal("199.00"),
+        )
         print(f"  创建订单: {o1}")
         print(f"  创建订单: {o2}")
 
@@ -172,7 +181,11 @@ async def main() -> None:
             user2 = await uow.users.create(name="李四")
             print(f"  创建用户: {user2}")
 
-            await uow.orders.create(user_id=user2.id, product="显示器", amount=2999)
+            await uow.orders.create(
+                user_id=user2.id,
+                product="显示器",
+                amount=Decimal("2999.00"),
+            )
             print(f"  创建订单: 显示器 ¥2999")
 
             # 模拟业务异常

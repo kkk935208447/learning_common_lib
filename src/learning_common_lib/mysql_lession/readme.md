@@ -48,6 +48,8 @@ mysql_lession/
 ├── architecture_map.md       ← 异步 ORM → 企业架构层映射
 ├── best_practices.md         ← 推荐做法
 ├── pitfalls.md               ← 反模式与常见坑
+├── smoke/
+│   └── run_all_examples.py   ← 自动运行所有示例的 smoke 测试
 ├── examples/
 │   ├── 01_connection/
 │   │   ├── 01_async_engine_basic.py
@@ -73,7 +75,9 @@ mysql_lession/
 │   │   └── 02_nested_savepoint.py
 │   ├── 08_repository_pattern/
 │   │   ├── 01_generic_repository.py
-│   │   └── 02_unit_of_work.py
+│   │   ├── 02_unit_of_work.py
+│   │   ├── 03_soft_delete.py
+│   │   └── 04_optimistic_lock.py
 │   ├── 09_performance/
 │   │   ├── 01_eager_loading.py
 │   │   └── 02_bulk_operations.py
@@ -81,11 +85,17 @@ mysql_lession/
 │       ├── 01_lifespan_and_session.py
 │       └── 02_full_crud_api.py
 └── templates/
-    ├── db_engine.py
-    ├── db_session.py
-    ├── base_model.py
-    ├── base_repository.py
-    └── fastapi_db_middleware.py
+    ├── __init__.py               ← 公开 API 导出
+    ├── README.md                 ← 模板使用说明
+    ├── db_engine.py              ← 引擎创建与连接池配置
+    ├── db_session.py             ← 异步 Session 工厂
+    ├── base_model.py             ← 声明式基类与公共字段混入
+    ├── mixins.py                 ← 软删除 / 乐观锁混入
+    ├── error_registry.py         ← 错误码注册表
+    ├── error_base.py             ← 异常层级树
+    ├── error_handler.py          ← FastAPI 全局异常处理器
+    ├── base_repository.py        ← 泛型 CRUD 仓储
+    └── fastapi_db_middleware.py   ← FastAPI 生命周期 + Session 注入
 ```
 
 ---
@@ -142,6 +152,8 @@ uv run python src/learning_common_lib/mysql_lession/examples/01_connection/01_as
 3. **Session 即工作单元** — 一个请求一个 Session，用完即关，不要跨请求复用
 4. **expire_on_commit=False** — 异步场景下 commit 后仍需访问对象属性，默认的 expire 行为会导致 detached instance 错误
 5. **连接池是生命线** — 合理配置 `pool_size`、`pool_recycle`、`pool_pre_ping`，避免连接泄漏和连接池耗尽
+6. **错误映射要按约束类型细分** — `IntegrityError` 不等于“重复数据”，唯一约束、外键约束、非空约束应区分处理
+7. **乐观锁要基于客户端读到的版本** — 真实 API 场景下应显式传递 `expected_version`，不要只在仓储内部读取“当前 version”
 
 ---
 
@@ -164,6 +176,7 @@ uv run python src/learning_common_lib/mysql_lession/examples/01_connection/01_as
 - 使用 selectinload / joinedload 解决 N+1 查询和 MissingGreenlet 问题
 - 用 savepoint 实现部分回滚，用最小事务范围提升并发性能
 - 封装泛型 Repository 和 Unit of Work，为 FastAPI 项目搭建清晰的数据访问层
+- 为软删除、错误码映射、乐观锁和 request_id 设计可落地的工程边界
 
 ---
 

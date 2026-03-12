@@ -193,7 +193,12 @@ class BaseRepository(Generic[T]):
         return await self.session.get(self.model, id)
 
     async def list_all(self, offset: int = 0, limit: int = 100) -> Sequence[T]:
-        stmt = select(self.model).offset(offset).limit(limit)
+        stmt = (
+            select(self.model)
+            .order_by(self.model.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -201,6 +206,12 @@ class BaseRepository(Generic[T]):
         self.session.add(entity)
         await self.session.flush()
         return entity
+
+    async def update(self, id: int, **kwargs) -> T | None:
+        invalid_fields = sorted(set(kwargs) - {"name", "email"})  # 实际项目中用 mapper 自动推导
+        if invalid_fields:
+            raise AppValidationError(detail={"invalid_fields": invalid_fields})
+        ...
 
     async def delete(self, entity: T) -> None:
         await self.session.delete(entity)
@@ -220,6 +231,8 @@ class UserRepository(BaseRepository["User"]):
 - Repository 接收 Session，不自己创建 — 事务边界由调用方控制
 - 泛型基类封装通用 CRUD，具体 Repository 只添加领域特定的查询方法
 - `flush()` 而不是 `commit()` — 让调用方决定何时提交事务
+- 分页查询要有稳定排序，避免 offset/limit 在高并发下翻页抖动
+- `update()` 对未知字段应 fail-fast，避免把拼写错误静默吞掉
 
 ---
 
@@ -295,15 +308,21 @@ print(f"溢出: {pool.overflow()}")
 - [ ] Session 在请求结束时正确关闭（使用 `async with` 或 `Depends`）
 - [ ] 事务范围最小化，不包含非数据库的耗时操作
 - [ ] Repository 不自己创建 Session，通过构造参数接收
+- [ ] 分页查询有稳定排序（如 `ORDER BY id`）
 - [ ] 批量操作使用 `insert().values()` 而不是循环 `session.add()`
 
 ---
 
-## 10. Repository 层用 `raise from` 转换 SQLAlchemy 异常
+## 10. Repository 层用 `raise from` 转换 SQLAlchemy 异常，并细分约束错误
 
 ```python
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from templates.error_base import DuplicateError, DatabaseError
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
+from templates.error_base import AppValidationError, DuplicateError, DatabaseError
+
+def mysql_code(error: SQLAlchemyError) -> int | None:
+    original = getattr(error, "orig", None)
+    args = getattr(original, "args", ()) or getattr(error, "args", ())
+    return args[0] if args and isinstance(args[0], int) else None
 
 async def create(self, obj, *, refresh=True):
     try:
@@ -312,12 +331,24 @@ async def create(self, obj, *, refresh=True):
         if refresh:
             await self.session.refresh(obj)
         return obj
-    except IntegrityError as e:
-        # 唯一约束冲突 → 客户端可修正的 409
-        raise DuplicateError(
-            message="资源已存在",
-            internal_message=str(e),  # 仅日志，不进入响应
+    except DataError as e:
+        raise AppValidationError(
+            message="数据格式或长度不符合数据库约束",
+            internal_message=str(e),
         ) from e
+    except IntegrityError as e:
+        code = mysql_code(e)
+        if code == 1062:
+            raise DuplicateError(
+                message="资源已存在",
+                internal_message=str(e),  # 仅日志，不进入响应
+            ) from e
+        if code in {1048, 1451, 1452}:
+            raise AppValidationError(
+                message="数据约束校验失败，请检查关联关系和必填字段",
+                internal_message=str(e),
+            ) from e
+        raise DatabaseError(internal_message=str(e)) from e
     except SQLAlchemyError as e:
         # 其他数据库错误 → 服务端 500
         raise DatabaseError(internal_message=str(e)) from e
@@ -327,7 +358,8 @@ async def create(self, obj, *, refresh=True):
 
 - `raise from` 保留原始异常链，日志中可追溯到 SQLAlchemy 原始错误
 - `internal_message` 只写入日志，不泄漏给客户端（表名、SQL、约束名等敏感信息）
-- 区分 `IntegrityError`（客户端可修正）和 `SQLAlchemyError`（服务端问题），返回不同 HTTP 状态码
+- 不要把所有 `IntegrityError` 都当成“重复数据”；唯一约束、外键冲突、非空约束的处理语义不同
+- MySQL 场景下至少区分 `1062`（唯一约束）、`1451/1452`（外键）、`1048`（非空约束）
 
 ---
 
@@ -347,12 +379,49 @@ async def create(self, obj, *, refresh=True):
 
 - 前端只需检查 `code == "OK"` 判断成功/失败，不需要解析 HTTP 状态码
 - `request_id` 贯穿请求全链路，排查问题时用 `grep request_id` 即可关联所有日志
+- 成功和失败响应都应携带 `request_id`，否则排障链路会断在成功请求上
 - 使用 `register_exception_handlers(app)` 一键注册，AppError/HTTPException/ValidationError/未知异常全覆盖
 - `RequestIdMiddleware` 自动从 `X-Request-ID` header 读取或生成 UUID
 
 ---
 
-## 12. 软删除代替物理删除，保留审计轨迹
+## 12. FastAPI 集成优先用 `app.state` 挂载 Engine / SessionFactory
+
+```python
+from fastapi import FastAPI, Request
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+ENGINE_KEY = "engine"
+SESSION_FACTORY_KEY = "session_factory"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    engine = create_async_engine(DATABASE_URL, echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    try:
+        yield
+    finally:
+        await engine.dispose()
+        app.state.engine = None
+        app.state.session_factory = None
+
+async def get_db_session(request: Request):
+    session_factory = request.app.state.session_factory
+    async with session_factory() as session:
+        yield session
+```
+
+要点：
+
+- `app.state` 比模块级全局变量更适合测试、子应用和多实例场景
+- 示例可以为了讲概念简化，但模板和脚手架应尽量避免全局可变状态
+- 生命周期负责 Engine，依赖函数负责 Session，职责边界要清楚
+
+---
+
+## 13. 软删除代替物理删除，保留审计轨迹
 
 ```python
 from templates.mixins import SoftDeleteMixin
@@ -364,6 +433,7 @@ class Article(SoftDeleteMixin, TimestampMixin, Base):
 repo = SoftDeleteRepository(session, Article)
 await repo.delete(1)          # UPDATE SET is_deleted=1（不是 DELETE）
 await repo.list_all()         # 自动过滤 WHERE is_deleted=0
+await repo.get_by_id(1)       # None（默认也过滤已删除记录）
 await repo.restore(1)         # 恢复
 await repo.hard_delete(1)     # 真正物理删除（谨慎使用）
 await repo.list_deleted()     # 查询回收站
@@ -372,13 +442,13 @@ await repo.list_deleted()     # 查询回收站
 要点：
 
 - 软删除保留完整数据历史，满足审计和合规要求
-- `list_all()` 自动过滤已删除记录，业务代码无需手动加 `WHERE is_deleted=0`
+- `list_all()` 和 `get_by_id()` 都应默认过滤已删除记录，避免“已删除数据被误读/误更新”
 - 长期积累的软删除数据建议定期归档到历史表，避免主表膨胀
 - 索引应包含 `is_deleted` 字段：`CREATE INDEX ix_article_is_deleted ON article(is_deleted)`
 
 ---
 
-## 13. 乐观锁防止并发覆盖，配合重试策略
+## 14. 乐观锁防止并发覆盖，配合 `expected_version` 和重试策略
 
 ```python
 from templates.mixins import VersionMixin
@@ -390,8 +460,11 @@ class Product(VersionMixin, SoftDeleteMixin, TimestampMixin, Base):
 
 repo = VersionedRepository(session, Product)
 
-# 更新时自动检查 version：WHERE version=N, SET version=N+1
-product = await repo.update(1, stock=90)
+# 来自客户端或上一个读取结果的 version
+expected_version = product.version
+
+# 更新时检查 expected_version：WHERE version=N, SET version=N+1
+product = await repo.update(1, expected_version=expected_version, stock=90)
 
 # 重试策略
 for attempt in range(3):
@@ -399,7 +472,12 @@ for attempt in range(3):
         async with session_factory() as session:
             async with session.begin():
                 repo = VersionedRepository(session, Product)
-                await repo.update(product_id, stock=new_stock)
+                current = await repo.get_by_id(product_id, strict=True)
+                await repo.update(
+                    product_id,
+                    expected_version=current.version,
+                    stock=new_stock,
+                )
                 break
     except OptimisticLockError:
         if attempt == 2:
@@ -411,12 +489,13 @@ for attempt in range(3):
 
 - 乐观锁适合读多写少场景（电商库存、配置管理等）
 - `rowcount == 0` 是检测冲突的关键，不检查就会静默丢失更新
+- 真实 HTTP API 场景里，应显式携带客户端看到的 `version`，而不是只在仓储内部偷偷读取当前版本
 - 重试次数应有上限（通常 3 次），避免无限重试
 - 高并发写入场景考虑悲观锁（`SELECT FOR UPDATE`）
 
 ---
 
-## 14. 生产级代码自查清单（更新版）
+## 15. 生产级代码自查清单（更新版）
 
 提交数据访问层代码前，确认：
 
@@ -431,7 +510,9 @@ for attempt in range(3):
 - [ ] Repository 不自己创建 Session，通过构造参数接收
 - [ ] 批量操作使用 `insert().values()` 而不是循环 `session.add()`
 - [ ] Repository 层已做异常转换（`raise from`），不泄漏 SQLAlchemy 异常
+- [ ] `IntegrityError` 已按错误码分类，不把所有约束错误都误判为重复数据
 - [ ] 全局异常处理器已注册（`register_exception_handlers`）
 - [ ] RequestIdMiddleware 已添加，支持链路追踪
+- [ ] FastAPI 中的 Engine / SessionFactory 已挂载到 `app.state`
 - [ ] 需要审计的数据使用软删除而非物理删除
-- [ ] 并发更新场景使用乐观锁 + 重试策略
+- [ ] 并发更新场景使用乐观锁 + `expected_version` + 重试策略

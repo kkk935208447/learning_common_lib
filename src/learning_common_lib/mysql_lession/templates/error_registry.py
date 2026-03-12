@@ -2,7 +2,7 @@
 解决什么问题: 数据库场景错误码集中管理，保证错误码唯一、与 HTTP 状态码绑定
 输入输出约定: ErrorCode 枚举成员带 (code, message, http_status) 三元组，可直接用于构造 AppError
 失败策略: 导入时检查错误码唯一性，重复则 RuntimeError
-不适用场景: 不适合动态注册错误码的场景；通用业务错误码请在 exception教程 的 ErrorCode 中定义
+不适用场景: 不适合动态注册错误码的场景；如需通用业务错误码（如 UNAUTHORIZED、FORBIDDEN），请在此处扩展
 """
 
 from __future__ import annotations

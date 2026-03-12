@@ -1,6 +1,6 @@
 """
 目标: 完整 CRUD API — Repository 模式 + 统一异常处理 + ErrorResponse 协议 + request_id 中间件
-关键 API: FastAPI lifespan, BaseRepository, NotFoundError/DuplicateError, register_exception_handlers, RequestIdMiddleware
+关键 API: FastAPI lifespan, BaseRepository, Base/TimestampMixin, NotFoundError/DuplicateError, register_exception_handlers, RequestIdMiddleware
 Python 版本: 3.11+
 运行命令: uv run python examples/10_fastapi_integration/02_full_crud_api.py  (从 mysql_lession/ 目录)
 预期现象: 启动服务后自动运行 httpx 测试全部 CRUD 端点，打印统一格式响应（含 code + message + data + request_id）后关闭
@@ -15,46 +15,41 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from pydantic import BaseModel
-from sqlalchemy import DateTime, Integer, String, Boolean, func
+from sqlalchemy import String, Boolean
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 try:
+    from ...templates.base_model import Base, TimestampMixin
     from ...templates.base_repository import BaseRepository
     from ...templates.error_base import NotFoundError, DuplicateError
     from ...templates.error_handler import ErrorResponse, register_exception_handlers, RequestIdMiddleware
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from templates.base_model import Base, TimestampMixin
     from templates.base_repository import BaseRepository
     from templates.error_base import NotFoundError, DuplicateError
     from templates.error_handler import ErrorResponse, register_exception_handlers, RequestIdMiddleware
 
 DATABASE_URL = "mysql+asyncmy://root:123456@localhost:3306/tutorial_db"
-
-engine = None
-session_factory: async_sessionmaker[AsyncSession] | None = None
-
-
-# ── ORM 模型 ──────────────────────────────────────────────
-class Base(DeclarativeBase):
-    pass
+ENGINE_STATE_KEY = "engine"
+SESSION_FACTORY_STATE_KEY = "session_factory"
 
 
-class Todo(Base):
+# ── ORM 模型（复用 templates 的 Base 和 TimestampMixin）────
+class Todo(TimestampMixin, Base):
+    """Todo 模型，继承 TimestampMixin 自动获得 id/created_at/updated_at。"""
     __tablename__ = "ex10_02_todo"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(String(500), default="")
     done: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     def __repr__(self) -> str:
         return f"Todo(id={self.id}, title={self.title!r}, done={self.done})"
@@ -92,23 +87,29 @@ class TodoRepository(BaseRepository[Todo]):
 # ── Lifespan ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global engine, session_factory
     print("🚀 启动: 创建引擎和表...")
     engine = create_async_engine(DATABASE_URL, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    setattr(app.state, ENGINE_STATE_KEY, engine)
+    setattr(app.state, SESSION_FACTORY_STATE_KEY, session_factory)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    yield
-    print("🛑 关闭: 销毁引擎...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        yield
+    finally:
+        print("🛑 关闭: 销毁引擎...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        setattr(app.state, ENGINE_STATE_KEY, None)
+        setattr(app.state, SESSION_FACTORY_STATE_KEY, None)
 
 
 # ── 依赖注入 ──────────────────────────────────────────────
-async def get_db_session():
+async def get_db_session(request: Request):
     """请求级 Session：只负责 open/close，不负责 commit。"""
+    session_factory = getattr(request.app.state, SESSION_FACTORY_STATE_KEY, None)
     if session_factory is None:
         raise RuntimeError("数据库未初始化，请确保 FastAPI 已正确配置 lifespan")
     async with session_factory() as session:
@@ -123,51 +124,69 @@ register_exception_handlers(app)
 app.add_middleware(RequestIdMiddleware)
 
 
-def ok(data: Any = None, message: str = "success") -> dict:
+def ok(request: Request, data: Any = None, message: str = "success") -> dict:
     """统一成功响应格式，与 ErrorResponse 共享 code + message + data 结构。"""
-    return {"code": "OK", "message": message, "data": data}
+    request_id = getattr(request.state, "request_id", "no-request")
+    return {"code": "OK", "message": message, "data": data, "request_id": request_id}
 
 
 @app.post("/todos")
-async def create_todo(body: TodoCreate, session: AsyncSession = Depends(get_db_session)):
+async def create_todo(
+    body: TodoCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     repo = TodoRepository(session)
     async with session.begin():
         todo = await repo.create(Todo(title=body.title, description=body.description))
-    return ok(data=TodoResponse.model_validate(todo).model_dump(), message="创建成功")
+    return ok(request, data=TodoResponse.model_validate(todo).model_dump(), message="创建成功")
 
 
 @app.get("/todos")
-async def list_todos(session: AsyncSession = Depends(get_db_session)):
+async def list_todos(request: Request, session: AsyncSession = Depends(get_db_session)):
     repo = TodoRepository(session)
     todos = await repo.list_all()
     data = [TodoResponse.model_validate(t).model_dump() for t in todos]
-    return ok(data=data)
+    return ok(request, data=data)
 
 
 @app.get("/todos/{todo_id}")
-async def get_todo(todo_id: int, session: AsyncSession = Depends(get_db_session)):
+async def get_todo(
+    todo_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     repo = TodoRepository(session)
     # strict=True: 不存在时自动抛出 NotFoundError，由全局异常处理器返回 404
     todo = await repo.get_by_id(todo_id, strict=True)
-    return ok(data=TodoResponse.model_validate(todo).model_dump())
+    return ok(request, data=TodoResponse.model_validate(todo).model_dump())
 
 
 @app.put("/todos/{todo_id}")
-async def update_todo(todo_id: int, body: TodoUpdate, session: AsyncSession = Depends(get_db_session)):
+async def update_todo(
+    todo_id: int,
+    body: TodoUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     repo = TodoRepository(session)
     async with session.begin():
         # strict=True: 不存在时自动抛出 NotFoundError
         todo = await repo.update(todo_id, strict=True, **body.model_dump(exclude_unset=True))
-    return ok(data=TodoResponse.model_validate(todo).model_dump(), message="更新成功")
+    return ok(request, data=TodoResponse.model_validate(todo).model_dump(), message="更新成功")
 
 
 @app.delete("/todos/{todo_id}")
-async def delete_todo(todo_id: int, session: AsyncSession = Depends(get_db_session)):
+async def delete_todo(
+    todo_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     repo = TodoRepository(session)
     async with session.begin():
         # strict=True: 不存在时自动抛出 NotFoundError
         await repo.delete(todo_id, strict=True)
-    return ok(message="删除成功")
+    return ok(request, message="删除成功")
 
 
 # ── httpx 集成测试 ────────────────────────────────────────
@@ -211,9 +230,10 @@ async def run_tests():
         print(f"  [{resp.status_code}] request_id={resp.headers.get('x-request-id', 'N/A')}")
         pp(resp.json())
         body = resp.json()
+        rid = resp.headers.get("x-request-id")
         assert resp.status_code == 404
         assert body["code"] == "NOT_FOUND"
-        assert "request_id" in resp.headers.get("x-request-id", "")[:36] or True
+        assert body["request_id"] == rid
 
         # UPDATE
         print("\n▸ PUT /todos/1 — 更新 (标记完成)")

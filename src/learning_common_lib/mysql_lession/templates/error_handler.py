@@ -129,14 +129,14 @@ def register_exception_handlers(app) -> None:
         for err in exc.errors():
             loc = ".".join(str(x) for x in err.get("loc", []))
             field_errors.append(f"{loc}: {err.get('msg', '')}")
-        summary = "; ".join(field_errors) if field_errors else ErrorCode.VALIDATION_ERROR.default_message
+        summary = "; ".join(field_errors) if field_errors else "参数校验失败"
         body = ErrorResponse(
             code=ErrorCode.VALIDATION_ERROR.code,
             message=summary,
             data={"errors": exc.errors()},
             request_id=request_id,
         )
-        return _build_response(ErrorCode.VALIDATION_ERROR.http_status, body)
+        return _build_response(422, body)
 
     @app.exception_handler(Exception)
     async def handle_generic_exception(request: Request, exc: Exception):
@@ -152,7 +152,7 @@ def register_exception_handlers(app) -> None:
             message=ErrorCode.INTERNAL_ERROR.default_message,
             request_id=request_id,
         )
-        return _build_response(ErrorCode.INTERNAL_ERROR.http_status, body)
+        return _build_response(500, body)
 
 
 class RequestIdMiddleware:
@@ -166,7 +166,7 @@ class RequestIdMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket"):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
@@ -179,7 +179,8 @@ class RequestIdMiddleware:
         async def send_with_request_id(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                headers.append((b"x-request-id", request_id.encode()))
+                if not any(name.lower() == b"x-request-id" for name, _ in headers):
+                    headers.append((b"x-request-id", request_id.encode()))
                 message["headers"] = headers
             await send(message)
 

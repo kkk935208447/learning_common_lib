@@ -1,6 +1,6 @@
 """
 解决什么问题: FastAPI 中数据库生命周期和 Session 注入问题，避免手动管理引擎启停和 Session 传递
-输入输出约定: db_lifespan 管理引擎生命周期并注册全局异常处理器，get_db_session 作为 Depends 注入 AsyncSession
+输入输出约定: db_lifespan 管理引擎生命周期，install_fastapi_db_support 注册异常处理器和 request_id 中间件，get_db_session 作为 Depends 注入 AsyncSession
 失败策略: 启动阶段引擎初始化失败直接抛出异常阻止应用启动；请求级 Session 在 with 块退出时自动关闭并归还连接；
     数据库未初始化时抛出 ConnectionError（业务异常）而非裸 RuntimeError
 不适用场景: 非 FastAPI 框架；需要多数据库切换的场景（需自行扩展）
@@ -10,14 +10,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
     from .db_engine import (
         create_engine_factory,
-        get_engine,
-        dispose_engine,
         DEFAULT_DATABASE_URL,
     )
     from .db_session import async_session_factory
@@ -30,8 +28,6 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from templates.db_engine import (  # type: ignore[no-redef]
         create_engine_factory,
-        get_engine,
-        dispose_engine,
         DEFAULT_DATABASE_URL,
     )
     from templates.db_session import async_session_factory  # type: ignore[no-redef]
@@ -39,10 +35,22 @@ except ImportError:
     from templates.error_handler import register_exception_handlers, RequestIdMiddleware  # type: ignore[no-redef]
     from templates.error_base import ConnectionError as DbConnectionError  # type: ignore[no-redef]
 
-# 模块级变量，保存 Session 工厂供依赖注入使用。
-# 这里缓存的是"Session 构造器"，不是具体的 Session 实例。
-# 每个请求都会创建自己的 AsyncSession，因此不会出现多个请求共享同一个 Session 的问题。
-_session_factory = None
+_ENGINE_STATE_KEY = "db_engine"
+_SESSION_FACTORY_STATE_KEY = "db_session_factory"
+_SUPPORT_INSTALLED_STATE_KEY = "_db_support_installed"
+
+
+def install_fastapi_db_support(app: FastAPI) -> None:
+    """安装异常处理器和 request_id 中间件。"""
+    if getattr(app.state, _SUPPORT_INSTALLED_STATE_KEY, False):
+        return
+    if app.middleware_stack is not None:
+        raise RuntimeError(
+            "install_fastapi_db_support() must be called before the FastAPI app starts"
+        )
+    register_exception_handlers(app)
+    app.add_middleware(RequestIdMiddleware)
+    setattr(app.state, _SUPPORT_INSTALLED_STATE_KEY, True)
 
 
 @asynccontextmanager
@@ -53,33 +61,33 @@ async def db_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     启动时: 创建引擎，初始化 Session 工厂。
     关闭时: 销毁引擎，释放所有连接。
 
-    注意: 模板统一复用 db_engine 中的全局单例 Engine，
-    保证整个进程内只有一套连接池。
+    注意: 这里把 Engine 和 SessionFactory 绑定到 app.state，
+    避免模块级全局变量污染测试和多应用场景。
     """
-    global _session_factory
+    install_fastapi_db_support(app)
 
-    # 启动阶段：统一走 db_engine 单例入口，避免同一进程出现多套连接池。
-    engine = get_engine()
-    _session_factory = async_session_factory(engine)
-
-    # 注册全局异常处理器和 request_id 中间件
-    register_exception_handlers(app)
-    app.add_middleware(RequestIdMiddleware)
+    # 启动阶段：为当前 FastAPI 应用创建独立 Engine/SessionFactory，并挂到 app.state。
+    engine = create_engine_factory()
+    session_factory = async_session_factory(engine)
+    setattr(app.state, _ENGINE_STATE_KEY, engine)
+    setattr(app.state, _SESSION_FACTORY_STATE_KEY, session_factory)
 
     # ⚠️ 生产环境请删除以下建表代码，使用 Alembic 迁移管理表结构变更
     # async with engine.begin() as conn:
     #     await conn.run_sync(Base.metadata.create_all)
     print("数据库初始化完成")
 
-    yield  # 应用运行中
+    try:
+        yield  # 应用运行中
+    finally:
+        # 关闭阶段：只释放当前 app 绑定的连接池，不依赖模块级全局状态。
+        await engine.dispose()
+        setattr(app.state, _ENGINE_STATE_KEY, None)
+        setattr(app.state, _SESSION_FACTORY_STATE_KEY, None)
+        print("数据库连接已释放")
 
-    # 关闭阶段：统一释放 db_engine 的单例连接池。
-    await dispose_engine()
-    _session_factory = None
-    print("数据库连接已释放")
 
-
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI 依赖注入函数，获取请求级 Session。
 
@@ -92,12 +100,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         async def list_users(session: AsyncSession = Depends(get_db_session)):
             ...
     """
-    if _session_factory is None:
+    session_factory = getattr(request.app.state, _SESSION_FACTORY_STATE_KEY, None)
+    if session_factory is None:
         raise DbConnectionError(
             message="数据库未初始化，请确保 db_lifespan 已配置为 FastAPI lifespan",
         )
 
-    async with _session_factory() as session:
+    async with session_factory() as session:
         # 请求结束后 async with 会自动 close Session，并把连接归还连接池。
         # 这里不写 commit/rollback，是为了让事务边界留在业务代码里显式表达。
         yield session
@@ -105,8 +114,6 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def _demo() -> None:
     """演示：创建最小 FastAPI 应用，使用 lifespan 管理数据库，通过 httpx 测试端点。"""
-    global _session_factory
-
     import httpx
     from sqlalchemy import String, select
     from sqlalchemy.orm import Mapped, mapped_column
@@ -123,7 +130,7 @@ async def _demo() -> None:
     # 手动初始化数据库（ASGITransport 不会触发 lifespan）
     # 教程演示直接使用硬编码 URL，生产环境走环境变量
     engine = create_engine_factory(url=DEFAULT_DATABASE_URL)
-    _session_factory = async_session_factory(engine)
+    session_factory = async_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -131,6 +138,9 @@ async def _demo() -> None:
 
     # 创建 FastAPI 应用（lifespan 在真实部署时生效）
     app = FastAPI(lifespan=db_lifespan)
+    install_fastapi_db_support(app)
+    setattr(app.state, _ENGINE_STATE_KEY, engine)
+    setattr(app.state, _SESSION_FACTORY_STATE_KEY, session_factory)
 
     @app.get("/items")
     async def list_items(session: AsyncSession = Depends(get_db_session)):
@@ -167,7 +177,8 @@ async def _demo() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
-    _session_factory = None
+    setattr(app.state, _ENGINE_STATE_KEY, None)
+    setattr(app.state, _SESSION_FACTORY_STATE_KEY, None)
     print("FastAPI 集成演示完成")
 
 

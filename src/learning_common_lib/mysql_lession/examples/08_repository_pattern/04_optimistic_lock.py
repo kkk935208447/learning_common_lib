@@ -78,28 +78,31 @@ async def main() -> None:
     # ── 3. 模拟并发冲突 ─────────────────────────────────
     print(f"\n▸ 模拟并发冲突:")
 
-    # 用户 A 和用户 B 同时读取同一条记录
+    # 用户 A 和用户 B 分别在两个请求中读取到相同的旧 version
     async with factory() as session_a, factory() as session_b:
-        # 用户 A 读取
+        repo_a = ProductRepository(session_a)
+        repo_b = ProductRepository(session_b)
+
         async with session_a.begin():
-            repo_a = ProductRepository(session_a)
             product_a = await repo_a.get_by_id(1)
             version_a = product_a.version
             print(f"  用户A 读取: stock={product_a.stock}, version={version_a}")
 
-            # 用户 A 先更新成功
-            product_a = await repo_a.update(1, stock=80)
+        async with session_b.begin():
+            product_b = await repo_b.get_by_id(1)
+            version_b = product_b.version
+            print(f"  用户B 读取: stock={product_b.stock}, version={version_b}")
+
+        async with session_a.begin():
+            product_a = await repo_a.update(1, expected_version=version_a, stock=80)
             print(f"  用户A 更新成功: stock={product_a.stock}, version={product_a.version}")
 
-        # 用户 B 后读取（此时 version 已经变了）
         async with session_b.begin():
-            repo_b = ProductRepository(session_b)
-            product_b = await repo_b.get_by_id(1)
-            print(f"  用户B 读取: stock={product_b.stock}, version={product_b.version}")
-
-            # 用户 B 正常更新（因为读到的是最新 version）
-            product_b = await repo_b.update(1, stock=70)
-            print(f"  用户B 更新成功: stock={product_b.stock}, version={product_b.version}")
+            try:
+                await repo_b.update(1, expected_version=version_b, stock=70)
+            except OptimisticLockError as e:
+                print(f"  用户B 更新失败: {e}")
+                print(f"    detail: {e.detail}")
 
     # ── 4. 真正的冲突场景：手动模拟旧 version 更新 ─────
     print(f"\n▸ 手动模拟旧 version 冲突:")
@@ -120,7 +123,7 @@ async def main() -> None:
 
             # 此时 repo 中缓存的 version 是旧的，更新会失败
             try:
-                await repo.update(1, stock=50)
+                await repo.update(1, expected_version=p.version, stock=50)
             except OptimisticLockError as e:
                 print(f"  捕获 OptimisticLockError: {e}")
                 print(f"    detail: {e.detail}")
@@ -135,7 +138,12 @@ async def main() -> None:
                 async with session.begin():
                     repo = ProductRepository(session)
                     try:
-                        result = await repo.update(product_id, **kwargs)
+                        current = await repo.get_by_id(product_id, strict=True)
+                        result = await repo.update(
+                            product_id,
+                            expected_version=current.version,
+                            **kwargs,
+                        )
                         print(f"    第 {attempt} 次尝试: 成功! stock={result.stock}, version={result.version}")
                         return result
                     except OptimisticLockError:

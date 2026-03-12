@@ -286,65 +286,74 @@ async def create(self, obj, *, refresh=True):
             await self.session.refresh(obj)
         return obj
     except IntegrityError as e:
-        raise DuplicateError(
-            message="资源已存在",
-            internal_message=str(e),  # 仅写入日志，不进入响应
-        ) from e
+        # 这里只是示意：至少要保留异常链
+        # 更完整的做法见第 10 条，按数据库错误码细分
+        raise DuplicateError(message="资源已存在", internal_message=str(e)) from e
 ```
 
 ---
 
-## 10. IntegrityError 不区分类型统一返回 500
+## 10. 把所有 IntegrityError 当成同一种错误
 
 ```python
-# 错误 — 所有数据库异常都返回 500
-except Exception as e:
-    raise HTTPException(status_code=500, detail="数据库错误")
+# 错误 — 不管什么约束错误，都统一返回 DuplicateError
+except IntegrityError as e:
+    raise DuplicateError(detail={"field": "email"}) from e
 ```
 
-后果：唯一约束冲突（用户可修正的 409）和真正的数据库故障（服务端 500）混为一谈。前端无法区分"用户名已存在，请换一个"和"服务器挂了"。
+后果：唯一约束冲突、外键冲突、非空约束、长度越界被混为一谈。前端会把“缺必填字段”误当成“资源已存在”，排障也会越来越困难。
 
 正确做法：
 
 ```python
+def mysql_code(error: SQLAlchemyError) -> int | None:
+    original = getattr(error, "orig", None)
+    args = getattr(original, "args", ()) or getattr(error, "args", ())
+    return args[0] if args and isinstance(args[0], int) else None
+
 except IntegrityError as e:
-    # 唯一约束冲突 → 409 DuplicateError（客户端可修正）
-    raise DuplicateError(detail={"field": "email"}) from e
+    code = mysql_code(e)
+    if code == 1062:
+        raise DuplicateError(detail={"field": "email"}) from e
+    if code in {1048, 1451, 1452}:
+        raise AppValidationError(message="数据约束校验失败") from e
+    raise DatabaseError(internal_message=str(e)) from e
 except SQLAlchemyError as e:
-    # 其他数据库错误 → 500 DatabaseError（服务端问题）
     raise DatabaseError(internal_message=str(e)) from e
 ```
 
 ---
 
-## 11. 乐观锁不检查 rowcount 导致静默丢失更新
+## 11. 乐观锁不检查 rowcount，或不使用客户端版本号
 
 ```python
-# 错误 — 更新时不检查 version，并发覆盖静默发生
-async def update(self, id, **kwargs):
-    obj = await self.get_by_id(id)
-    for k, v in kwargs.items():
-        setattr(obj, k, v)
-    await self.session.flush()
-    return obj
-    # 两个请求同时读到 version=1，都更新成功
-    # 后提交的覆盖了先提交的修改，数据丢失且无任何报错
+# 错误 1 — 不检查 rowcount，并发覆盖静默发生
+stmt = (
+    update(Product)
+    .where(Product.id == id)
+    .values(stock=new_stock)
+)
+await session.execute(stmt)
+
+# 错误 2 — 只在仓储内部读取“当前 version”，而不是使用客户端读到的旧 version
+current = await repo.get_by_id(product_id)
+await repo.update(product_id, expected_version=current.version, stock=new_stock)
 ```
 
-后果：并发场景下数据静默丢失。例如两个管理员同时修改商品库存，一个改成 90，一个改成 80，最终结果取决于谁后提交，先提交的修改被覆盖且无任何提示。
+后果：并发场景下数据静默丢失，或者看似“用了乐观锁”，实际上永远拿的是数据库最新版本，根本无法表达“我是基于旧页面编辑的”。
 
 正确做法：
 
 ```python
-# 使用 WHERE version = ? 实现乐观锁
+# 使用客户端持有的 expected_version 实现乐观锁
 stmt = (
     update(Product)
-    .where(Product.id == id, Product.version == current_version)
-    .values(stock=new_stock, version=current_version + 1)
+    .where(Product.id == id, Product.version == expected_version)
+    .values(stock=new_stock, version=expected_version + 1)
 )
 result = await session.execute(stmt)
 if result.rowcount == 0:
-    raise OptimisticLockError(detail={"expected_version": current_version})
+    raise OptimisticLockError(detail={"expected_version": expected_version})
 ```
 
 ---

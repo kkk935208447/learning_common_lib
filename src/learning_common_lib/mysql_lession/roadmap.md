@@ -84,6 +84,8 @@ CRUD 能跑了，但 Session 的状态管理是异步 ORM 最容易踩坑的地�
 |------|------|--------|-------------|
 | 16 | `01_generic_repository.py` | 泛型 BaseRepository[T]、通用 CRUD 方法 | 消除重复代码 |
 | 17 | `02_unit_of_work.py` | Unit of Work 模式、多 Repository 协调 | 事务边界管理 |
+| 18 | `03_soft_delete.py` | SoftDeleteRepository 完整生命周期 | 企业级审计需求 |
+| 19 | `04_optimistic_lock.py` | VersionedRepository + 冲突检测 + 重试策略 | 并发安全 |
 
 ### 第九阶段：性能优化（09_performance/）
 
@@ -91,8 +93,8 @@ CRUD 能跑了，但 Session 的状态管理是异步 ORM 最容易踩坑的地�
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 18 | `01_eager_loading.py` | selectinload / joinedload 对比 | 解决 N+1 查询 |
-| 19 | `02_bulk_operations.py` | session.add / add_all / insert().values() 批量写入 | 大数据量写入优化 |
+| 20 | `01_eager_loading.py` | selectinload / joinedload 对比 | 解决 N+1 查询 |
+| 21 | `02_bulk_operations.py` | session.add / add_all / insert().values() 批量写入 | 大数据量写入优化 |
 
 ### 第十阶段：FastAPI 集成（10_fastapi_integration/）— 终极章节
 
@@ -100,8 +102,8 @@ CRUD 能跑了，但 Session 的状态管理是异步 ORM 最容易踩坑的地�
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 20 | `01_lifespan_and_session.py` | lifespan 管理 Engine、Depends 注入 AsyncSession | FastAPI + ORM 的桥梁 |
-| 21 | `02_full_crud_api.py` | 完整 CRUD API、Repository + Router 配合、统一响应格式 | 综合运用所有知识 |
+| 22 | `01_lifespan_and_session.py` | lifespan 管理 Engine、Depends 注入 AsyncSession | FastAPI + ORM 的桥梁 |
+| 23 | `02_full_crud_api.py` | 完整 CRUD API、Repository + Router 配合、统一响应格式 | 综合运用所有知识 |
 
 ## 学完示例后
 
