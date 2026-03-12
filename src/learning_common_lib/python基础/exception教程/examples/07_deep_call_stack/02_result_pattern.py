@@ -36,7 +36,7 @@ class UnwrapError(Exception):
 # Result[T] 类型定义
 # ============================================================
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)  #  frozen=True 确保不可变性，slots=True 优化内存布局
 class Result(Generic[T]):
     """函数式错误处理：用返回值代替异常。"""
     value: T | None = None

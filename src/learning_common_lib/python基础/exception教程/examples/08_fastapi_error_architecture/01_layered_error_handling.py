@@ -151,6 +151,8 @@ def user_service_find(user_id: int) -> dict:
 app = FastAPI()
 
 
+# 中间件是 FastAPI 处理请求的管道中的一环，可以在 **请求处理前** 后执行逻辑
+# request.state 是一个特殊属性，用于在请求处理过程中存储数据, call_next 是一个函数，用于调用下一个中间件或路由处理函数
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """为每个请求生成唯一 request_id。"""
@@ -247,18 +249,22 @@ if __name__ == "__main__":
         "场景 1: 正常请求 GET /users/1 → 200",
         client.get("/users/1"),
     )
+    print("-" * 60)
     print_response(
         "场景 2: 参数校验失败 GET /users/-1 → 422 AppValidationError",
         client.get("/users/-1"),
     )
+    print("-" * 60)
     print_response(
         "场景 3: 资源不存在 GET /users/42 → 404 NotFoundError",
         client.get("/users/42"),
     )
+    print("-" * 60)
     print_response(
         "场景 4: 数据库错误 GET /users/999 → 500 DatabaseError",
         client.get("/users/999"),
     )
+    print("-" * 60)
     print_response(
         "场景 5: 未知异常 GET /crash → 500 INTERNAL_ERROR",
         client.get("/crash"),
