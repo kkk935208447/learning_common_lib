@@ -55,8 +55,8 @@ def run_one(path: Path) -> tuple[str, bool, str]:
 
 
 def main() -> None:
-    base = Path(__file__).resolve().parent.parent
-    all_files = find_py_files(base)
+    base = Path(__file__).resolve().parent.parent   # exception教程/ 
+    all_files = find_py_files(base)                 # exception教程/examples/ 和 exception教程/templates/ 下所有 .py 文件
 
     if not all_files:
         print("No Python files found!")

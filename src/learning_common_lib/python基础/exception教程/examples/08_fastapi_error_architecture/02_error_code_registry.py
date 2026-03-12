@@ -115,12 +115,6 @@ class ErrorResponse(BaseModel):
 # ContextVar 是 Python 3.7+ 引入的特性，用于在并发/异步环境中维护上下文相关的变量。它的核心作用是：
 # 隔离上下文：在不同的执行上下文（如不同的请求/协程）中，ContextVar 可以存储不同的值，互不干扰。
 # 避免参数传递：无需通过函数参数层层传递请求 ID，可在任何地方直接访问当前上下文的 request_id。
-
-# 当前的协程/请求时：
-# 每个 HTTP 请求在独立的协程中处理
-# 中间件（如 request_id_middleware）在请求开始时设置 request_id_var
-# 请求处理完成后，协程执行完毕，上下文自动退出
-# 此时 ContextVar 的值会自动恢复到默认值（即 "no-request"）
 request_id_var: ContextVar[str] = ContextVar("request_id", default="no-request")
 
 

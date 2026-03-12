@@ -64,8 +64,6 @@ del _seen, _member
 
 
 def _demo() -> None:
-    from .error_base import AppError
-
     # 1. 打印所有错误码
     print("=== 错误码注册表 ===")
     print(f"  {'枚举名':<25} {'code':<25} {'message':<15} {'http_status'}")
@@ -92,37 +90,60 @@ def _demo() -> None:
 
 
 if __name__ == "__main__":
-    import logging
-    import sys
-    from pathlib import Path
-
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from templates.error_base import AppError  # noqa: E402
 
-    # 1. 打印所有错误码
-    print("=== 错误码注册表 ===")
-    print(f"  {'枚举名':<25} {'code':<25} {'message':<15} {'http_status'}")
-    print(f"  {'-'*25} {'-'*25} {'-'*15} {'-'*11}")
-    for ec in ErrorCode:
-        print(
-            f"  {ec.name:<25} {ec.code:<25} {ec.default_message:<15} {ec.http_status}"
-        )
-    print()
+    try:
+        from .error_base import AppError
+    except ImportError:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from templates.error_base import AppError  # noqa: E402
 
-    # 2. 用 ErrorCode 构造 AppError（ErrorCode 是唯一真源）
-    print("=== 用 ErrorCode 构造 AppError ===")
-    ec = ErrorCode.NOT_FOUND
-    err = AppError(
-        error_code=ec,
-        detail={"resource": "order", "id": 123},
-    )
-    print(f"  ErrorCode: {ec}")
-    print(f"  AppError:  {err}")
-    print(f"  repr:      {err!r}")
-    print(f"  code:      {err.code}")
-    print(f"  message:   {err.message}")
-    print(f"  status:    {err.status_code}")
+    _demo()
+
+
+
+
+
+
+
+
+
+    # import logging
+    # import sys
+    # from pathlib import Path
+
+    # try:
+    #     from .error_base import AppError
+    # except ImportError:
+    #     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    #     from templates.error_base import AppError  # noqa: E402
+
+
+    # # 1. 打印所有错误码
+    # print("=== 错误码注册表 ===")
+    # print(f"  {'枚举名':<25} {'code':<25} {'message':<15} {'http_status'}")
+    # print(f"  {'-'*25} {'-'*25} {'-'*15} {'-'*11}")
+    # for ec in ErrorCode:
+    #     print(
+    #         f"  {ec.name:<25} {ec.code:<25} {ec.default_message:<15} {ec.http_status}"
+    #     )
+    # print()
+
+    # # 2. 用 ErrorCode 构造 AppError（ErrorCode 是唯一真源）
+    # print("=== 用 ErrorCode 构造 AppError ===")
+    # ec = ErrorCode.NOT_FOUND
+    # err = AppError(
+    #     error_code=ec,
+    #     detail={"resource": "order", "id": 123},
+    # )
+    # print(f"  ErrorCode: {ec}")
+    # print(f"  AppError:  {err}")
+    # print(f"  repr:      {err!r}")
+    # print(f"  code:      {err.code}")
+    # print(f"  message:   {err.message}")
+    # print(f"  status:    {err.status_code}")
