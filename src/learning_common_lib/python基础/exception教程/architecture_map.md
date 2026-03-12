@@ -226,8 +226,8 @@ ExceptionHandler:
 Controller:
   # 不做异常处理
   result = service.transfer(...)
-  return {"code": "OK", "message": "success", "data": result}
-  # request_id 由中间件统一补齐到标准 JSON 响应体
+  return success_response(data=result)
+  # request_id 由 success_response 从 ContextVar 显式写入标准 JSON 响应体
 
 Service:
   account = repo.get_account(user_id)    # 异常自然冒泡
