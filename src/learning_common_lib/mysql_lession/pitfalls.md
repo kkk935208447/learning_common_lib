@@ -256,6 +256,99 @@ async def get_user_sync_fallback(user_id: int):
 
 ---
 
+## 9. SQLAlchemy 异常直接泄漏给客户端（暴露表名/SQL）
+
+```python
+# 错误 — Repository 不捕获异常，SQLAlchemy 错误直接传到路由层
+@app.post("/users")
+async def create_user(body: UserCreate, session: AsyncSession = Depends(get_db_session)):
+    repo = UserRepository(session)
+    async with session.begin():
+        user = await repo.create(User(**body.model_dump()))
+    return user
+    # 如果 email 唯一约束冲突，客户端会看到：
+    # IntegrityError: (pymysql.err.IntegrityError) (1062,
+    #   "Duplicate entry 'alice@example.com' for key 'uq_users_email'")
+    # 暴露了表名 users、字段名 email、约束名 uq_users_email
+```
+
+后果：攻击者可以通过错误信息推断数据库表结构、字段名、约束名，为 SQL 注入等攻击提供线索。
+
+正确做法：
+
+```python
+# Repository 层用 raise from 转换异常
+async def create(self, obj, *, refresh=True):
+    try:
+        self.session.add(obj)
+        await self.session.flush()
+        if refresh:
+            await self.session.refresh(obj)
+        return obj
+    except IntegrityError as e:
+        raise DuplicateError(
+            message="资源已存在",
+            internal_message=str(e),  # 仅写入日志，不进入响应
+        ) from e
+```
+
+---
+
+## 10. IntegrityError 不区分类型统一返回 500
+
+```python
+# 错误 — 所有数据库异常都返回 500
+except Exception as e:
+    raise HTTPException(status_code=500, detail="数据库错误")
+```
+
+后果：唯一约束冲突（用户可修正的 409）和真正的数据库故障（服务端 500）混为一谈。前端无法区分"用户名已存在，请换一个"和"服务器挂了"。
+
+正确做法：
+
+```python
+except IntegrityError as e:
+    # 唯一约束冲突 → 409 DuplicateError（客户端可修正）
+    raise DuplicateError(detail={"field": "email"}) from e
+except SQLAlchemyError as e:
+    # 其他数据库错误 → 500 DatabaseError（服务端问题）
+    raise DatabaseError(internal_message=str(e)) from e
+```
+
+---
+
+## 11. 乐观锁不检查 rowcount 导致静默丢失更新
+
+```python
+# 错误 — 更新时不检查 version，并发覆盖静默发生
+async def update(self, id, **kwargs):
+    obj = await self.get_by_id(id)
+    for k, v in kwargs.items():
+        setattr(obj, k, v)
+    await self.session.flush()
+    return obj
+    # 两个请求同时读到 version=1，都更新成功
+    # 后提交的覆盖了先提交的修改，数据丢失且无任何报错
+```
+
+后果：并发场景下数据静默丢失。例如两个管理员同时修改商品库存，一个改成 90，一个改成 80，最终结果取决于谁后提交，先提交的修改被覆盖且无任何提示。
+
+正确做法：
+
+```python
+# 使用 WHERE version = ? 实现乐观锁
+stmt = (
+    update(Product)
+    .where(Product.id == id, Product.version == current_version)
+    .values(stock=new_stock, version=current_version + 1)
+)
+result = await session.execute(stmt)
+if result.rowcount == 0:
+    raise OptimisticLockError(detail={"expected_version": current_version})
+```
+
+---
+
 ## 一句话总结
 
 异步 ORM 真正难的地方不是 SQL 怎么写，而是生命周期管理：连接什么时候创建和释放、Session 什么时候打开和关闭、对象什么时候过期和刷新、事务什么时候提交和回滚。把这四个生命周期理清楚，90% 的坑都能避开。

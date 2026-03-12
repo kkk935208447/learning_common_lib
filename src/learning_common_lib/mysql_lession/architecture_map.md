@@ -13,8 +13,13 @@
 │      API 集成层 (FastAPI + Depends)          │
 │  路由函数 / Session 依赖注入 / 请求级生命周期  │
 ├─────────────────────────────────────────────┤
+│      异常处理层 (Error Handling)              │
+│  全局异常处理器 / RequestIdMiddleware /       │
+│  ErrorResponse 统一响应 / 异常→HTTP 状态码    │
+├─────────────────────────────────────────────┤
 │       仓储层 (Repository Pattern)            │
-│  泛型 CRUD / Unit of Work / 事务边界         │
+│  泛型 CRUD / 软删除 / 乐观锁 / 异常转换      │
+│  Unit of Work / 事务边界                     │
 ├─────────────────────────────────────────────┤
 │       事务层 (Transaction)                   │
 │  commit / rollback / savepoint              │
@@ -26,7 +31,7 @@
 │  工作单元 / 对象状态管理 / flush             │
 ├─────────────────────────────────────────────┤
 │       模型层 (DeclarativeBase / Mapped)      │
-│  表映射 / 关系定义 / 字段类型               │
+│  表映射 / 关系定义 / 字段类型 / Mixin 混入   │
 ├─────────────────────────────────────────────┤
 │       连接层 (Engine / Pool)                 │
 │  连接池 / 驱动适配 / 健康检查               │
@@ -43,14 +48,15 @@
 | 架构层 | ORM 职责 | 教程示例 | 企业模板 |
 |--------|---------|---------|---------|
 | 连接层 | create_async_engine、连接池参数、pool_pre_ping | `01_connection/01, 02` | `db_engine.py` |
-| 模型层 | DeclarativeBase、Mapped[T]、Mixin 公共字段 | `02_model_definition/01, 02` | `base_model.py` |
-| 会话层 | AsyncSession 状态机、expire_on_commit | `04_session_lifecycle/01, 02` | — |
+| 模型层 | DeclarativeBase、Mapped[T]、Mixin 公共字段 | `02_model_definition/01, 02` | `base_model.py`, `mixins.py` |
+| 会话层 | AsyncSession 状态机、expire_on_commit | `04_session_lifecycle/01, 02` | `db_session.py` |
 | 查询层 | select/insert/update/delete、过滤分页聚合 | `03_crud_basics/01, 02`、`06_query_patterns/01, 02, 03` | — |
 | 事务层 | commit/rollback、begin_nested savepoint | `07_transactions/01, 02` | — |
-| 仓储层 | 泛型 Repository、Unit of Work | `08_repository_pattern/01, 02` | `base_repository.py` |
+| 仓储层 | 泛型 Repository、软删除、乐观锁、Unit of Work | `08_repository_pattern/01, 02, 03, 04` | `base_repository.py` |
+| 异常处理层 | 错误码注册、异常层级树、全局异常处理器 | — | `error_registry.py`, `error_base.py`, `error_handler.py` |
 | API 集成层 | Depends 注入 Session、完整 CRUD API | `10_fastapi_integration/01, 02` | `fastapi_db_middleware.py` |
 
-跨层关注点：关系映射（`05_relationships/`）横跨模型层和查询层；性能优化（`09_performance/`）横跨查询层和连接层。
+跨层关注点：关系映射（`05_relationships/`）横跨模型层和查询层；性能优化（`09_performance/`）横跨查询层和连接层；异常处理横跨仓储层和 API 集成层。
 
 ---
 
@@ -249,13 +255,48 @@ Session 关闭 → 连接归还连接池
 客户端收到 JSON 响应
 ```
 
+### 异常路径：请求失败的完整生命周期
+
+```text
+客户端请求 POST /users (email 重复)
+  │
+  ▼
+FastAPI 路由匹配 → Depends(get_session) 触发
+  │
+  ▼
+仓储层：UserRepository.create(User(email="duplicate"))
+  │
+  ▼
+会话层：session.flush() → MySQL 返回 IntegrityError
+  │
+  ▼
+仓储层：捕获 IntegrityError → raise DuplicateError(...) from e
+  │                           (internal_message=原始SQL错误, 不泄漏给客户端)
+  ▼
+异常处理层：handle_app_error() 捕获 DuplicateError
+  │  → ClientError → logger.info (不打印堆栈)
+  │  → 构造 ErrorResponse(code="DUPLICATE", message="资源已存在", request_id=...)
+  ▼
+客户端收到 409 JSON: {"code": "DUPLICATE", "message": "资源已存在", "data": null, "request_id": "..."}
+  + 响应头 X-Request-ID: ...
+```
+
+对比：
+
+| | 正常路径 | 异常路径 |
+|---|---------|---------|
+| 仓储层 | 返回 ORM 对象 | `raise from` 转换为业务异常 |
+| 异常处理层 | 不介入 | 捕获 AppError → 统一 ErrorResponse |
+| 日志级别 | 无 | 4xx→info, 5xx→error+堆栈 |
+| 响应格式 | `{"code":"OK", "data":{...}}` | `{"code":"NOT_FOUND", "data":null}` |
+
 ---
 
 ## 从教程到生产的演进路径
 
 1. 先用示例理解每个层的概念和 API（01-07 章）
-2. 用第 08 章理解如何将数据访问封装为 Repository 模式
+2. 用第 08 章理解如何将数据访问封装为 Repository 模式（含软删除和乐观锁）
 3. 用第 09 章理解性能优化的关键手段
-4. 用第 10 章理解如何在 FastAPI 中串联所有层
+4. 用第 10 章理解如何在 FastAPI 中串联所有层（含统一异常处理）
 5. 阅读 `templates/` 了解如何将架构封装为可复用组件
 6. 在实际项目中按架构层组合模板，根据业务需求扩展：添加读写分离、多数据库支持、查询缓存等

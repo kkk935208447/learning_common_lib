@@ -1,7 +1,8 @@
 """
 解决什么问题: FastAPI 中数据库生命周期和 Session 注入问题，避免手动管理引擎启停和 Session 传递
-输入输出约定: db_lifespan 管理引擎生命周期，get_db_session 作为 Depends 注入 AsyncSession
-失败策略: 启动阶段引擎初始化失败直接抛出异常阻止应用启动；请求级 Session 在 with 块退出时自动关闭并归还连接
+输入输出约定: db_lifespan 管理引擎生命周期并注册全局异常处理器，get_db_session 作为 Depends 注入 AsyncSession
+失败策略: 启动阶段引擎初始化失败直接抛出异常阻止应用启动；请求级 Session 在 with 块退出时自动关闭并归还连接；
+    数据库未初始化时抛出 ConnectionError（业务异常）而非裸 RuntimeError
 不适用场景: 非 FastAPI 框架；需要多数据库切换的场景（需自行扩展）
 """
 
@@ -21,6 +22,8 @@ try:
     )
     from .db_session import async_session_factory
     from .base_model import Base
+    from .error_handler import register_exception_handlers, RequestIdMiddleware
+    from .error_base import ConnectionError as DbConnectionError
 except ImportError:
     import sys
     from pathlib import Path
@@ -33,9 +36,11 @@ except ImportError:
     )
     from templates.db_session import async_session_factory  # type: ignore[no-redef]
     from templates.base_model import Base  # type: ignore[no-redef]
+    from templates.error_handler import register_exception_handlers, RequestIdMiddleware  # type: ignore[no-redef]
+    from templates.error_base import ConnectionError as DbConnectionError  # type: ignore[no-redef]
 
 # 模块级变量，保存 Session 工厂供依赖注入使用。
-# 这里缓存的是“Session 构造器”，不是具体的 Session 实例。
+# 这里缓存的是"Session 构造器"，不是具体的 Session 实例。
 # 每个请求都会创建自己的 AsyncSession，因此不会出现多个请求共享同一个 Session 的问题。
 _session_factory = None
 
@@ -56,6 +61,10 @@ async def db_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 启动阶段：统一走 db_engine 单例入口，避免同一进程出现多套连接池。
     engine = get_engine()
     _session_factory = async_session_factory(engine)
+
+    # 注册全局异常处理器和 request_id 中间件
+    register_exception_handlers(app)
+    app.add_middleware(RequestIdMiddleware)
 
     # ⚠️ 生产环境请删除以下建表代码，使用 Alembic 迁移管理表结构变更
     # async with engine.begin() as conn:
@@ -84,7 +93,9 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             ...
     """
     if _session_factory is None:
-        raise RuntimeError("数据库未初始化，请确保 db_lifespan 已配置为 FastAPI lifespan")
+        raise DbConnectionError(
+            message="数据库未初始化，请确保 db_lifespan 已配置为 FastAPI lifespan",
+        )
 
     async with _session_factory() as session:
         # 请求结束后 async with 会自动 close Session，并把连接归还连接池。
@@ -132,7 +143,7 @@ async def _demo() -> None:
     async def create_item(title: str, session: AsyncSession = Depends(get_db_session)):
         """创建一个 Item。"""
         # 写请求显式打开事务，教学上最关键的一点是：
-        # “请求级 Session” != “请求级事务”。
+        # "请求级 Session" != "请求级事务"。
         # 这里的事务只覆盖真正的写操作，范围最小，也更符合企业项目习惯。
         async with session.begin():
             item = Item(title=title)

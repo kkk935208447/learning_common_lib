@@ -296,3 +296,142 @@ print(f"溢出: {pool.overflow()}")
 - [ ] 事务范围最小化，不包含非数据库的耗时操作
 - [ ] Repository 不自己创建 Session，通过构造参数接收
 - [ ] 批量操作使用 `insert().values()` 而不是循环 `session.add()`
+
+---
+
+## 10. Repository 层用 `raise from` 转换 SQLAlchemy 异常
+
+```python
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from templates.error_base import DuplicateError, DatabaseError
+
+async def create(self, obj, *, refresh=True):
+    try:
+        self.session.add(obj)
+        await self.session.flush()
+        if refresh:
+            await self.session.refresh(obj)
+        return obj
+    except IntegrityError as e:
+        # 唯一约束冲突 → 客户端可修正的 409
+        raise DuplicateError(
+            message="资源已存在",
+            internal_message=str(e),  # 仅日志，不进入响应
+        ) from e
+    except SQLAlchemyError as e:
+        # 其他数据库错误 → 服务端 500
+        raise DatabaseError(internal_message=str(e)) from e
+```
+
+要点：
+
+- `raise from` 保留原始异常链，日志中可追溯到 SQLAlchemy 原始错误
+- `internal_message` 只写入日志，不泄漏给客户端（表名、SQL、约束名等敏感信息）
+- 区分 `IntegrityError`（客户端可修正）和 `SQLAlchemyError`（服务端问题），返回不同 HTTP 状态码
+
+---
+
+## 11. 统一错误响应格式（code + message + data + request_id）
+
+```python
+# 所有响应（成功和失败）共享同一结构
+{
+    "code": "OK",           # 成功时 "OK"，失败时错误码如 "NOT_FOUND"
+    "message": "success",   # 人类可读消息
+    "data": {...},          # 成功时为业务数据，失败时为 null 或错误详情
+    "request_id": "uuid"    # 链路追踪 ID
+}
+```
+
+要点：
+
+- 前端只需检查 `code == "OK"` 判断成功/失败，不需要解析 HTTP 状态码
+- `request_id` 贯穿请求全链路，排查问题时用 `grep request_id` 即可关联所有日志
+- 使用 `register_exception_handlers(app)` 一键注册，AppError/HTTPException/ValidationError/未知异常全覆盖
+- `RequestIdMiddleware` 自动从 `X-Request-ID` header 读取或生成 UUID
+
+---
+
+## 12. 软删除代替物理删除，保留审计轨迹
+
+```python
+from templates.mixins import SoftDeleteMixin
+from templates.base_repository import SoftDeleteRepository
+
+class Article(SoftDeleteMixin, TimestampMixin, Base):
+    title: Mapped[str] = mapped_column(String(200))
+
+repo = SoftDeleteRepository(session, Article)
+await repo.delete(1)          # UPDATE SET is_deleted=1（不是 DELETE）
+await repo.list_all()         # 自动过滤 WHERE is_deleted=0
+await repo.restore(1)         # 恢复
+await repo.hard_delete(1)     # 真正物理删除（谨慎使用）
+await repo.list_deleted()     # 查询回收站
+```
+
+要点：
+
+- 软删除保留完整数据历史，满足审计和合规要求
+- `list_all()` 自动过滤已删除记录，业务代码无需手动加 `WHERE is_deleted=0`
+- 长期积累的软删除数据建议定期归档到历史表，避免主表膨胀
+- 索引应包含 `is_deleted` 字段：`CREATE INDEX ix_article_is_deleted ON article(is_deleted)`
+
+---
+
+## 13. 乐观锁防止并发覆盖，配合重试策略
+
+```python
+from templates.mixins import VersionMixin
+from templates.base_repository import VersionedRepository
+from templates.error_base import OptimisticLockError
+
+class Product(VersionMixin, SoftDeleteMixin, TimestampMixin, Base):
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+
+repo = VersionedRepository(session, Product)
+
+# 更新时自动检查 version：WHERE version=N, SET version=N+1
+product = await repo.update(1, stock=90)
+
+# 重试策略
+for attempt in range(3):
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                repo = VersionedRepository(session, Product)
+                await repo.update(product_id, stock=new_stock)
+                break
+    except OptimisticLockError:
+        if attempt == 2:
+            raise  # 重试耗尽，向上抛出
+        # 重新读取最新版本后重试
+```
+
+要点：
+
+- 乐观锁适合读多写少场景（电商库存、配置管理等）
+- `rowcount == 0` 是检测冲突的关键，不检查就会静默丢失更新
+- 重试次数应有上限（通常 3 次），避免无限重试
+- 高并发写入场景考虑悲观锁（`SELECT FOR UPDATE`）
+
+---
+
+## 14. 生产级代码自查清单（更新版）
+
+提交数据访问层代码前，确认：
+
+- [ ] Engine 全局只创建一个，应用关闭时调用 `await engine.dispose()`
+- [ ] `pool_pre_ping=True` 已开启
+- [ ] `pool_recycle` 小于 MySQL `wait_timeout`
+- [ ] `expire_on_commit=False` 已设置
+- [ ] 所有关系加载都显式指定了 `selectinload` / `joinedload`
+- [ ] 没有在异步代码中使用 `session.query()` 旧 API
+- [ ] Session 在请求结束时正确关闭（使用 `async with` 或 `Depends`）
+- [ ] 事务范围最小化，不包含非数据库的耗时操作
+- [ ] Repository 不自己创建 Session，通过构造参数接收
+- [ ] 批量操作使用 `insert().values()` 而不是循环 `session.add()`
+- [ ] Repository 层已做异常转换（`raise from`），不泄漏 SQLAlchemy 异常
+- [ ] 全局异常处理器已注册（`register_exception_handlers`）
+- [ ] RequestIdMiddleware 已添加，支持链路追踪
+- [ ] 需要审计的数据使用软删除而非物理删除
+- [ ] 并发更新场景使用乐观锁 + 重试策略
