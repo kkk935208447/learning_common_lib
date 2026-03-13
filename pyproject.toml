@@ -15,6 +15,9 @@ dependencies = [
     "python-multipart>=0.0.18",
     "aiohttp>=3.13.2",
     "asyncmy>=0.2.9",
+    "celery[redis]>=5.6.2",
+    "redis>=5.0",
+    "flower>=2.0.1",
 ]
 [build-system]
 requires = ["hatchling>=1.17.1"]
