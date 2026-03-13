@@ -64,6 +64,9 @@ async def _demo() -> None:
     try:
         from .base_model import Base, TimestampMixin
     except ImportError:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from templates.base_model import Base, TimestampMixin  # type: ignore[no-redef]
 
     # 定义带软删除 + 乐观锁的模型

@@ -39,6 +39,8 @@ async def main() -> None:
     engine = create_async_engine(DATABASE_URL, echo=False)
 
     async with engine.begin() as conn:
+        # 先删掉 Base 里声明的所有表（如果不存在就什么都不做）
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     print("表 demo_notes 已创建\n")
 

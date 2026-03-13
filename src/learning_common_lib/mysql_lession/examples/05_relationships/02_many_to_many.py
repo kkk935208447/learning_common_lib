@@ -80,6 +80,8 @@ async def main() -> None:
 
     # 建表（包括关联表）
     async with engine.begin() as conn:
+        # 先删掉 Base 里声明的所有表（如果不存在就什么都不做）
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     print("表 demo_students, demo_courses, demo_student_course 已创建\n")
 
