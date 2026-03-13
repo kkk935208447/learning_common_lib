@@ -1,17 +1,31 @@
 """
-目标: Celery Beat 定时任务配置，演示 crontab / timedelta / solar 调度
-关键 API: beat_schedule, crontab(), timedelta(), solar(), celery beat
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.07_periodic_tasks.01_celery_beat worker -l info -P solo
-  终端 2 (启动 Beat):
-    celery -A examples.07_periodic_tasks.01_celery_beat beat -l info
-  终端 3 (运行示例 - 可选，手动触发验证):
-    uv run python examples/07_periodic_tasks/01_celery_beat.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: 打印完整的 Beat 调度配置表，说明各调度类型用法
-生产提醒: 生产环境需单独启动 beat 进程: celery -A app beat，且只能运行一个 beat 实例
+目标: 演示 Celery Beat 定时任务调度系统 (Periodic Task Scheduling with Beat)
+关键概念:
+  - Beat 调度器：独立进程负责定时任务调度，将任务按时发送到队列
+  - 调度表达式：crontab() 支持类 Unix cron 语法，timedelta() 支持间隔调度
+  - 调度持久化：beat_schedule_filename 存储调度状态，防止重启后重复执行
+关键 API: beat_schedule, crontab(), timedelta(), celery beat
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/07_periodic_tasks
+运行方式:
+  Worker: celery -A examples.07_periodic_tasks.01_celery_beat worker -l info
+    (启动 worker 执行定时任务)
+  Beat: celery -A examples.07_periodic_tasks.01_celery_beat beat -l info
+    (启动 beat 调度器，按配置发送定时任务)
+  Client: python examples/07_periodic_tasks/01_celery_beat.py
+    (查看调度配置，不发送任务)
+预期现象:
+  - Beat 进程按 crontab/timedelta 配置定时发送任务到队列
+  - Worker 进程接收并执行定时任务
+  - 调度状态持久化到 celerybeat-schedule 文件
+生产提醒:
+  - 生产环境 beat 调度器只能运行一个实例，避免重复调度
+  - 运行后可删除 celerybeat-schedule* 文件进行清理
+技术要点:
+  - crontab(minute, hour, day_of_week, day_of_month, month_of_year)
+  - Beat 和 Worker 可以在不同机器上运行
+  - 调度精度受 beat_max_loop_interval 参数影响
 """
 
 from __future__ import annotations
@@ -165,10 +179,9 @@ async def main() -> None:
 
     # 启动命令说明
     print("── 生产环境启动命令 ──")
-    print("  💡 celery -A app beat                        # 启动 beat 调度器")
-    print("  💡 celery -A app beat --loglevel=info         # 带日志")
-    print("  💡 celery -A app beat -S django               # Django 数据库调度器")
-    print("  💡 celery -A app worker --beat                # worker + beat 合并 (开发用)")
+    print("  💡 celery -A myproj.celery_app:app beat --loglevel=info")
+    print("  💡 celery -A myproj.celery_app:app beat -S django_celery_beat.schedulers:DatabaseScheduler")
+    print("  💡 celery -A myproj.celery_app:app worker --beat    # worker + beat 合并 (仅开发用)")
     print("  ⚠️  生产环境 beat 只能运行一个实例，否则任务会重复执行!")
 
 

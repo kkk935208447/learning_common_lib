@@ -1,12 +1,30 @@
 """
-目标: 演示 AsyncResult 状态机、常用属性和方法
+目标: 演示 AsyncResult 状态机与结果管理 (AsyncResult State Machine & Result Management)
+关键概念:
+  - 任务状态机：PENDING → SUCCESS/FAILURE/RETRY，状态转换不可逆
+  - AsyncResult 对象：任务结果的代理，提供状态查询和结果获取接口
+  - 结果存储机制：backend 存储任务状态和返回值，支持跨进程访问
 关键 API: AsyncResult, .get(), .ready(), .successful(), .failed(), .state, .info, .forget()
-Python 版本: 3.11+
-运行方式 (两个终端):
-  终端1 (worker):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.04_result_backend.01_async_result worker --loglevel=info
-  终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/04_result_backend/01_async_result.py
-预期现象: 展示任务各状态及 AsyncResult 的查询方法
-生产提醒: 生产中 .get() 会阻塞当前线程，应设置 timeout；频繁轮询 state 会增加 backend 压力
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/04_result_backend
+运行方式:
+  Worker: celery -A examples.04_result_backend.01_async_result worker -l info
+    (worker 执行任务并更新状态到 backend)
+  Client: python examples/04_result_backend/01_async_result.py
+    (创建任务并通过 AsyncResult 监控状态变化)
+预期现象:
+  - 任务状态从 PENDING 转换到 SUCCESS/FAILURE
+  - ready() 方法反映任务完成状态，successful()/failed() 反映执行结果
+  - Redis backend 中存储任务元数据 (key: celery-task-meta-*)
+生产提醒:
+  - .get() 会阻塞当前线程直到任务完成，生产环境必须设置 timeout 参数
+  - 频繁轮询 .state 会增加 backend 负载，建议使用事件机制或适当间隔
+技术要点:
+  - ready() 检查任务是否完成，不区分成功失败
+  - successful() 仅在任务成功完成时返回 True
+  - .info 在任务失败时包含异常信息，成功时包含返回值
+  - forget() 从 backend 删除任务结果，释放存储空间
 """
 
 from __future__ import annotations

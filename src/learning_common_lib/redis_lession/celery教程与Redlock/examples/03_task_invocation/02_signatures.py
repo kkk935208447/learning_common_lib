@@ -21,6 +21,8 @@ app = Celery(
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
+# 默认队列名一般是 celery（除非你在配置里改过），这里改为 defult
+app.conf.task_default_queue = "default"
 
 
 @app.task

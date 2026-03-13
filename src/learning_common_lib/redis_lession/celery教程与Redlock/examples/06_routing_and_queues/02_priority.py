@@ -2,12 +2,13 @@
 目标: 优先级队列配置，演示任务优先级调度概念
 关键 API: apply_async(priority=N), broker_transport_options, task_queue_max_priority
 Python 版本: 3.11+
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
     celery -A examples.06_routing_and_queues.02_priority worker -l info -P solo
   终端 2 (运行示例):
     uv run python examples/06_routing_and_queues/02_priority.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
 预期现象: 打印不同优先级任务的调度信息，说明优先级机制
 生产提醒: Redis 优先级支持有限(仅模拟)，RabbitMQ 原生支持 0-255 优先级
 """

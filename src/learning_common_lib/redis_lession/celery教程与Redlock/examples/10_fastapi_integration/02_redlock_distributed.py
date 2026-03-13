@@ -1,15 +1,10 @@
 """
-目标: Redlock 分布式锁 — 使用真实 Redis 演示锁获取、释放、超时与竞争
-关键 API: redis.lock.Lock, redis.Redis.lock(), acquire/release
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.10_fastapi_integration.02_redlock_distributed worker -l info -P solo
-  终端 2 (运行示例):
-    uv run python examples/10_fastapi_integration/02_redlock_distributed.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: 演示真实 Redis 分布式锁的获取、释放、超时、竞争
-生产提醒: 锁超时必须大于任务最大执行时间
+目标: 演示 Redis 分布式锁机制与竞争处理 (Redis Distributed Lock & Competition)
+关键 API: redis.lock.Lock, acquire(), release(), timeout
+运行方式:
+  Client: python examples/10_fastapi_integration/02_redlock_distributed.py
+预期现象: 演示锁获取、释放、超时、竞争等分布式锁核心机制
+生产提醒: 锁超时必须大于任务最大执行时间，使用 db=2 避免与 Celery 冲突
 """
 
 from __future__ import annotations
@@ -30,7 +25,8 @@ app = Celery(
 )
 
 # ── 2. Redis 连接 ──
-redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=0, decode_responses=True)
+# 使用 db=2 避免与 Celery broker(db=0) 和 backend(db=1) 冲突
+redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2, decode_responses=True)
 
 
 # ── 3. Celery 任务 (使用 redis.lock.Lock) ──
@@ -109,12 +105,16 @@ async def main() -> None:
     print(f"  🔑 锁已被持有")
 
     async def try_acquire():
-        lock5 = redis_client.lock("demo:blocking", timeout=10)
+        # acquire() 在线程池里执行；关闭 thread_local，避免 release() 时丢失锁 token。
+        lock5 = redis_client.lock("demo:blocking", timeout=10, thread_local=False)
         print(f"  ⏳ 等待获取锁 (blocking_timeout=5s)...")
         acquired = await asyncio.to_thread(lock5.acquire, blocking=True, blocking_timeout=5)
         print(f"  🔑 等待后获取锁: {acquired}")
         if acquired:
-            lock5.release()
+            try:
+                await asyncio.to_thread(lock5.release)
+            except redis.exceptions.LockError:
+                print("  ⚠️ 等待者已不再持有锁，跳过释放")
 
     # 2秒后释放锁，让等待者获取
     async def release_later():
@@ -179,6 +179,7 @@ async def main() -> None:
     print("             raise Reject('任务已在执行中')")
 
     # 清理 demo keys
+    # ⚠️ KEYS 命令会阻塞 Redis，生产环境应使用 SCAN 替代
     for key in redis_client.keys("demo:*"):
         redis_client.delete(key)
 

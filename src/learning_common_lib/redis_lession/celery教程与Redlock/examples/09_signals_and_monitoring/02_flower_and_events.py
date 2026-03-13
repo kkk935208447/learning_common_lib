@@ -2,6 +2,8 @@
 目标: Flower 监控与事件系统 — 任务事件、自定义事件、监控模式
 关键 API: task_send_sent_event, worker_send_task_events, Flower, events
 Python 版本: 3.11+
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
     celery -A examples.09_signals_and_monitoring.02_flower_and_events worker -l info -P solo
@@ -9,7 +11,8 @@ Python 版本: 3.11+
     uv run python examples/09_signals_and_monitoring/02_flower_and_events.py
   (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
 预期现象: 打印 Flower 配置、事件类型、监控命令，演示事件配置
-生产提醒: Flower 需独立部署，建议配合 Prometheus + Grafana 做长期监控
+生产提醒: Flower 需独立部署，建议与 worker 共用稳定 app 入口
+    （如 celery -A myproj.celery_app:app flower），并配合 Prometheus + Grafana 做长期监控
 """
 
 from __future__ import annotations
@@ -68,9 +71,9 @@ async def main() -> None:
     # Flower 安装与启动
     print("── Flower 安装与启动 ──")
     print("  💡 安装: pip install flower")
-    print("  💡 启动: celery -A app flower")
-    print("  💡 指定端口: celery -A app flower --port=5555")
-    print("  💡 带认证: celery -A app flower --basic-auth=admin:password")
+    print("  💡 启动: celery -A myproj.celery_app:app flower")
+    print("  💡 指定端口: celery -A myproj.celery_app:app flower --port=5555")
+    print("  💡 带认证: celery -A myproj.celery_app:app flower --basic-auth=admin:password")
     print("  💡 访问: http://localhost:5555")
     print()
 
@@ -137,13 +140,13 @@ async def main() -> None:
 
     # CLI 监控命令
     print("── CLI 监控命令 ──")
-    print("  💡 celery -A app events              # 实时事件流 (curses 界面)")
-    print("  💡 celery -A app events --dump        # 事件转储到 stdout")
-    print("  💡 celery -A app events -c camera     # 自定义事件相机")
-    print("  💡 celery -A app inspect active        # 查看活跃任务")
-    print("  💡 celery -A app inspect reserved      # 查看预留任务")
-    print("  💡 celery -A app inspect stats         # 查看 worker 统计")
-    print("  💡 celery -A app control rate_limit task_name 10/m  # 限速")
+    print("  💡 celery -A myproj.celery_app:app events               # 实时事件流 (curses 界面)")
+    print("  💡 celery -A myproj.celery_app:app events --dump        # 事件转储到 stdout")
+    print("  💡 celery -A myproj.celery_app:app events -c camera     # 自定义事件相机")
+    print("  💡 celery -A myproj.celery_app:app inspect active       # 查看活跃任务")
+    print("  💡 celery -A myproj.celery_app:app inspect reserved     # 查看预留任务")
+    print("  💡 celery -A myproj.celery_app:app inspect stats        # 查看 worker 统计")
+    print("  💡 celery -A myproj.celery_app:app control rate_limit task_name 10/m  # 限速")
     print()
 
     # Prometheus + Grafana 集成

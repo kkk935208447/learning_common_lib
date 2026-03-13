@@ -16,11 +16,13 @@
 ## 2. 任务定义
 
 - 使用 `bind=True`，获取 `self` 访问 `self.request`、`self.retry()`
-- 显式指定 `name=` 参数，防止重构移动文件后任务名变化导致路由失败
+- 优先把任务放在稳定的绝对包路径下，使用 Celery 自动生成的 `module.function` 任务名
+- 只有在“跨服务固定契约”或“兼容历史名字”时，才显式指定 `name=`
   ```python
-  @app.task(bind=True, name="order.process")
-  def process_order(self, order_id: int) -> dict: ...
+  # 推荐：稳定包路径 + 自动命名
+  # myproj/orders/tasks.py -> myproj.orders.tasks.process_order
   ```
+- `Celery("myproj")` 的 app 名用项目包名，不要用 `worker`、`demo`、`add_test` 这类临时名称
 - 任务参数只传 JSON 可序列化类型（str/int/float/list/dict/None/bool）
 - 不要传 ORM 对象，传 ID 让 worker 侧重新查询（避免序列化问题 + 数据一致性）
 - 任务函数保持幂等：同一参数多次执行结果一致
@@ -48,8 +50,8 @@
 - 按任务类型分队列：CPU 密集型、IO 密集型、快速任务分开
 - 不同队列启动不同 concurrency 的 worker
   ```bash
-  celery -A app worker -Q cpu_heavy --concurrency=2
-  celery -A app worker -Q io_tasks --concurrency=20
+  celery -A myproj.celery_app:app worker -Q cpu_heavy --concurrency=2
+  celery -A myproj.celery_app:app worker -Q io_tasks --concurrency=20
   ```
 - `worker_prefetch_multiplier=1`：一次只预取一个任务，配合 `acks_late` 实现公平调度
 
@@ -68,7 +70,7 @@
 
 ## 8. 监控
 
-- 生产环境部署 Flower：`celery -A app flower --port=5555`
+- 生产环境部署 Flower：`celery -A myproj.celery_app:app flower --port=5555`
 - 开启 `worker_send_task_events=True` 获取实时事件
 - 利用 task signals 做结构化日志、指标采集
 - 监控队列长度，设置告警阈值
@@ -94,11 +96,12 @@
   ```ini
   # /etc/supervisor/conf.d/celery_worker.conf
   [program:celery_worker]
-  command=celery -A myapp worker -l info -c 4
+  command=celery -A myproj.celery_app:app worker -l info -c 4
   autostart=true
   autorestart=true
   stopwaitsecs=600
   ```
+- 统一提供单一 app 入口，例如 `myproj/celery_app.py`，避免 worker / beat / Flower 分别指向不同模块
 - 日志配置：`--logfile=/var/log/celery/worker.log --loglevel=info`
 - 多队列部署：每个队列一个 worker 组，独立扩缩容
 - 代码更新后必须重启 worker（worker 不会自动加载新代码）

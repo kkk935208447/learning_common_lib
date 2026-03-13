@@ -1,10 +1,27 @@
 """
-目标: 演示 Celery 三种配置方式及关键参数
+目标: 演示 Celery 三种配置模式与最佳实践 (Configuration Patterns & Best Practices)
+关键概念:
+  - 配置分离原则：开发/测试/生产环境配置隔离
+  - 配置优先级：环境变量 > 配置文件 > 代码硬编码
+  - 敏感信息管理：broker 密码、API 密钥等通过环境变量注入
 关键 API: app.conf.update(), config_from_object(), config_from_envvar()
-Python 版本: 3.11+
-运行命令: cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/01_app_and_config/02_config_patterns.py
-预期现象: 依次展示三种配置方式，打印各配置项的值 (本文件不派发任务，无需启动 worker)
-生产提醒: 敏感信息 (broker 密码等) 应通过环境变量注入，勿硬编码
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/01_app_and_config
+运行方式:
+  Client: python examples/01_app_and_config/02_config_patterns.py
+    (本示例仅演示配置加载，不派发任务，无需启动 worker)
+预期现象:
+  - 依次展示字典配置、类配置、环境变量配置三种方式
+  - 打印各配置项的值和类型，验证配置加载正确性
+  - 演示配置优先级覆盖机制
+生产提醒:
+  - 生产环境必须使用环境变量管理敏感信息，避免密码泄露
+  - 建议使用配置类模式，便于不同环境的配置管理和版本控制
+技术要点:
+  - config_from_envvar() 加载的是 Python 模块，不是 JSON 文件
+  - 配置项名称区分大小写，必须与 Celery 官方文档一致
+  - 运行时修改 app.conf 只影响当前进程，不影响已启动的 worker
 """
 
 from __future__ import annotations

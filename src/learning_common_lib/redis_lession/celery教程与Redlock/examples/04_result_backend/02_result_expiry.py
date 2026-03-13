@@ -1,12 +1,13 @@
 """
-目标: 演示结果过期配置、result_extended 元数据、结果清理最佳实践
-关键 API: result_expires, result_extended, AsyncResult, .forget()
-Python 版本: 3.11+
-运行方式 (两个终端):
-  终端1 (worker):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.04_result_backend.02_result_expiry worker --loglevel=info
-  终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/04_result_backend/02_result_expiry.py
-预期现象: 展示不同过期配置、扩展元数据字段 (worker/queue 会有真实值)、结果生命周期管理
-生产提醒: 生产环境务必设置 result_expires，否则 Redis/DB 会无限膨胀
+目标: 演示结果过期配置与生命周期管理 (Result Expiry & Lifecycle)
+关键 API: result_expires, result_extended, AsyncResult.forget()
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+运行方式:
+  Worker: celery -A examples.04_result_backend.02_result_expiry worker -l info
+  Client: python examples/04_result_backend/02_result_expiry.py
+预期现象: 展示结果过期配置、扩展元数据、手动清理效果
+生产提醒: 务必设置 result_expires，否则 Redis/DB 会无限膨胀
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ async def main() -> None:
     print(f"  当前配置 (秒): result_expires = {app.conf.result_expires}")
 
     # 方式二: timedelta (演示如何设置)
+    # ⚠️ 运行时修改只影响当前进程，已启动的 worker 不受影响
     app.conf.result_expires = timedelta(hours=2)
     print(f"  修改为 timedelta: result_expires = {app.conf.result_expires}")
 

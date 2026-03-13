@@ -112,12 +112,12 @@ result.forget()  # 立即从 backend 删除
 ### 多个 Beat 进程导致重复调度
 ```bash
 # ❌ 启动了两个 beat
-celery -A app beat &
-celery -A app beat &  # 同一个任务会被调度两次
+celery -A myproj.celery_app:app beat &
+celery -A myproj.celery_app:app beat &  # 同一个任务会被调度两次
 
 # ✅ 确保只有一个 beat 进程
 # 使用 PID 文件或分布式锁保证单实例
-celery -A app beat --pidfile=/var/run/celery/beat.pid
+celery -A myproj.celery_app:app beat --pidfile=/var/run/celery/beat.pid
 ```
 
 ### 时区不一致
@@ -140,10 +140,10 @@ app.conf.timezone = "Asia/Shanghai"
 ```python
 # ❌ 配置了路由但没启动对应 worker
 app.conf.task_routes = {"email.*": {"queue": "email"}}
-# 只启动了 celery -A app worker（默认只消费 default 队列）
+# 只启动了 celery -A myproj.celery_app:app worker（默认只消费 default 队列）
 
 # ✅ 启动时指定队列
-# celery -A app worker -Q default,email
+# celery -A myproj.celery_app:app worker -Q default,email
 ```
 
 ### 优先级在 Redis 下的限制
@@ -224,7 +224,7 @@ task.delay()  # 消息堆积在 Redis 队列中
 # 很久之后才启动 worker...
 
 # ✅ 先启动 worker，再发任务
-# 终端 1: celery -A app worker -l info
+# 终端 1: celery -A myproj.celery_app:app worker -l info
 # 终端 2: python client.py
 ```
 
@@ -248,5 +248,5 @@ result.get(timeout=30)  # 30 秒后超时抛 TimeoutError
 # ✅ 修改代码后重启 worker
 # Ctrl+C 停止 worker → 重新启动
 # 或使用 --autoreload（仅开发环境）
-celery -A app worker -l info --autoreload
+celery -A myproj.celery_app:app worker -l info --autoreload
 ```

@@ -133,6 +133,8 @@ async def async_get_result(
         async_result = AsyncResult(tid)
     else:
         tid = task_id
+        if not tid:
+            raise ValueError("传入 Celery App 时必须同时提供 task_id")
         async_result = AsyncResult(tid, app=app_or_task_id)
 
     return await asyncio.to_thread(async_result.get, timeout=timeout)
@@ -206,7 +208,7 @@ def _demo() -> None:
     print(f"  注册任务: {safe_task.name}")
 
     print("\n💡 要执行任务，请先启动 Redis，然后运行 Celery Worker:")
-    print("   celery -A task_base worker --loglevel=info")
+    print("   celery -A myproj.celery_app:app worker --loglevel=info")
 
     print("\n✅ BaseTask 演示完成")
 

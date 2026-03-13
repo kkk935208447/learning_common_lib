@@ -11,6 +11,7 @@ Celery 教程与 Redlock 分布式锁 smoke 测试
 前置条件：
     1. celery[redis] 已安装（uv sync）
     2. Redis 已启动（密码 123456）
+    3. 本脚本会清空教程专用 Redis DB 0/1，避免不同示例互相污染
 
 运行方式（从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录）：
     uv run python smoke/run_all_examples.py
@@ -32,6 +33,7 @@ SKIP_FILES = {
 # 不需要 worker 的文件（只读配置、只定义 beat_schedule、或纯演示）
 NO_WORKER_NEEDED = {
     "02_config_patterns.py",     # 只读配置，不调度任务
+    "02_redlock_distributed.py",  # 只演示 Redis 锁，不提交 Celery 任务
 }
 
 EXAMPLE_TIMEOUT = 60
@@ -101,6 +103,22 @@ def get_worker_queues(path: Path) -> str | None:
     return None
 
 
+def reset_tutorial_redis() -> None:
+    """清空教程专用 Redis DB，避免示例之间互相污染。"""
+    for db in (0, 1):
+        client = redis_lib.Redis(
+            host="localhost",
+            port=6379,
+            password="123456",
+            db=db,
+            socket_connect_timeout=3,
+        )
+        try:
+            client.flushdb()
+        finally:
+            client.close()
+
+
 def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
     """运行单个示例，返回 (文件名, 是否成功, 输出/错误信息)。"""
     rel = path.name
@@ -109,6 +127,8 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
 
     worker_proc = None
     try:
+        reset_tutorial_redis()
+
         if needs_worker(path):
             module = get_celery_module(path, base)
             queues = get_worker_queues(path)
@@ -148,6 +168,7 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
             except Exception:
                 worker_proc.kill()
                 worker_proc.wait(timeout=5)
+        reset_tutorial_redis()
 
 
 def main() -> None:

@@ -1,12 +1,29 @@
 """
-目标: 演示 delay() 与 apply_async() 的区别及 apply_async 参数
+目标: 演示任务调用机制与调度参数 (Task Invocation Mechanisms & Scheduling Parameters)
+关键概念:
+  - delay() vs apply_async()：简化调用 vs 完整参数控制
+  - 任务调度参数：countdown(延迟秒数)、eta(绝对时间)、expires(过期时间)
+  - 队列路由：通过 queue 参数将任务发送到指定队列
 关键 API: task.delay(), task.apply_async(), countdown, eta, expires, queue
-Python 版本: 3.11+
-运行方式 (两个终端):
-  终端1 (worker):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.03_task_invocation.01_delay_and_apply_async worker --loglevel=info -Q default,high_priority,greetings
-  终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/03_task_invocation/01_delay_and_apply_async.py
-预期现象: 展示两种调用方式及 apply_async 的各种参数效果 (countdown 会真正延迟，eta 会真正调度)
-生产提醒: countdown/eta 依赖 worker 时钟，跨时区部署时注意使用 UTC
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/03_task_invocation
+运行方式:
+  Worker: celery -A examples.03_task_invocation.01_delay_and_apply_async worker -l info -Q default,high_priority,greetings
+    (监听多个队列：default、high_priority、greetings)
+  Client: python examples/03_task_invocation/01_delay_and_apply_async.py
+    (演示各种调用方式和调度参数)
+预期现象:
+  - delay() 任务立即执行，apply_async() 任务按调度参数延迟执行
+  - countdown 任务在指定秒数后执行，eta 任务在指定时间点执行
+  - 不同队列的任务按队列优先级和 worker 配置执行
+生产提醒:
+  - countdown/eta 依赖 worker 系统时钟，跨时区部署时务必使用 UTC 时间
+  - expires 过期的任务会被丢弃，适用于时效性强的任务（如验证码）
+技术要点:
+  - delay(*args, **kwargs) 等价于 apply_async(args=args, kwargs=kwargs)
+  - eta 使用 datetime 对象，countdown 使用秒数，两者不能同时指定
+  - queue 参数覆盖任务装饰器中的 queue 设置
 """
 
 from __future__ import annotations
@@ -22,7 +39,8 @@ app = Celery(
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
-
+# 默认队列名一般是 celery（除非你在配置里改过），这里改为 defult
+app.conf.task_default_queue = "default"
 
 # ── 2. 示例任务 ──
 @app.task(bind=True)

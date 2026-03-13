@@ -1,12 +1,29 @@
 """
-目标: 演示手动重试: self.retry() 参数、捕获特定异常、MaxRetriesExceededError
-关键 API: self.retry(), max_retries, countdown, exc, self.request.retries, MaxRetriesExceededError
-Python 版本: 3.11+
-运行方式 (需要两个终端):
-  终端1 (worker): cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.05_error_handling.01_retry_basics worker --loglevel=info
-  终端2 (客户端): cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/05_error_handling/01_retry_basics.py
-预期现象: worker 终端可见重试过程，客户端终端通过轮询 result.state 观察最终结果
-生产提醒: 重试 countdown 建议用指数退避，避免雪崩；max_retries 不宜过大
+目标: 演示手动重试机制与异常处理策略 (Manual Retry Mechanisms & Exception Handling)
+关键概念:
+  - 手动重试控制：通过 self.retry() 实现条件重试和退避策略
+  - 异常分类处理：区分可重试异常和不可重试异常
+  - 重试限制机制：max_retries 防止无限重试，MaxRetriesExceededError 处理最终失败
+关键 API: self.retry(), max_retries, MaxRetriesExceededError, countdown
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/05_error_handling
+运行方式:
+  Worker: celery -A examples.05_error_handling.01_retry_basics worker -l info
+    (观察重试过程和异常处理日志)
+  Client: python examples/05_error_handling/01_retry_basics.py
+    (触发各种异常场景并观察重试行为)
+预期现象:
+  - Worker 显示重试次数递增和 countdown 延迟
+  - 可重试异常触发重试，不可重试异常直接失败
+  - 达到 max_retries 后抛出 MaxRetriesExceededError
+生产提醒:
+  - 重试 countdown 建议使用指数退避算法，避免服务雪崩
+  - max_retries 不宜过大，防止长时间占用 worker 资源
+技术要点:
+  - self.retry() 会重新入队任务，当前执行立即终止
+  - countdown 参数控制重试延迟，可实现退避策略
+  - bind=True 是使用 self.retry() 的前提条件
 """
 
 from __future__ import annotations
@@ -36,6 +53,7 @@ class AuthenticationError(Exception):
 
 
 # 模拟调用计数器
+# ⚠️ 仅限教程演示：模块级字典在单 worker 进程内有效，worker 重启后计数器重置。生产环境应使用 Redis 原子计数器。
 call_counts: dict[str, int] = {}
 
 

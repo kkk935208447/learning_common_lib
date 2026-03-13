@@ -1,12 +1,29 @@
 """
-目标: 演示 @app.task 参数: bind, name, ignore_result, 任务继承, self.request 属性
-关键 API: @app.task(bind=True), self.request, Task 基类
-Python 版本: 3.11+
-运行方式 (两个终端):
-  终端1 (worker):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.02_task_definition.01_basic_task worker --loglevel=info
-  终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/02_task_definition/01_basic_task.py
-预期现象: 打印任务 ID、重试次数、delivery_info 等 request 属性
-生产提醒: bind=True 的任务第一个参数是 self，签名与普通函数不同，调用时勿传 self
+目标: 演示任务装饰器参数与任务上下文访问 (Task Decorator Parameters & Context Access)
+关键概念:
+  - bind=True 将任务实例绑定到第一个参数，提供任务上下文访问能力
+  - 任务继承机制：自定义 Task 基类扩展任务行为
+  - self.request 属性：任务运行时元数据（ID、重试次数、路由信息等）
+关键 API: @app.task(bind=True), self.request, Task 基类, ignore_result
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/02_task_definition
+运行方式:
+  Worker: celery -A examples.02_task_definition.01_basic_task worker -l info
+    (bind=True 的任务会在日志中显示详细的 request 信息)
+  Client: python examples/02_task_definition/01_basic_task.py
+    (调用各种类型的任务并观察其行为差异)
+预期现象:
+  - bind=True 任务打印任务 ID、重试次数、delivery_info 等上下文信息
+  - ignore_result=True 任务不在 backend 存储结果，节省内存
+  - 自定义 Task 基类的钩子方法被正确调用
+生产提醒:
+  - bind=True 任务的第一个参数是 self，调用时不要传递 self 参数
+  - ignore_result=True 适用于通知类任务，可显著减少 Redis 内存占用
+技术要点:
+  - self.request.id 是任务的唯一标识符，用于结果存储和状态跟踪
+  - delivery_info 包含队列、交换机、路由键等消息传递信息
+  - 任务继承允许在 on_success、on_failure 等钩子中添加通用逻辑
 """
 
 from __future__ import annotations

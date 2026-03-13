@@ -41,7 +41,8 @@ def create_celery_app(
     """创建 Celery App 实例。
 
     Args:
-        name: App 名称，通常用项目名。
+        name: App 名称。生产中建议传稳定的项目包名，如 "myproj"；
+            不建议长期使用 "worker"、"demo" 这类临时名。
         config: 配置类，默认 CeleryConfig。
         autodiscover: 自动发现任务的包列表，如 ["myapp.tasks"]。
     """
@@ -59,6 +60,7 @@ def create_celery_app(
 # ---------------------------------------------------------------------------
 
 _app: Celery | None = None
+_app_init_signature: tuple[str, type, tuple[str, ...]] | None = None
 
 
 def init_celery_app(
@@ -68,8 +70,22 @@ def init_celery_app(
 ) -> Celery:
     """初始化模块级单例，幂等调用（重复调用返回已有实例）。"""
     global _app
+    global _app_init_signature
+
+    current_signature = (
+        name,
+        config or CeleryConfig,
+        tuple(autodiscover or ()),
+    )
     if _app is None:
         _app = create_celery_app(name, config, autodiscover)
+        _app_init_signature = current_signature
+        return _app
+    if _app_init_signature != current_signature:
+        raise RuntimeError(
+            "Celery App 已按不同参数初始化，"
+            "请保持 name/config/autodiscover 一致，或直接使用 create_celery_app() 创建独立实例"
+        )
     return _app
 
 
@@ -89,7 +105,7 @@ def get_celery_app() -> Celery:
 
 async def async_delay(task: Any, *args: Any, **kwargs: Any) -> Any:
     """异步版 task.delay()，通过 asyncio.to_thread 避免阻塞事件循环。"""
-    return await asyncio.to_thread(functools.partial(task.delay, *args, **kwargs))
+    return await asyncio.to_thread(task.delay, *args, **kwargs)
 
 
 async def async_apply(
@@ -135,7 +151,8 @@ def _demo() -> None:
     print(f"  init_celery_app() is get_celery_app(): {singleton is same}")
 
     print("\n💡 要执行任务，请先启动 Redis，然后运行 Celery Worker:")
-    print("   celery -A celery_app worker --loglevel=info")
+    print("   celery -A myproj.celery_app:app worker --loglevel=info")
+    print("   # 如果包根导出了 app，也可以简写成: celery -A myproj worker --loglevel=info")
 
     print("\n✅ Celery App 工厂演示完成")
 

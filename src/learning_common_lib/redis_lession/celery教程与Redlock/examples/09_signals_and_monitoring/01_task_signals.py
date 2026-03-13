@@ -2,6 +2,8 @@
 目标: Task 信号系统 — 监听任务生命周期事件
 关键 API: task_prerun, task_postrun, task_success, task_failure, before_task_publish
 Python 版本: 3.11+
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
     celery -A examples.09_signals_and_monitoring.01_task_signals worker -l info -P solo

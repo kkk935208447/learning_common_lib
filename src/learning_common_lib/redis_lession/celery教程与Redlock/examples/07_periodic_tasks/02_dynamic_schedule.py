@@ -1,14 +1,12 @@
 """
-目标: 动态调度 — 运行时增删改 beat_schedule 条目
+目标: 演示动态调度管理与配置 (Dynamic Schedule Management)
 关键 API: app.conf.beat_schedule, add_periodic_task(), DatabaseScheduler
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.07_periodic_tasks.02_dynamic_schedule worker -l info -P solo
-  终端 2 (运行示例):
-    uv run python examples/07_periodic_tasks/02_dynamic_schedule.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: 打印调度表的增删改过程，展示动态调度概念
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+运行方式:
+  Worker: celery -A examples.07_periodic_tasks.02_dynamic_schedule worker -l info
+  Client: python examples/07_periodic_tasks/02_dynamic_schedule.py
+预期现象: 展示调度表的增删改过程，演示动态调度概念
 生产提醒: 动态调度推荐使用 django-celery-beat 的 DatabaseScheduler 持久化
 """
 
@@ -70,7 +68,9 @@ def print_schedule(label: str) -> None:
 
 def add_schedule(name: str, task: str, schedule: timedelta | crontab,
                  args: tuple = (), kwargs: dict | None = None) -> None:
-    """添加调度条目"""
+    """添加调度条目
+    ⚠️ 直接修改 beat_schedule 字典只在 beat 尚未启动时有效。已运行的 beat 不会感知到内存中的变更。生产环境应使用 DatabaseScheduler (django-celery-beat) 实现真正的动态调度。
+    """
     app.conf.beat_schedule[name] = {
         "task": task,
         "schedule": schedule,
@@ -162,7 +162,7 @@ async def main() -> None:
     # DatabaseScheduler 说明
     print("\n── 补充: DatabaseScheduler (django-celery-beat) ──")
     print("  💡 安装: pip install django-celery-beat")
-    print("  💡 启动: celery -A app beat -S django_celery_beat.schedulers:DatabaseScheduler")
+    print("  💡 启动: celery -A myproj.celery_app:app beat -S django_celery_beat.schedulers:DatabaseScheduler")
     print("  💡 优势:")
     print("     • 调度配置持久化到数据库，重启不丢失")
     print("     • 可通过 Django Admin 界面管理")

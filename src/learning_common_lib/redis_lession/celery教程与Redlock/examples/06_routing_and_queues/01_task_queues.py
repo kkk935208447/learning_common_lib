@@ -1,15 +1,29 @@
 """
-目标: 多队列路由配置，将不同类型任务分发到不同队列
-关键 API: task_routes, task_queues, kombu.Queue, -Q 参数
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.06_routing_and_queues.01_task_queues worker -l info -P solo -Q default,email_queue,report_queue,notification_queue
-  终端 2 (运行示例):
-    uv run python examples/06_routing_and_queues/01_task_queues.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: 打印路由表，演示任务被路由到不同队列
-生产提醒: 生产环境需为每个队列启动独立 worker: celery -A app worker -Q email_queue
+目标: 演示多队列路由配置与任务分发策略 (Multi-Queue Routing & Task Distribution Strategies)
+关键概念:
+  - 队列路由机制：通过 task_routes 将不同类型任务分发到专用队列
+  - 队列隔离策略：email、report、notification 队列独立处理，避免相互影响
+  - Worker 队列绑定：-Q 参数控制 worker 监听的队列范围
+关键 API: task_routes, task_queues, kombu.Queue, Exchange, -Q 参数
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/06_routing_and_queues
+运行方式:
+  Worker: celery -A examples.06_routing_and_queues.01_task_queues worker -l info -Q default,email_queue,report_queue,notification_queue
+    (启动 worker 监听所有队列，观察任务路由)
+  Client: python examples/06_routing_and_queues/01_task_queues.py
+    (发送不同类型任务到各自队列)
+预期现象:
+  - 不同任务函数被自动路由到对应队列
+  - Worker 日志显示从不同队列消费任务
+  - Redis 中可观察到各队列的任务分布
+生产提醒:
+  - 生产环境建议为每个队列启动独立 worker 进程，实现资源隔离
+  - 高优先级队列可配置更多 worker 实例
+技术要点:
+  - Exchange 和 routing_key 是 AMQP 概念，Redis broker 会忽略它们
+  - task_routes 支持函数名匹配和正则表达式匹配
+  - 队列分离有助于监控、扩缩容和故障隔离
 """
 
 from __future__ import annotations
@@ -25,17 +39,18 @@ app = Celery(
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
+# 默认队列名一般是 celery（除非你在配置里改过），这里改为 defult
+app.conf.task_default_queue = "default"
 
 # ── 2. 定义交换机和队列 ──
-# 生产环境中，每个 Queue 对应 broker 中的一个真实队列
+# ⚠️ Exchange 和 routing_key 是 AMQP (RabbitMQ) 概念。Redis broker 会忽略它们，只看 Queue 名称。
+# 这里写出来是为了展示完整的 AMQP 配置语法，方便迁移到 RabbitMQ。如果只用 Redis，可以简化为 Queue("email_queue") 即可。
 default_exchange = Exchange("default", type="direct")
-email_exchange = Exchange("email", type="direct")
-report_exchange = Exchange("report", type="direct")
 
 app.conf.task_queues = (
     Queue("default", default_exchange, routing_key="default"),
-    Queue("email_queue", email_exchange, routing_key="email"),
-    Queue("report_queue", report_exchange, routing_key="report"),
+    Queue("email_queue", default_exchange, routing_key="email"),
+    Queue("report_queue", default_exchange, routing_key="report"),
     Queue("notification_queue", default_exchange, routing_key="notification"),
 )
 
@@ -122,11 +137,11 @@ async def main() -> None:
     print("     celery -A examples.06_routing_and_queues.01_task_queues worker -l info -P solo -Q default,email_queue,report_queue,notification_queue")
     print()
     print("  💡 生产环境可为每个队列启动独立 Worker:")
-    print("     celery -A app worker -Q default          # 处理默认队列")
-    print("     celery -A app worker -Q email_queue       # 专门处理邮件")
-    print("     celery -A app worker -Q report_queue      # 专门处理报表")
-    print("     celery -A app worker -Q email_queue,default  # 同时处理多个队列")
-    print("     celery -A app worker -Q default -c 4      # 4 个并发 worker")
+    print("     celery -A myproj.celery_app:app worker -Q default              # 处理默认队列")
+    print("     celery -A myproj.celery_app:app worker -Q email_queue          # 专门处理邮件")
+    print("     celery -A myproj.celery_app:app worker -Q report_queue         # 专门处理报表")
+    print("     celery -A myproj.celery_app:app worker -Q email_queue,default  # 同时处理多个队列")
+    print("     celery -A myproj.celery_app:app worker -Q default -c 4         # 4 个并发 worker")
 
 
 if __name__ == "__main__":

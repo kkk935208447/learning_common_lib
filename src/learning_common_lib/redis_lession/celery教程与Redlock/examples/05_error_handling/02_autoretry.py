@@ -1,12 +1,29 @@
 """
-目标: 演示自动重试: autoretry_for, retry_backoff, retry_jitter, on_failure 回调
-关键 API: autoretry_for, retry_backoff, retry_backoff_max, retry_jitter, on_failure
-Python 版本: 3.11+
-运行方式 (需要两个终端):
-  终端1 (worker): cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run celery -A examples.05_error_handling.02_autoretry worker --loglevel=info
-  终端2 (客户端): cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/05_error_handling/02_autoretry.py
-预期现象: worker 终端可见自动重试的指数退避过程、抖动、失败回调；客户端通过轮询观察最终结果
-生产提醒: autoretry_for 只捕获指定异常，务必明确列出；retry_backoff_max 防止延迟过长
+目标: 演示自动重试机制与退避策略 (Automatic Retry Mechanisms & Backoff Strategies)
+关键概念:
+  - 自动重试配置：autoretry_for 指定可重试异常类型，无需手动调用 retry()
+  - 退避策略：retry_backoff 实现指数退避，retry_jitter 添加随机抖动
+  - 失败回调：on_failure 钩子处理最终失败场景
+关键 API: autoretry_for, retry_backoff, retry_jitter, on_failure, retry_backoff_max
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/05_error_handling
+运行方式:
+  Worker: celery -A examples.05_error_handling.02_autoretry worker -l info
+    (观察自动重试的指数退避和抖动过程)
+  Client: python examples/05_error_handling/02_autoretry.py
+    (触发不同异常类型并观察自动重试行为)
+预期现象:
+  - autoretry_for 异常自动重试，其他异常直接失败
+  - retry_backoff=True 时重试间隔呈指数增长
+  - retry_jitter=True 时每次重试间隔有随机抖动
+生产提醒:
+  - autoretry_for 只捕获指定异常，务必明确列出所有可重试异常
+  - retry_backoff_max 防止退避延迟过长，建议设置合理上限
+技术要点:
+  - autoretry_for 比手动 retry() 更简洁，适合标准重试场景
+  - 指数退避算法：delay = base * (2 ** retry_count)
+  - 抖动机制防止多个任务同时重试造成的雷群效应
 """
 
 from __future__ import annotations
@@ -36,6 +53,7 @@ class PermanentError(Exception):
 
 
 # 调用计数器
+# ⚠️ 仅限教程演示：模块级字典在单 worker 进程内有效，worker 重启后计数器重置。生产环境应使用 Redis 原子计数器。
 call_counts: dict[str, int] = {}
 
 
@@ -45,6 +63,7 @@ call_counts: dict[str, int] = {}
     autoretry_for=(TransientError,),
     max_retries=3,
     retry_backoff=False,  # 先不用退避，看基本行为
+    default_retry_delay=1,  # 显式缩短默认重试间隔，避免 Celery 默认 180s 干扰示例
 )
 def basic_autoretry(self: Task, succeed_on: int = 3) -> str:
     """autoretry_for 自动捕获指定异常并重试"""

@@ -27,7 +27,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Worker (消费侧)                              │
 │                                                                 │
-│  celery -A app worker -Q default,email --concurrency=4          │
+│  celery -A myproj.celery_app:app worker -Q default,email --concurrency=4 │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  Prefork Pool (默认)                                     │   │
@@ -48,7 +48,7 @@
 │                                                                 │
 │  key: celery-task-meta-{task_id}                                │
 │  value: {"status": "SUCCESS", "result": ..., "traceback": ...}  │
-│  TTL: result_expires (默认 86400s)                               │
+│  TTL: result_expires (Celery 默认 86400s，本模板配置为 3600s)                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

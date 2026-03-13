@@ -34,15 +34,24 @@ python -c "import redis; print(redis.Redis(host='localhost', port=6379, password
 uv add "celery[redis]" "redis>=5.0" flower fastapi uvicorn
 ```
 
+## 终端查看后台开启的 celery 进程
+```bash
+ps -ef | grep celery
+# ps aux | grep celery
+# 删除所有的 celery,  -9 表示强制删除
+pkill -9 -f celery 
+```
+
+
 ## 目录结构
 
 ```
 celery教程与Redlock/
 ├── README.md                ← 本文件
-├── roadmap.md               ← 学习路线
 ├── architecture_map.md      ← 架构全景图
 ├── best_practices.md        ← 最佳实践
 ├── pitfalls.md              ← 常见陷阱
+├── distributed_lock_guide.md ← 分布式锁原理与队列关系
 ├── smoke/
 │   └── run_all_examples.py  ← 一键验证所有示例
 ├── examples/
@@ -57,18 +66,26 @@ celery教程与Redlock/
 │   ├── 09_signals_and_monitoring/ ← 信号与监控
 │   └── 10_fastapi_integration/   ← FastAPI + Redlock
 └── templates/
-    ├── celery_config.py     ← 生产级配置
-    ├── celery_app.py        ← App 工厂 + 异步包装
-    ├── task_base.py         ← 基础任务类
-    ├── error_handling.py    ← 异常层级树
-    ├── redlock.py           ← 分布式锁
-    └── fastapi_celery.py    ← FastAPI 集成
+    ├── tutorial/            ← 教程专用简化模板
+    │   ├── simple_celery.py     ← 简化 Celery 配置
+    │   ├── simple_redlock.py    ← 简化分布式锁
+    │   └── simple_fastapi.py    ← 简化 FastAPI 集成
+    └── enterprise/          ← 企业级生产模板
+        ├── celery_config.py     ← 生产级配置
+        ├── celery_app.py        ← App 工厂 + 异步包装
+        ├── task_base.py         ← 基础任务类
+        ├── error_handling.py    ← 异常层级树
+        ├── redlock.py           ← 分布式锁
+        └── fastapi_celery.py    ← FastAPI 集成
 ```
 
 ## 快速开始
 
 ```bash
 cd src/learning_common_lib/redis_lession/celery教程与Redlock
+
+# 如果之前运行过其他示例，建议先清理 Redis：
+redis-cli -a 123456 -n 0 FLUSHDB && redis-cli -a 123456 -n 1 FLUSHDB
 
 # 终端 1: 启动 Worker
 celery -A examples.01_app_and_config.01_celery_hello worker -l info -P solo
@@ -95,6 +112,39 @@ uv run python smoke/run_all_examples.py
 - `-P solo`: 单线程池，适合教程演示
 - `-Q queue1,queue2`: 指定消费的队列（第 6 章路由示例需要）
 
+## 命名与启动的生产约定
+
+教程示例为了方便演示，很多文件把 `app` 和任务写在同一个模块里，并直接用
+`celery -A examples.xx.yy worker` 启动。生产环境建议改成更稳定的结构：
+
+```python
+# myproj/celery_app.py
+from celery import Celery
+
+app = Celery("myproj")
+app.config_from_object("myproj.settings.celery")
+app.autodiscover_tasks(["myproj"])
+```
+
+```bash
+# 更常见的生产启动方式
+celery -A myproj.celery_app:app worker -l info
+
+# 如果 myproj/__init__.py 里导出了 app，也可以简写
+celery -A myproj worker -l info
+```
+
+命名建议：
+- `Celery("myproj")` 的第一个参数用稳定的项目包名，不要用 `add_test`、`worker` 这类教学或临时名字
+- 任务优先使用自动生成的绝对模块路径名，例如 `myproj.orders.tasks.process_order`
+- 只有在“跨服务固定契约”或“重构期间要保持旧名字兼容”时，才显式写 `@app.task(name="myproj.orders.process_order")`
+- 不要在生产里依赖“直接运行 task 文件”这种模式；统一通过包模块导入和 `celery -A pkg.module:app` 启动
+
+这样做的好处：
+- worker / client / beat / Flower 都引用同一个可导入的 app 入口
+- 任务名天然稳定，降低 `NotRegistered` 和路由漂移风险
+- 部署命令与官方文档、进程管理器、容器启动脚本更一致
+
 ## 学习路线概览
 
 | 章 | 主题 | 核心知识点 |
@@ -115,6 +165,7 @@ uv run python smoke/run_all_examples.py
 ```
 broker:  redis://:123456@localhost:6379/0
 backend: redis://:123456@localhost:6379/1
+lock:    redis://:123456@localhost:6379/2
 ```
 
 分库避免 key 冲突，带密码认证。

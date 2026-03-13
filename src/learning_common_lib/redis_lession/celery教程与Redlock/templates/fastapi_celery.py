@@ -43,6 +43,23 @@ _CELERY_STATE_KEY = "celery_app"
 _REDIS_STATE_KEY = "redis_client"
 
 
+def _build_task_status_response(task_id: str, celery_app: Any) -> dict[str, Any]:
+    """在线程中读取 AsyncResult，避免在 async 路由里阻塞事件循环。"""
+    from celery.result import AsyncResult
+
+    result = AsyncResult(task_id, app=celery_app)
+    response: dict[str, Any] = {
+        "task_id": task_id,
+        "status": result.status,
+    }
+    if result.ready():
+        if result.successful():
+            response["result"] = result.result
+        else:
+            response["error"] = str(result.result)
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Lifespan — 管理 Celery App + Redis 连接
 # ---------------------------------------------------------------------------
@@ -60,7 +77,7 @@ async def celery_lifespan(app: Any) -> AsyncGenerator[None, None]:
 
     # 启动阶段
     celery_app = init_celery_app(name="web", config=CeleryConfig)
-    redis_url = CeleryConfig.broker_url  # 复用 broker 的 Redis 连接
+    redis_url = CeleryConfig.redis_lock_url  # 使用专用锁 Redis 连接
     redis_client = aioredis.from_url(redis_url, decode_responses=True)
 
     setattr(app.state, _CELERY_STATE_KEY, celery_app)
@@ -155,8 +172,6 @@ def create_task_status_router(prefix: str = "/tasks") -> Any:
         app.include_router(create_task_status_router())
     """
     from fastapi import APIRouter, Depends as FastAPIDepends
-    from celery.result import AsyncResult
-
     router = APIRouter(prefix=prefix, tags=["tasks"])
 
     @router.get("/{task_id}/status")
@@ -169,17 +184,7 @@ def create_task_status_router(prefix: str = "/tasks") -> Any:
         返回:
             {"task_id": "...", "status": "PENDING|STARTED|SUCCESS|FAILURE", "result": ...}
         """
-        result = AsyncResult(task_id, app=celery_app)
-        response: dict[str, Any] = {
-            "task_id": task_id,
-            "status": result.status,
-        }
-        if result.ready():
-            if result.successful():
-                response["result"] = result.result
-            else:
-                response["error"] = str(result.result)
-        return response
+        return await asyncio.to_thread(_build_task_status_response, task_id, celery_app)
 
     return router
 

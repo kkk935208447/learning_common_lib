@@ -1,15 +1,29 @@
 """
-目标: Chain 和 Group 工作流 — 串行链式调用与并行分组执行
+目标: 演示工作流编排模式：链式串行与分组并行 (Workflow Orchestration: Chain & Group Patterns)
+关键概念:
+  - Chain 链式工作流：任务串行执行，前一个任务的结果作为后一个任务的输入
+  - Group 分组并行：多个任务并行执行，互不依赖，提高处理效率
+  - Signature 任务签名：.s() 创建不可变签名，.si() 忽略前置结果
 关键 API: chain(), group(), .s(), .si(), | 操作符
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.08_workflows.01_chain_and_group worker -l info -P solo
-  终端 2 (运行示例):
-    uv run python examples/08_workflows/01_chain_and_group.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: 演示 chain 结果传递、group 并行执行、组合使用
-生产提醒: chain 中任一任务失败会中断后续任务；group 中单个失败不影响其他任务
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/08_workflows
+运行方式:
+  Worker: celery -A examples.08_workflows.01_chain_and_group worker -l info -P solo
+    (-P solo 使用单线程池，便于观察执行顺序)
+  Client: python examples/08_workflows/01_chain_and_group.py
+    (演示各种工作流组合模式)
+预期现象:
+  - Chain 任务按顺序执行，每个任务接收前一个的结果
+  - Group 任务并行执行，同时开始处理
+  - 组合工作流展示复杂的编排逻辑
+生产提醒:
+  - Chain 中任一任务失败会中断整个链，需要合理的错误处理
+  - Group 中单个任务失败不影响其他任务，但需要检查整体结果
+技术要点:
+  - .s() 保留参数，.si() 忽略链式传递的结果
+  - | 操作符等价于 chain() 函数
+  - 工作流可以嵌套组合，实现复杂的业务逻辑
 """
 
 from __future__ import annotations

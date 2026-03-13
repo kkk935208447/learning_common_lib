@@ -1,15 +1,29 @@
 """
-目标: FastAPI + Celery 集成 — REST API 触发异步任务并轮询状态
-关键 API: FastAPI, TestClient, lifespan, AsyncResult
-Python 版本: 3.11+
-运行命令:
-  终端 1 (启动 Worker):
-    celery -A examples.10_fastapi_integration.01_fastapi_celery worker -l info -P solo
-  终端 2 (运行示例):
-    uv run python examples/10_fastapi_integration/01_fastapi_celery.py
-  (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
-预期现象: TestClient 提交任务到真实 broker，worker 处理后客户端轮询获取结果
-生产提醒: 生产环境需启动独立 worker 进程
+目标: 演示 FastAPI + Celery 集成与异步任务管理 (FastAPI + Celery Integration & Async Task Management)
+关键概念:
+  - Web 异步任务模式：HTTP 请求立即返回任务 ID，客户端轮询或推送获取结果
+  - 应用生命周期管理：lifespan 确保 Celery 应用正确初始化和清理
+  - 任务状态 API：RESTful 接口提供任务提交、状态查询、结果获取功能
+关键 API: FastAPI, TestClient, AsyncResult, lifespan, asyncio.to_thread
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
+  - 从上级目录: cd examples/10_fastapi_integration
+运行方式:
+  Worker: celery -A examples.10_fastapi_integration.01_fastapi_celery worker -l info
+    (启动 worker 处理来自 FastAPI 的任务)
+  Client: python examples/10_fastapi_integration/01_fastapi_celery.py
+    (使用 TestClient 模拟 HTTP 请求和任务轮询)
+预期现象:
+  - POST 请求立即返回任务 ID，不阻塞 HTTP 响应
+  - GET 请求轮询任务状态，从 PENDING 变为 SUCCESS
+  - TestClient 演示完整的异步任务生命周期
+生产提醒:
+  - 生产环境建议将 Celery app 抽取到独立模块，便于 worker/beat/Flower 统一管理
+  - 避免在 HTTP 请求处理中调用 result.get()，会阻塞整个 Web 服务
+技术要点:
+  - asyncio.to_thread() 将同步 Celery 调用包装为异步操作
+  - lifespan 管理应用启动和关闭时的资源初始化
+  - TestClient 提供同步接口测试异步 FastAPI 应用
 """
 
 from __future__ import annotations
@@ -96,16 +110,18 @@ async def create_notification_task(user_id: int, message: str) -> dict[str, str]
 async def get_task_status(task_id: str) -> dict[str, Any]:
     """轮询任务状态"""
     result = AsyncResult(task_id, app=celery_app)
+    status = await asyncio.to_thread(lambda: result.status)
+    ready = await asyncio.to_thread(result.ready)
     response: dict[str, Any] = {
         "task_id": task_id,
-        "status": result.status,
-        "ready": result.ready(),
+        "status": status,
+        "ready": ready,
     }
-    if result.ready():
-        if result.successful():
-            response["result"] = result.get()
+    if ready:
+        if await asyncio.to_thread(result.successful):
+            response["result"] = await asyncio.to_thread(lambda: result.result)
         else:
-            response["error"] = str(result.result)
+            response["error"] = await asyncio.to_thread(lambda: str(result.result))
     return response
 
 
@@ -134,7 +150,7 @@ async def main() -> None:
             status_data = resp2.json()
             if status_data.get("ready"):
                 break
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
         print(f"  📤 请求: GET /tasks/{task_id}")
         print(f"  📥 响应 [{resp2.status_code}]: {status_data}")
         print()
@@ -158,7 +174,7 @@ async def main() -> None:
             notif_status = resp4.json()
             if notif_status.get("ready"):
                 break
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
         print(f"  📤 请求: GET /tasks/{notif_task_id}")
         print(f"  📥 响应 [{resp4.status_code}]: {notif_status}")
         print()
@@ -172,10 +188,10 @@ async def main() -> None:
 
     # 生产部署说明
     print("── 生产部署架构 ──")
-    print("  💡 FastAPI:  uvicorn app:api --host 0.0.0.0 --port 8000")
-    print("  💡 Worker:   celery -A app worker --loglevel=info -c 4")
-    print("  💡 Beat:     celery -A app beat --loglevel=info")
-    print("  💡 Flower:   celery -A app flower --port=5555")
+    print("  💡 FastAPI:  uvicorn myproj.api:app --host 0.0.0.0 --port 8000")
+    print("  💡 Worker:   celery -A myproj.celery_app:app worker --loglevel=info -c 4")
+    print("  💡 Beat:     celery -A myproj.celery_app:app beat --loglevel=info")
+    print("  💡 Flower:   celery -A myproj.celery_app:app flower --port=5555")
 
 
 if __name__ == "__main__":

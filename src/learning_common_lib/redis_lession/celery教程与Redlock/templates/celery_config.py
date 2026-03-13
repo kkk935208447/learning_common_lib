@@ -36,6 +36,10 @@ class CeleryConfig:
         "CELERY_RESULT_BACKEND",
         "redis://:123456@localhost:6379/1",
     )
+    redis_lock_url: str = os.getenv(
+        "REDIS_LOCK_URL",
+        "redis://:123456@localhost:6379/2"
+    )
 
     # --- 序列化与时区 ---
     accept_content: list[str] = ["json"]

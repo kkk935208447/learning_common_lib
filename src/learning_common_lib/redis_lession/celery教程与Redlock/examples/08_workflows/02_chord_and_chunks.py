@@ -2,6 +2,8 @@
 目标: Chord 和 Chunks 工作流 — 并行计算+回调聚合、批量分块处理
 关键 API: chord(), chunks(), group(), callback
 Python 版本: 3.11+
+目录导航:
+  - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
     celery -A examples.08_workflows.02_chord_and_chunks worker -l info -P solo

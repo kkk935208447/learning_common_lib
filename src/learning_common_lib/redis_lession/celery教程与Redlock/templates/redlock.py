@@ -62,7 +62,7 @@ def distributed_lock(
             process_order(12345)
     """
     from redis.lock import Lock
-    lock = Lock(redis_client, name, timeout=timeout, blocking_timeout=blocking_timeout)
+    lock = Lock(redis_client, name, timeout=timeout)
 
     acquired = lock.acquire(blocking=True, blocking_timeout=blocking_timeout)
     if not acquired:
@@ -110,7 +110,7 @@ async def async_distributed_lock(
             await process_order(12345)
     """
     from redis.asyncio.lock import Lock
-    lock = Lock(redis_client, name, timeout=timeout, blocking_timeout=blocking_timeout)
+    lock = Lock(redis_client, name, timeout=timeout)
 
     acquired = await lock.acquire(blocking=True, blocking_timeout=blocking_timeout)
     if not acquired:
