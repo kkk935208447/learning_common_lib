@@ -11,6 +11,8 @@
 - broker 和 backend 使用不同 Redis db（db=0 / db=1），避免 key 冲突
 - 连接串从环境变量读取，不硬编码密码
 - 设置 `result_expires`（推荐 3600s），防止 Redis 内存无限增长
+- `task_acks_late` 与 `broker_transport_options` 分开理解：前者是 ack 时机，后者是 broker 传输层行为
+- Redis broker 可按需设置 `broker_transport_options = {"visibility_timeout": 3600}`
 - 设置 `task_soft_time_limit` 和 `task_time_limit`，防止任务永远挂起
 
 ## 2. 任务定义
@@ -78,10 +80,11 @@
 ## 9. 分布式锁
 
 - 锁超时（timeout）必须大于任务最大执行时间，否则锁提前释放导致并发问题
-- 使用 redis-py 内置 `Lock`（基于 Lua 脚本，原子性有保证）
+- 教程基础篇可先用 redis-py 内置 `Lock` 理解原理
+- 企业模板默认使用 `python-redis-lock`，优先开启 `auto_renewal=True`
 - 锁名使用业务语义：`lock:order:{order_id}`，不要用 UUID
 - 获取锁失败时快速失败（抛异常），不要无限等待
-- 释放锁时校验 owner token（redis-py Lock 默认行为）
+- 长任务不要只依赖固定 TTL；看门狗续期更适合 Celery worker
 
 ## 10. FastAPI 集成
 

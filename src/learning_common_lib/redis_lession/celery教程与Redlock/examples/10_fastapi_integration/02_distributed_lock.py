@@ -1,10 +1,12 @@
 """
-目标: 演示 Redis 分布式锁机制与竞争处理 (Redis Distributed Lock & Competition)
+目标: 演示单 Redis 分布式锁机制与竞争处理 (Single Redis Distributed Lock & Competition)
 关键 API: redis.lock.Lock, acquire(), release(), timeout
 运行方式:
-  Client: python examples/10_fastapi_integration/02_redlock_distributed.py
+  Client: python examples/10_fastapi_integration/02_distributed_lock.py
 预期现象: 演示锁获取、释放、超时、竞争等分布式锁核心机制
-生产提醒: 锁超时必须大于任务最大执行时间，使用 db=2 避免与 Celery 冲突
+生产提醒:
+  - 服务可以是分布式部署的，锁底座仍然可以是单 Redis
+  - 锁超时必须大于任务最大执行时间，使用 db=2 避免与 Celery 冲突
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from celery import Celery
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.10_fastapi_integration.02_redlock_distributed",
+    "examples.10_fastapi_integration.02_distributed_lock",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
@@ -54,7 +56,7 @@ def process_order_with_lock(self: Any, order_id: str) -> dict[str, str]:
 
 # ── 4. 入口 ──
 async def main() -> None:
-    print("🚀 Redis 分布式锁示例 (真实 Redis)\n")
+    print("🚀 单 Redis 分布式锁示例 (真实 Redis)\n")
 
     # 验证 Redis 连接
     print("── 验证 Redis 连接 ──")
@@ -152,24 +154,22 @@ async def main() -> None:
             print(f"  结果: {f.result()}")
     print()
 
-    # Redlock 算法说明
-    print("── Redlock 算法说明 ──")
-    print("  📋 单 Redis 实例: 使用 redis-py Lock (本教程)")
-    print("  📋 多 Redis 实例: 使用 Redlock 算法 (pottery / redis-lock)")
+    # 工程化说明
+    print("── 工程化说明 ──")
+    print("  📋 本教程主线: 单 Redis 实例 + 多服务实例共享同一把锁")
+    print("  📋 这已经是分布式锁，因为互斥对象是分布式部署的多个 worker / service 实例")
+    print("  📋 如果你想要更高层封装，可以参考 pottery 一类库，但不属于本教程主线")
     print()
 
     # 生产实现方式
     print("── 生产实现方式 ──")
-    print("  💡 方式一: redis-py Lock (单实例)")
+    print("  💡 方式一: redis-py Lock (教程基础篇)")
     print("     lock = redis.Redis(...).lock('resource', timeout=30)")
     print("     with lock:")
     print("         do_work()")
     print()
-    print("  💡 方式二: Redlock (多 Redis 实例)")
-    print("     from pottery import Redlock")
-    print("     lock = Redlock(key='resource', masters={r1, r2, r3})")
-    print("     with lock:")
-    print("         do_work()")
+    print("  💡 方式二: 类似 pottery 的高层封装")
+    print("     核心目标仍然是把单 Redis 锁包装成更清晰的 API 和异常语义")
     print()
     print("  💡 方式三: Celery 任务去重")
     print("     @app.task(bind=True)")

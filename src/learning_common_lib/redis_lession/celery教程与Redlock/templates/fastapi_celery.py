@@ -9,7 +9,7 @@
 集成模式:
   FastAPI lifespan → 初始化 Celery App + Redis 连接
   Depends(get_celery) → 注入 Celery App
-  Depends(get_redis) → 注入 Redis 客户端（用于 Redlock）
+  Depends(get_redis) → 注入同步 Redis 客户端（用于企业级分布式锁）
   send_task() → asyncio.to_thread 包装，不阻塞事件循环
   GET /tasks/{task_id}/status → 轮询任务执行状态
 """
@@ -18,21 +18,24 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
+from fastapi import Request
+
 try:
-    from .celery_app import create_celery_app, get_celery_app, init_celery_app
+    from .celery_app import init_celery_app
     from .celery_config import CeleryConfig
-    from .redlock import distributed_lock, async_distributed_lock
+    from .distributed_lock import async_distributed_lock
 except ImportError:
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from templates.celery_app import create_celery_app, get_celery_app, init_celery_app  # type: ignore[no-redef]
+    from templates.celery_app import init_celery_app  # type: ignore[no-redef]
     from templates.celery_config import CeleryConfig  # type: ignore[no-redef]
-    from templates.redlock import distributed_lock, async_distributed_lock  # type: ignore[no-redef]
+    from templates.distributed_lock import async_distributed_lock  # type: ignore[no-redef]
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +76,12 @@ async def celery_lifespan(app: Any) -> AsyncGenerator[None, None]:
         from fastapi import FastAPI
         app = FastAPI(lifespan=celery_lifespan)
     """
-    import redis.asyncio as aioredis
+    import redis
 
     # 启动阶段
     celery_app = init_celery_app(name="web", config=CeleryConfig)
     redis_url = CeleryConfig.redis_lock_url  # 使用专用锁 Redis 连接
-    redis_client = aioredis.from_url(redis_url, decode_responses=True)
+    redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
 
     setattr(app.state, _CELERY_STATE_KEY, celery_app)
     setattr(app.state, _REDIS_STATE_KEY, redis_client)
@@ -88,7 +91,7 @@ async def celery_lifespan(app: Any) -> AsyncGenerator[None, None]:
         yield
     finally:
         # 关闭阶段
-        await redis_client.aclose()
+        await asyncio.to_thread(redis_client.close)
         setattr(app.state, _CELERY_STATE_KEY, None)
         setattr(app.state, _REDIS_STATE_KEY, None)
         print("🔌 Celery App + Redis 连接已释放")
@@ -99,7 +102,7 @@ async def celery_lifespan(app: Any) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 
-def get_celery(request: Any) -> Any:
+def get_celery(request: Request) -> Any:
     """FastAPI Depends 注入 Celery App。
 
     用法:
@@ -113,8 +116,8 @@ def get_celery(request: Any) -> Any:
     return celery_app
 
 
-def get_redis(request: Any) -> Any:
-    """FastAPI Depends 注入 Redis 客户端（用于 Redlock 等场景）。
+def get_redis(request: Request) -> Any:
+    """FastAPI Depends 注入同步 Redis 客户端（用于分布式锁等场景）。
 
     用法:
         @app.post("/orders/{order_id}/lock")
@@ -226,8 +229,8 @@ def _demo() -> None:
     print("   # GET /tasks/{task_id}/status → {'task_id': '...', 'status': 'SUCCESS', 'result': ...}")
     print()
 
-    print("5️⃣  Redlock 集成:")
-    print("   from templates.redlock import async_distributed_lock")
+    print("5️⃣  分布式锁集成:")
+    print("   from templates.distributed_lock import async_distributed_lock")
     print("   @app.post('/orders/{order_id}/process')")
     print("   async def process(order_id: str, redis=Depends(get_redis)):")
     print("       async with async_distributed_lock(redis, f'order:{order_id}'):")

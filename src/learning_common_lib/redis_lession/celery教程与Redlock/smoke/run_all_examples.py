@@ -1,5 +1,5 @@
 """
-Celery 教程与 Redlock 分布式锁 smoke 测试
+Celery 教程与 Redis 分布式锁 smoke 测试
 
 对每个 example 文件:
   1. 启动 worker 子进程
@@ -28,16 +28,21 @@ import redis as redis_lib
 
 SKIP_FILES = {
     "__init__.py",
+    "redlock.py",  # 历史兼容别名，不单独作为模板 demo 运行
 }
 
 # 不需要 worker 的文件（只读配置、只定义 beat_schedule、或纯演示）
 NO_WORKER_NEEDED = {
     "02_config_patterns.py",     # 只读配置，不调度任务
-    "02_redlock_distributed.py",  # 只演示 Redis 锁，不提交 Celery 任务
+    "02_distributed_lock.py",  # 只演示 Redis 锁，不提交 Celery 任务
 }
 
 EXAMPLE_TIMEOUT = 60
 WORKER_STARTUP_WAIT = 5
+
+EXAMPLE_TIMEOUT_OVERRIDES = {
+    "03_watchdog_lock_with_celery.py": 90,
+}
 
 
 def find_py_files(base: Path) -> list[Path]:
@@ -103,9 +108,14 @@ def get_worker_queues(path: Path) -> str | None:
     return None
 
 
+def get_example_timeout(path: Path) -> int:
+    """按文件名返回示例超时时间。"""
+    return EXAMPLE_TIMEOUT_OVERRIDES.get(path.name, EXAMPLE_TIMEOUT)
+
+
 def reset_tutorial_redis() -> None:
     """清空教程专用 Redis DB，避免示例之间互相污染。"""
-    for db in (0, 1):
+    for db in (0, 1, 2):
         client = redis_lib.Redis(
             host="localhost",
             port=6379,
@@ -128,6 +138,7 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
     worker_proc = None
     try:
         reset_tutorial_redis()
+        timeout = get_example_timeout(path)
 
         if needs_worker(path):
             module = get_celery_module(path, base)
@@ -146,7 +157,7 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
             [sys.executable, str(path)],
             capture_output=True,
             text=True,
-            timeout=EXAMPLE_TIMEOUT,
+            timeout=timeout,
             cwd=str(base),
         )
 
@@ -157,7 +168,7 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
             return (str(path), False, f"exit code {result.returncode}: {err}")
 
     except subprocess.TimeoutExpired:
-        return (str(path), False, f"TIMEOUT after {EXAMPLE_TIMEOUT}s")
+        return (str(path), False, f"TIMEOUT after {timeout}s")
     except Exception as exc:
         return (str(path), False, f"ERROR: {exc}")
     finally:
@@ -180,17 +191,17 @@ def main() -> None:
         sys.exit(1)
 
     # 验证 Redis 连接
-    print("验证 Redis 连接...")
+    print("验证 Redis 连接...", flush=True)
     try:
         r = redis_lib.Redis(host="localhost", port=6379, password="123456", db=0, socket_connect_timeout=3)
         r.ping()
-        print("✅ Redis 连接正常\n")
+        print("✅ Redis 连接正常\n", flush=True)
     except Exception as e:
-        print(f"❌ Redis 连接失败: {e}")
-        print("请确保 Redis 已启动（密码 123456）")
+        print(f"❌ Redis 连接失败: {e}", flush=True)
+        print("请确保 Redis 已启动（密码 123456）", flush=True)
         sys.exit(1)
 
-    print(f"找到 {len(all_files)} 个 Python 文件\n")
+    print(f"找到 {len(all_files)} 个 Python 文件\n", flush=True)
 
     passed = 0
     failed = 0
@@ -200,33 +211,35 @@ def main() -> None:
     started = time.perf_counter()
 
     for path in all_files:
+        rel_path = str(path.relative_to(base))
+        print(f"RUN   {rel_path}", flush=True)
         name, ok, msg = run_one(path, base)
         rel_path = str(Path(name).relative_to(base))
 
         if msg == "SKIPPED":
-            print(f"  SKIP  {rel_path}")
+            print(f"  SKIP  {rel_path}", flush=True)
             skipped += 1
         elif ok:
             w = " (w/ worker)" if needs_worker(path) else ""
-            print(f"  PASS  {rel_path}{w}")
+            print(f"  PASS  {rel_path}{w}", flush=True)
             passed += 1
         else:
-            print(f"  FAIL  {rel_path}")
+            print(f"  FAIL  {rel_path}", flush=True)
             failed += 1
             failures.append((rel_path, msg))
 
     elapsed = time.perf_counter() - started
 
-    print(f"\n{'='*60}")
-    print(f"结果: {passed} 通过, {failed} 失败, {skipped} 跳过")
-    print(f"耗时: {elapsed:.1f}s")
+    print(f"\n{'='*60}", flush=True)
+    print(f"结果: {passed} 通过, {failed} 失败, {skipped} 跳过", flush=True)
+    print(f"耗时: {elapsed:.1f}s", flush=True)
 
     if failures:
-        print(f"\n失败详情:")
+        print(f"\n失败详情:", flush=True)
         for name, msg in failures:
-            print(f"\n  {name}:")
+            print(f"\n  {name}:", flush=True)
             for line in msg.strip().split("\n"):
-                print(f"    {line}")
+                print(f"    {line}", flush=True)
 
     sys.exit(1 if failed else 0)
 

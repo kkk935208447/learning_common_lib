@@ -110,7 +110,7 @@ chunks:   [item1, item2, ..., itemN]
           → ...
 ```
 
-## Redlock 分布式锁
+## Redis 分布式锁（单 Redis, 服务分布式部署）
 
 ```
 ┌──────────┐                        ┌──────────┐
@@ -127,10 +127,13 @@ chunks:   [item1, item2, ..., itemN]
 2. 成功 → 执行业务逻辑 → DEL key 释放锁
 3. 失败 → 抛出 LockAcquireError 或等待重试
 
-redis-py Lock 内部实现:
-- 使用 Lua 脚本保证原子性
-- 支持自动续期（extend）
-- 释放时校验 owner token，防止误删他人锁
+教程基础篇:
+- 使用 redis-py Lock 讲解 SET NX EX + 释放语义
+
+企业模板:
+- 使用 python-redis-lock
+- 支持 auto_renewal 看门狗续期
+- 更适合 Celery 长任务
 ```
 
 ## Worker 生命周期
@@ -191,4 +194,4 @@ Producer                    Broker (Redis)              Worker
 | 调度层 | Beat、动态 | 07 章 | — |
 | 编排层 | chain/group/chord | 08 章 | — |
 | 监控层 | 信号、Flower | 09 章 | — |
-| 集成层 | FastAPI、Redlock | 10 章 | `fastapi_celery.py`, `redlock.py` |
+| 集成层 | FastAPI、Redis 分布式锁 | 10 章 | `fastapi_celery.py`, `distributed_lock.py` |

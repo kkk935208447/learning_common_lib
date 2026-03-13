@@ -10,7 +10,7 @@
   │   ├── TaskTimeoutError        — 任务超时
   │   ├── TaskRateLimitError      — 触发限流
   │   ├── ExternalServiceError    — 外部服务调用失败
-  │   └── LockAcquireError        — Redlock 获取失败
+  │   └── LockAcquireError        — 分布式锁获取失败
   └── TaskFatalError (不可重试)
 
 与 Celery 内置异常的映射:
@@ -81,7 +81,7 @@ class ExternalServiceError(TaskRetryableError):
 
 
 class LockAcquireError(TaskRetryableError):
-    """Redlock 分布式锁获取失败。"""
+    """分布式锁获取失败。"""
     pass
 
 

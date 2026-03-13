@@ -1,4 +1,9 @@
-# 分布式锁原理与队列关系指南
+# 单 Redis 分布式锁原理与队列关系指南
+
+配套文件：
+- 基础示例：`examples/10_fastapi_integration/02_distributed_lock.py`
+- 企业示例：`examples/10_fastapi_integration/03_watchdog_lock_with_celery.py`
+- 企业模板：`templates/distributed_lock.py`
 
 ## Part 1: Redis 分布式锁原理
 
@@ -26,7 +31,7 @@ else
 end
 ```
 
-### redis-py Lock 类实现
+### redis-py Lock 类实现（基础篇）
 
 redis-py 的 `Lock` 类内部实现：
 
@@ -39,11 +44,12 @@ redis-py 的 `Lock` 类内部实现：
 
 - **Java Redisson**: 有自动续期机制
 - **redis-py**: 无自动续期，需合理设置 timeout
-- **生产建议**: timeout 应大于任务最大执行时间
+- **python-redis-lock**: 支持 `auto_renewal=True`，适合长任务
+- **生产建议**: Celery 长任务优先使用带自动续期的锁封装
 
-### 单实例 vs 多实例
+### 单 Redis 锁 vs 多节点 Redlock
 
-#### 单实例 Lock（本教程使用）
+#### 单 Redis 锁（本教程主线）
 ```python
 import redis
 client = redis.Redis(host="localhost", port=6379, db=2)
@@ -53,7 +59,7 @@ with lock:
     do_work()
 ```
 
-#### 多实例 Redlock 算法
+#### 多节点 Redlock 算法（扩展话题，不是本教程主线）
 ```python
 from pottery import Redlock
 masters = {redis1, redis2, redis3}
@@ -62,13 +68,18 @@ with lock:
     do_work()
 ```
 
-### Redlock 争议
+### 为什么本教程主线不展开 Redlock
 
-Martin Kleppmann vs Antirez 之争的核心观点：
+- 大多数业务真正需要的是“多服务实例之间互斥”，单 Redis 锁已经能覆盖
+- 引入多节点 Redlock 会明显提高理解与运维复杂度
+- 因此本教程主线聚焦单 Redis 分布式锁，把多节点方案作为扩展阅读
 
-- **Kleppmann**: Redlock 在网络分区、时钟偏移场景下不安全
-- **Antirez**: 实际生产环境中 Redlock 足够可靠
-- **共识**: 单 Redis 实例的 Lock 对大多数场景已足够
+### 为什么企业模板选 python-redis-lock
+
+- Celery 长任务经常明显超过初始锁 TTL
+- 固定 TTL 容易在任务未完成时提前失锁
+- `python-redis-lock` 的 `auto_renewal=True` 能通过后台线程持续续期
+- 因此教程基础篇用 `redis-py` 讲原理，企业模板直接用 `python-redis-lock`
 
 ## Part 2: Celery 队列与分布式锁的关系
 
@@ -166,7 +177,7 @@ report_app = Celery(broker="redis://report-redis:6379/0")
 
 ## 总结
 
-1. **分布式锁**: 基于 SET NX EX + Lua 脚本实现，redis-py Lock 类已封装
+1. **分布式锁**: 教程基础篇用 `redis-py Lock` 讲原理，企业模板用 `python-redis-lock` 提供自动续期
 2. **队列与锁**: 技术上正交，建议 db 隔离（broker=0, backend=1, lock=2）
 3. **多队列**: 逻辑隔离满足大多数场景，物理隔离仅用于特殊需求
 4. **生产建议**: 合理设置锁超时，监控 Redis 内存使用，定期清理过期数据

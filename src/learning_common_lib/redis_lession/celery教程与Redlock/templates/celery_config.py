@@ -7,6 +7,7 @@
 配置分组:
   序列化与时区: accept_content, task_serializer, result_serializer, timezone, enable_utc
   超时与限流: task_soft_time_limit, task_time_limit, task_default_rate_limit
+  Broker 传输层: broker_transport_options
   连接池与结果: broker_pool_limit, result_expires
   并发与预取: worker_concurrency, worker_prefetch_multiplier
   可靠投递: task_acks_late, task_reject_on_worker_lost
@@ -58,6 +59,11 @@ class CeleryConfig:
     task_default_rate_limit: str = "100/m"  # 每分钟 100 次
 
     # --- 连接池与结果 ---
+    # visibility_timeout 影响未确认消息多久后重新对其他 worker 可见，
+    # 它是 broker 传输层配置，不替代 task_acks_late。
+    broker_transport_options: dict[str, int] = {
+        "visibility_timeout": 3600,
+    }
     broker_pool_limit: int = 10       # Broker 连接池上限
     result_expires: int = 3600        # 结果过期时间（秒）
 

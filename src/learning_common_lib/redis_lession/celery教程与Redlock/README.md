@@ -1,8 +1,13 @@
-# Celery 教程与 Redlock 分布式锁
+# Celery 教程与 Redis 分布式锁
 
 ## 定位
 
 从零掌握 Celery 分布式任务队列 + Redis 分布式锁，覆盖配置、任务定义、调用、结果、重试、路由、定时、工作流、监控、FastAPI 集成共 10 章渐进式示例，外加一套企业级可复用模板。
+
+说明：
+- 当前目录名仍然保留历史名称 `celery教程与Redlock`
+- 教程主线讨论的是“服务分布式部署，但锁底座是单 Redis”的分布式锁
+- 不把多 Redis 节点的 Redlock 算法作为本教程主线
 
 ## 适合谁
 
@@ -17,6 +22,7 @@
 | Python | 3.11+ | 运行环境 |
 | celery[redis] | 5.3+ | 任务队列 + Redis broker/backend |
 | redis | 5.0+ | redis-py（内置 Lock 支持） |
+| python-redis-lock | 4.0+ | 企业级分布式锁自动续期 |
 | flower | 2.0+ | 第 9 章监控 |
 | fastapi | 0.100+ | 第 10 章集成 |
 | uvicorn | 0.20+ | 第 10 章集成 |
@@ -31,7 +37,7 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # 应返回 PONG
 python -c "import redis; print(redis.Redis(host='localhost', port=6379, password='123456').ping())"
 
 # 2. 安装依赖
-uv add "celery[redis]" "redis>=5.0" flower fastapi uvicorn
+uv add "celery[redis]" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
 ```
 
 ## 终端查看后台开启的 celery 进程
@@ -55,7 +61,7 @@ celery教程与Redlock/
 ├── smoke/
 │   └── run_all_examples.py  ← 一键验证所有示例
 ├── examples/
-│   ├── 01_app_and_config/   ← Celery 实例与配置
+│   ├── 01_app_and_config/   ← Celery 实例与配置（含 acks_late 运行时示例）
 │   ├── 02_task_definition/  ← 任务定义
 │   ├── 03_task_invocation/  ← 任务调用
 │   ├── 04_result_backend/   ← 结果后端
@@ -64,19 +70,16 @@ celery教程与Redlock/
 │   ├── 07_periodic_tasks/   ← 定时任务
 │   ├── 08_workflows/        ← 工作流编排
 │   ├── 09_signals_and_monitoring/ ← 信号与监控
-│   └── 10_fastapi_integration/   ← FastAPI + Redlock
+│   └── 10_fastapi_integration/   ← FastAPI + Redis 分布式锁（基础篇 + 企业篇）
 └── templates/
-    ├── tutorial/            ← 教程专用简化模板
-    │   ├── simple_celery.py     ← 简化 Celery 配置
-    │   ├── simple_redlock.py    ← 简化分布式锁
-    │   └── simple_fastapi.py    ← 简化 FastAPI 集成
-    └── enterprise/          ← 企业级生产模板
-        ├── celery_config.py     ← 生产级配置
-        ├── celery_app.py        ← App 工厂 + 异步包装
-        ├── task_base.py         ← 基础任务类
-        ├── error_handling.py    ← 异常层级树
-        ├── redlock.py           ← 分布式锁
-        └── fastapi_celery.py    ← FastAPI 集成
+    ├── __init__.py          ← 公开 API 导出
+    ├── celery_config.py     ← 生产级配置
+    ├── celery_app.py        ← App 工厂 + 异步包装
+    ├── error_handling.py    ← 异常层级树
+    ├── task_base.py         ← 基础任务类
+    ├── distributed_lock.py  ← 企业级 python-redis-lock 分布式锁模板
+    ├── redlock.py           ← 历史兼容别名
+    └── fastapi_celery.py    ← FastAPI 集成
 ```
 
 ## 快速开始
@@ -149,7 +152,7 @@ celery -A myproj worker -l info
 
 | 章 | 主题 | 核心知识点 |
 |----|------|-----------|
-| 01 | App 与配置 | Celery 实例创建、broker/backend 角色、配置方式对比 |
+| 01 | App 与配置 | Celery 实例创建、broker/backend 角色、配置方式对比、`acks_late` 与 `broker_transport_options` 区别 |
 | 02 | 任务定义 | @app.task 参数、bind=True、序列化约束 |
 | 03 | 任务调用 | delay/apply_async、Signature、countdown/ETA |
 | 04 | 结果后端 | AsyncResult 状态机、result_expires |
@@ -158,7 +161,11 @@ celery -A myproj worker -l info
 | 07 | 定时任务 | Celery Beat、crontab、动态调度 |
 | 08 | 工作流 | chain/group/chord/chunks |
 | 09 | 信号与监控 | task signals、Flower、自定义事件 |
-| 10 | FastAPI 集成 | 触发任务/轮询状态/Redlock 分布式锁 |
+| 10 | FastAPI 集成 | 触发任务/轮询状态/Redis 分布式锁 |
+
+第 10 章中的锁示例分为两层：
+- `02_distributed_lock.py`：基础篇，使用 `redis-py Lock`
+- `03_watchdog_lock_with_celery.py`：企业篇，使用 `python-redis-lock` + Celery 长任务
 
 ## Redis 连接约定
 
