@@ -35,12 +35,13 @@ class User(Base):
     # Mapped[int] 声明 Python 类型，mapped_column() 声明数据库列属性
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), comment="用户名")
-    email: Mapped[str] = mapped_column(String(100), unique=True, comment="邮箱")
+    email: Mapped[str] = mapped_column(String(100), unique=True, comment="邮箱")  # unique=True 的含义：在数据库层面为这一列添加唯一约束（UNIQUE constraint），比如 email 设为 unique=True 后，如果你插入第二个相同 email 的用户，数据库会抛出唯一约束错误。
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), comment="创建时间"
     )
 
     def __repr__(self) -> str:
+        # !r 相当于用 repr() 打印，更适合调试（会带引号等）
         return f"<User(id={self.id}, name={self.name!r}, email={self.email!r})>"
 
 
@@ -54,8 +55,9 @@ async def main() -> None:
         await conn.run_sync(Base.metadata.create_all)
     print("表已创建")
 
-    # ── 4. 创建 session 工厂 ──
-    async_session = async_sessionmaker(engine, expire_on_commit=False)
+    # ── 4. 创建 session 工厂 ──。如果只是跑简单 SQL、工具脚本，用 engine.begin() 就够了；如果是业务代码、操作 ORM 模型，推荐使用 AsyncSession（通过 async_sessionmaker 创建），在 session 上管理事务。
+    # async_sessionmaker 是为了操作 ORM 模型。 session.begin()（由 async_sessionmaker 创建的 Session）是更上层的 ORM 会话级事务。 engine.begin() 是偏底层的 连接级事务
+    async_session = async_sessionmaker(engine, expire_on_commit=False)  # expire_on_commit=True：更强调“提交后再访问时，保证是最新数据”，代价是可能多一次查询。 expire_on_commit=False：更强调“提交后对象还能直接用，不再自动查库”，适合很多 Web 接口 / 简单脚本场景。
 
     # ── 5. 插入数据 ──
     async with async_session() as session:

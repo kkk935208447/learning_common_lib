@@ -17,18 +17,18 @@ DATABASE_URL = "mysql+asyncmy://root:123456@localhost:3306/tutorial_db"
 
 async def main() -> None:
     # ── 1. 创建异步引擎 ──
-    engine = create_async_engine(DATABASE_URL, echo=True)
+    engine = create_async_engine(DATABASE_URL, echo=True) # echo=True：将执行的 SQL 语句（以及绑定参数等调试信息）输出到标准输出（一般是终端），方便你在开发/调试时观察实际发出的 SQL。
     print("✅ 异步引擎创建成功")
 
     # ── 2. 使用 connect() 执行只读查询 ──
     # connect() 不会自动提交，需要手动 commit（或仅做读操作）
     async with engine.connect() as conn:
-        result = await conn.execute(text("SELECT 1 AS ping"))
+        result = await conn.execute(text("SELECT 1 AS ping"))  # SELECT 1 AS ping 常用于数据库连通性/心跳检测
         row = result.one()
         print(f"📡 SELECT 1 返回: {row[0]}")
 
     # ── 3. 使用 begin() 执行写操作（自动提交） ──
-    # begin() 会在退出上下文时自动 commit，出异常则 rollback
+    # “开启事务 + 自动提交/回滚”的语法糖，begin() 会在退出上下文时自动 commit，出异常则 rollback
     async with engine.begin() as conn:
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS _engine_demo (

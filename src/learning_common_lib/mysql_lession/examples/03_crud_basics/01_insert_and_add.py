@@ -73,7 +73,7 @@ async def main() -> None:
     # 方式三：session.flush() — 提前拿到 id
     # ══════════════════════════════════════
     async with async_session() as session:
-        async with session.begin():
+        async with session.begin():  # session.begin() 上下文退出时自动 commit
             task_flush = Task(title="需要提前拿 id 的任务", done=False)
             session.add(task_flush)
 
