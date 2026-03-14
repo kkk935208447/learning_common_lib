@@ -145,6 +145,13 @@ uv run python smoke/run_all_examples.py
 - `-c N`: 设置并发数，greenlet/aio pool 示例通常需要显式配置
 - `-Q queue1,queue2`: 指定消费的队列（第 7 章路由示例需要）
 
+默认队列提醒：
+
+- Celery 默认队列通常是 `celery`
+- 如果多个 worker 都监听同一个默认队列，而它们导入的任务集合或 `task_routes` 配置不一致，消息仍可能先被错误 worker 抢到
+- 这时常见表现不是“完全没问题”，而是 `Received unregistered task`、任务积压、错误路由、结果超时
+- 生产环境不要长期依赖默认 `celery` 队列；尽量显式设置 `task_default_queue`，并配合 `task_routes` 和 worker `-Q` 做职责隔离
+
 第 4 章 async worker 示例额外需要：
 - `-P prefork`: 作为传统同步 worker 基线
 - `-P gevent`: 官方 greenlet 并发池
