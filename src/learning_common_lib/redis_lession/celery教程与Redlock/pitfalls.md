@@ -138,7 +138,7 @@ app.conf.timezone = "Asia/Shanghai"
 
 ### 多个 worker 长期共享默认队列 `celery`
 ```python
-# ❌ 默认心智：只要 task name 不同，共享默认队列也没关系
+# ❌ 错误心智：任何不相干的 worker 都能安全共享默认队列
 app = Celery("demo")
 # 未显式设置 task_default_queue 时，默认通常是 celery
 ```
@@ -150,6 +150,7 @@ celery -A service_b worker -l info
 ```
 
 **问题**:
+- 单个 worker 在一个队列里处理多个任务，或多个同构 worker 共享一个队列做扩容，这本来就是正常模式
 - 谁先从队列里取到消息，取决于 broker 层竞争消费，不取决于业务上的“这条任务本来该给谁”
 - 如果 worker 监听了同一个队列，但任务导入不完整、模块不一致、注册表不一致，就会出现 `Received unregistered task`
 - 即使没有立即报错，也会把职责完全不同的流量混到一起，导致扩容、限流、排障都变差

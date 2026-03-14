@@ -148,7 +148,8 @@ uv run python smoke/run_all_examples.py
 默认队列提醒：
 
 - Celery 默认队列通常是 `celery`
-- 如果多个 worker 都监听同一个默认队列，而它们导入的任务集合或 `task_routes` 配置不一致，消息仍可能先被错误 worker 抢到
+- 单个 worker 完全可以在同一个队列里处理多个不同任务；多个 worker 共享同一个队列做横向扩容也是正常模式
+- 真正危险的是多个 worker 监听同一个默认队列，但它们导入的任务集合或 `task_routes` 配置不一致
 - 这时常见表现不是“完全没问题”，而是 `Received unregistered task`、任务积压、错误路由、结果超时
 - 生产环境不要长期依赖默认 `celery` 队列；尽量显式设置 `task_default_queue`，并配合 `task_routes` 和 worker `-Q` 做职责隔离
 
