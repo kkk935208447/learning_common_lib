@@ -46,7 +46,7 @@ import asyncio
 import time
 import uuid
 
-from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
+from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 
 # ── 1. 请求 ID 注入中间件 ──
@@ -107,13 +107,19 @@ broker = ListQueueBroker(
 
 
 @broker.task(task_name="examples.05_middlewares.02_custom_middleware.slow_add")
-async def slow_add(x: int, y: int) -> int:
+async def slow_add(
+    x: int,
+    y: int,
+    context: Context = TaskiqDepends(),
+) -> dict:
     """模拟耗时计算任务。"""
     print(f"📦 Worker 正在执行: slow_add({x}, {y})")
     await asyncio.sleep(0.5)  # 模拟耗时操作
     result = x + y
+    request_id = context.message.labels.get("request_id", "N/A")
+    print(f"   request_id={request_id}")
     print(f"✅ 计算完成: {x} + {y} = {result}")
-    return result
+    return {"sum": result, "request_id": request_id}
 
 
 # ── 5. 客户端发送任务 ──
@@ -123,6 +129,10 @@ async def main() -> None:
     """发送任务，观察 request_id 注入和耗时统计。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: client 侧中间件给消息补 request_id")
+        print("阶段 2: worker 侧中间件读取 request_id 并统计执行耗时")
+        print("=" * 60)
         print("🚀 发送任务: slow_add(10, 20)")
         print("=" * 50)
 
@@ -143,11 +153,11 @@ async def main() -> None:
         print(f"✅ 任务结果   = {result2.return_value}")
         print()
 
-        print("💡 中间件执行顺序:")
-        print("   注册顺序: RequestIdMiddleware → TimingMiddleware")
-        print("   pre_send:    RequestId.pre_send → Timing.pre_send(未定义,跳过)")
-        print("   pre_execute: RequestId.pre_execute → Timing.pre_execute")
-        print("   post_execute: RequestId.post_execute(未定义) → Timing.post_execute")
+        print("中间件执行顺序:")
+        print("  注册顺序: RequestIdMiddleware -> TimingMiddleware")
+        print("  pre_send: RequestId.pre_send -> Timing.pre_send(未定义,跳过)")
+        print("  pre_execute: RequestId.pre_execute -> Timing.pre_execute")
+        print("  post_execute: RequestId.post_execute(未定义) -> Timing.post_execute")
     finally:
         await broker.shutdown()
 

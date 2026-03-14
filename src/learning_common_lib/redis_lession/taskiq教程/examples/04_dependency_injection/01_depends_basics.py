@@ -52,13 +52,22 @@ broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
 ).with_result_backend(result_backend)
 
+DEPENDENCY_STEP = 0
+
+
+def next_step(label: str) -> str:
+    """给依赖解析过程打序号，方便观察运行顺序。"""
+    global DEPENDENCY_STEP
+    DEPENDENCY_STEP += 1
+    return f"[{DEPENDENCY_STEP}] {label}"
+
 
 # ── 2. 定义依赖函数 ──
 
 
 async def get_config() -> dict:
     """获取应用配置 — 模拟从配置中心读取。"""
-    print("🔧 [依赖] 加载应用配置...")
+    print(f"🔧 {next_step('解析依赖 get_config')} -> 加载应用配置")
     return {
         "app_name": "order-service",
         "version": "1.0.0",
@@ -68,7 +77,7 @@ async def get_config() -> dict:
 
 async def get_redis_client() -> dict:
     """获取 Redis 客户端信息 — 模拟连接（不实际连接）。"""
-    print("🔧 [依赖] 获取 Redis 客户端信息...")
+    print(f"🔧 {next_step('解析依赖 get_redis_client')} -> 获取 Redis 客户端信息")
     return {
         "host": "localhost",
         "port": 6379,
@@ -87,6 +96,7 @@ async def process_with_deps(
     redis_info: dict = TaskiqDepends(get_redis_client),
 ) -> dict:
     """处理订单 — 自动注入配置和 Redis 客户端。"""
+    print(f"🧭 {next_step('进入任务 process_with_deps')}")
     print(f"📦 Worker 处理订单: order_id={order_id}")
     print(f"   注入的配置: {config}")
     print(f"   注入的 Redis: {redis_info}")
@@ -95,6 +105,7 @@ async def process_with_deps(
         "app": config["app_name"],
         "redis_connected": redis_info["connected"],
         "status": "completed",
+        "dependency_order": DEPENDENCY_STEP,
     }
 
 
@@ -105,6 +116,9 @@ async def main() -> None:
     """演示：依赖注入基础用法。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: client 只传业务参数，worker 负责补齐依赖")
+        print("=" * 60)
         print("🚀 发送任务（Worker 端将自动注入依赖）...")
         # 客户端只传业务参数，依赖参数由 Worker 端自动注入
         handle = await process_with_deps.kiq(order_id=3001)
@@ -114,10 +128,11 @@ async def main() -> None:
         result = await handle.wait_result(timeout=10)
         print(f"✅ 任务返回值: {result.return_value}")
         print()
-        print("💡 关键点:")
-        print("   - config 和 redis_info 由 Worker 端自动注入，客户端无需传递")
-        print("   - 类比 FastAPI 的 Depends()，TaskIQ 用 TaskiqDepends() 声明依赖")
-        print("   - Celery 没有依赖注入机制，通常需要在任务函数内手动初始化资源")
+        print("对照结论:")
+        print("  - client 侧只发送 order_id=3001")
+        print("  - worker 侧先解析 get_config / get_redis_client，再进入任务函数")
+        print("  - 类比 FastAPI 的 Depends()，TaskIQ 用 TaskiqDepends() 声明依赖")
+        print("  - Celery 没有同等级的内置依赖注入能力")
     finally:
         await broker.shutdown()
 

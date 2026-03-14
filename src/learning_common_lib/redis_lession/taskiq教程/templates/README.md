@@ -4,6 +4,12 @@
 
 提供生产可用的 TaskIQ 基础设施代码，可直接复制到项目中使用。
 
+模板层约定：
+
+- 优先保留薄封装，避免把教学演示逻辑混入生产骨架
+- 默认值强调稳定性和可读性，不追求过度抽象
+- 每个模块都保留 `_demo()`，方便 smoke 和人工单独验证
+
 ## 模块职责
 
 | 模块 | 职责 |
@@ -11,7 +17,7 @@
 | `taskiq_config.py` | 配置 dataclass，环境变量覆盖，broker/backend 工厂方法 |
 | `taskiq_app.py` | Broker 工厂函数 + 单例管理 + `broker_session()` |
 | `error_handling.py` | 异常层级树（TaskRetryableError / TaskFatalError），is_retryable() |
-| `task_base.py` | 任务装饰器工厂 create_task()，通用包装器 safe_execute() |
+| `task_base.py` | 任务装饰器工厂 create_task()，稳定默认 task_name，通用包装器 safe_execute() |
 | `middleware_stack.py` | LoggingMiddleware / RetryMiddleware / SlowTaskWarningMiddleware |
 | `fastapi_taskiq.py` | FastAPI lifespan、get_broker Depends、send_task 辅助 |
 | `__init__.py` | 公开 API 导出，FastAPI 可选依赖处理 |
@@ -57,6 +63,12 @@ async def main():
 Worker 并发、threadpool、大型 CPU 任务建议通过 `taskiq worker` CLI 参数控制，而不是塞进 Broker 配置对象。
 
 `broker_session(...)` 更适合作为模板层和中后期教程里的收敛写法；前期教程仍然建议先理解显式 `startup()` / `shutdown()`。
+
+## 关键默认约定
+
+- `create_task(...)` 默认会生成稳定的 `task_name="<module>.<func_name>"`，避免跨模块撞名
+- `safe_execute(...)` 同时支持 `sync def` 和 `async def`
+- `RetryMiddleware` / `SlowTaskWarningMiddleware` 对脏 labels 会回退到默认值，而不是直接把任务打崩
 
 ## 每个模板都可独立运行
 

@@ -82,6 +82,16 @@ async def main() -> None:
     """演示：发送任务并通过 wait_result() 获取结果。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: 给 Broker 绑定 Result Backend")
+        print("=" * 60)
+        print(f"_broker is broker ? {_broker is broker}")
+        print("解释:")
+        print("  - _broker 只负责消息队列")
+        print("  - with_result_backend(...) 会返回一个新 broker")
+        print("  - 新 broker 同时具备发消息 + 查结果的能力")
+        print()
+
         print("🚀 发送任务: add(3, 7)")
         handle = await add.kiq(3, 7)
         print(f"   task_id = {handle.task_id}")
@@ -89,6 +99,7 @@ async def main() -> None:
 
         # wait_result() 是异步轮询等待结果
         # timeout 单位为秒，超时抛出 TaskiqResultTimeoutError
+        print("阶段 2: 轮询 Result Backend，直到结果可用")
         print("⏳ 异步等待任务结果...")
         result = await handle.wait_result(timeout=10)
 
@@ -105,6 +116,10 @@ async def main() -> None:
             print(f"✅ 任务执行成功! 3 + 7 = {result.return_value}")
         else:
             print(f"❌ 任务执行失败: {result.error}")
+        print()
+        print("对照上一节:")
+        print("  - 01_taskiq_hello.py: 只能发任务，不能拿结果")
+        print("  - 当前示例: handle.wait_result() 可以拿到完整 TaskiqResult")
     finally:
         await broker.shutdown()
 

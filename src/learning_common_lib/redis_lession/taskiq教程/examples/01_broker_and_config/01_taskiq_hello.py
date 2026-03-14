@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import asyncio
 
+from taskiq.exceptions import ResultBackendError
 from taskiq_redis import ListQueueBroker
 
 # ── 1. 创建 Broker ──
@@ -72,6 +73,14 @@ async def main() -> None:
     """演示：发送任务到 Broker。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: 只配置 Broker，不配置 Result Backend")
+        print("=" * 60)
+        print("这意味着:")
+        print("  1. producer 可以正常把消息放进 Redis")
+        print("  2. worker 可以正常消费任务")
+        print("  3. client 不能通过 handle.wait_result() 取回返回值")
+        print()
         print("🚀 发送任务: add(3, 7)")
 
         # kiq() = Kick Into Queue，异步发送任务
@@ -83,10 +92,19 @@ async def main() -> None:
         print(f"   handle   = {handle!r}")
         print()
 
-        # ⚠️ 注意：没有配置 result_backend，无法 wait_result()
-        # 如果尝试 await handle.wait_result()，会抛出异常
-        print("💡 提示: 当前未配置 result_backend，无法获取任务返回值")
-        print("   请参考 02_result_backend.py 了解如何配置 result_backend")
+        print("阶段 2: 故意尝试 wait_result()，观察失败方式")
+        print("⏳ 现在调用 handle.wait_result(timeout=3)")
+        try:
+            await handle.wait_result(timeout=3)
+        except ResultBackendError as exc:
+            print("✅ 预期内失败: 当前 broker 没有 result_backend")
+            print(f"   异常类型 = {type(exc).__name__}")
+            print(f"   异常信息 = {exc}")
+        print()
+        print("对照结论:")
+        print("  - 只要有 broker，任务就能发送")
+        print("  - 但没有 result_backend，client 无法拿到返回值")
+        print("  - 下一节 02_result_backend.py 会补齐这一块能力")
     finally:
         await broker.shutdown()
 

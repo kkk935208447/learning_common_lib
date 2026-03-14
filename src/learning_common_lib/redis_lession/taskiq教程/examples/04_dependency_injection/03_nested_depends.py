@@ -52,6 +52,8 @@ broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
 ).with_result_backend(result_backend)
 
+RESOLUTION_TRACE: list[str] = []
+
 
 # ── 2. 定义嵌套依赖链 ──
 # 依赖关系: get_db_url → get_db_session → task
@@ -60,6 +62,9 @@ broker = ListQueueBroker(
 
 async def get_db_url() -> str:
     """底层依赖 — 提供数据库连接 URL。"""
+    if RESOLUTION_TRACE:
+        RESOLUTION_TRACE.clear()
+    RESOLUTION_TRACE.append("get_db_url")
     print("🔧 [依赖层1] 获取数据库 URL...")
     return "postgresql://user:pass@localhost:5432/mydb"
 
@@ -73,6 +78,7 @@ async def get_db_session(
     yield 值: 注入到任务的对象
     yield 后: cleanup（关闭会话）
     """
+    RESOLUTION_TRACE.append("get_db_session.setup")
     # ── setup 阶段 ──
     print(f"🔧 [依赖层2] 创建数据库会话, url={db_url}")
     session = {"url": db_url, "session_id": "sess-abc-123", "active": True}
@@ -81,6 +87,7 @@ async def get_db_session(
     yield session  # 注入到任务
 
     # ── cleanup 阶段（任务完成后自动执行） ──
+    RESOLUTION_TRACE.append("get_db_session.cleanup")
     print(f"🧹 [依赖层2] 关闭数据库会话: {session['session_id']}")
     session["active"] = False
     print("✅ [依赖层2] 会话已关闭")
@@ -95,6 +102,7 @@ async def query_orders(
     db_session: dict = TaskiqDepends(get_db_session),
 ) -> dict:
     """查询订单 — 自动注入数据库会话（含嵌套依赖解析）。"""
+    RESOLUTION_TRACE.append("query_orders")
     print(f"📦 Worker 查询订单: customer_id={customer_id}")
     print(f"   使用会话: {db_session['session_id']}")
     print(f"   连接地址: {db_session['url']}")
@@ -109,6 +117,7 @@ async def query_orders(
         "customer_id": customer_id,
         "session_id": db_session["session_id"],
         "orders": orders,
+        "resolution_trace": list(RESOLUTION_TRACE),
     }
 
 
@@ -119,6 +128,10 @@ async def main() -> None:
     """演示：嵌套依赖链与 generator 依赖生命周期。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: TaskIQ 先按依赖拓扑排序解析 get_db_url -> get_db_session")
+        print("阶段 2: query_orders 执行结束后，再回到 generator cleanup")
+        print("=" * 60)
         print("🚀 发送查询任务（Worker 端将自动解析依赖链）...")
         print("   依赖链: get_db_url → get_db_session → query_orders")
         print()
@@ -128,16 +141,16 @@ async def main() -> None:
         print(f"✅ 任务返回值: {result.return_value}")
         print()
 
-        print("💡 依赖生命周期（Worker 端执行顺序）:")
-        print("   1. get_db_url()          → 返回数据库 URL")
-        print("   2. get_db_session()      → setup: 创建会话（yield 前）")
-        print("   3. query_orders()        → 执行任务逻辑")
-        print("   4. get_db_session()      → cleanup: 关闭会话（yield 后）")
+        print("依赖生命周期（Worker 端执行顺序）:")
+        print("  1. get_db_url()          -> 返回数据库 URL")
+        print("  2. get_db_session()      -> setup: 创建会话（yield 前）")
+        print("  3. query_orders()        -> 执行任务逻辑")
+        print("  4. get_db_session()      -> cleanup: 关闭会话（yield 后）")
         print()
-        print("💡 关键点:")
-        print("   - async generator 依赖自动管理资源生命周期（类比 contextmanager）")
-        print("   - 嵌套依赖由 TaskIQ 自动按拓扑顺序解析")
-        print("   - 同一次任务中，相同依赖只调用一次（结果缓存）")
+        print("对照结论:")
+        print("  - async generator 依赖 = setup + yield + cleanup")
+        print("  - 嵌套依赖由 TaskIQ 自动按拓扑顺序解析")
+        print("  - 同一次任务中，相同依赖只调用一次（结果缓存）")
     finally:
         await broker.shutdown()
 

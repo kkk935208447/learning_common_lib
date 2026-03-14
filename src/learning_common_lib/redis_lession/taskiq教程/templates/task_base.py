@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from typing import Any, Callable, TypeVar
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _default_task_name(func: Callable[..., Any]) -> str:
+    """为模板层任务生成稳定的默认 task_name。"""
+    module = getattr(func, "__module__", "__main__")
+    name = getattr(func, "__name__", "task")
+    return f"{module}.{name}"
+
+
 # ---------------------------------------------------------------------------
 # 装饰器工厂
 # ---------------------------------------------------------------------------
@@ -32,6 +40,7 @@ T = TypeVar("T")
 def create_task(
     broker: Any,
     *,
+    task_name: str | None = None,
     queue: str = "default",
     max_retries: int = 3,
     retry_delay: float = 1.0,
@@ -41,6 +50,7 @@ def create_task(
 
     参数:
         broker: TaskIQ Broker 实例
+        task_name: 显式任务名；为空时默认使用 "<module>.<func_name>"
         queue: 队列名称，默认 "default"
         max_retries: 最大重试次数，默认 3
         retry_delay: 重试间隔（秒），默认 1.0
@@ -64,9 +74,10 @@ def create_task(
 
     def decorator(func: Callable) -> Any:
         """将函数注册为 TaskIQ 任务，并附加标准 labels。"""
-        task = broker.task(task_name=func.__name__, **labels)(func)
+        resolved_task_name = task_name or _default_task_name(func)
+        task = broker.task(task_name=resolved_task_name, **labels)(func)
         # 保留原始 labels 供中间件读取
-        task._task_labels = labels
+        task._task_labels = dict(labels)
         return task
 
     return decorator
@@ -82,15 +93,16 @@ async def safe_execute(func: Callable[..., Any], *args: Any, **kwargs: Any) -> A
 
     执行流程:
       1. 记录任务开始日志
-      2. 调用目标协程 func(*args, **kwargs)
-      3. 记录任务完成日志和耗时
+      2. 调用目标函数 func(*args, **kwargs)
+      3. 如果返回 awaitable，则 await 其结果
+      4. 记录任务完成日志和耗时
       4. 异常分类处理:
          - TaskFatalError → 记录错误日志，直接 re-raise（不可重试）
          - TaskRetryableError → 记录警告日志，re-raise（交给中间件决定是否重试）
          - Exception → 包装为 TaskError，记录错误日志后 re-raise
 
     参数:
-        func: 要执行的异步函数
+        func: 要执行的函数，支持 sync def / async def
         *args: 位置参数
         **kwargs: 关键字参数
 
@@ -107,7 +119,9 @@ async def safe_execute(func: Callable[..., Any], *args: Any, **kwargs: Any) -> A
     logger.info("任务开始: %s | args=%s kwargs=%s", task_name, args, kwargs)
 
     try:
-        result = await func(*args, **kwargs)
+        result = func(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
         elapsed = time.monotonic() - start
         logger.info("任务完成: %s | 耗时=%.3fs", task_name, elapsed)
         return result
@@ -152,6 +166,10 @@ def _demo() -> None:
     print("    async def send_email(to: str, subject: str) -> dict:")
     print("        return {'status': 'sent', 'to': to}")
     print()
+    print("  默认 task_name:")
+    print("    <module>.<func_name>")
+    print("  如需固定契约，也可显式传 task_name='orders.send_email'")
+    print()
 
     print("=== safe_execute 包装器 ===")
     print("  用法示例:")
@@ -169,6 +187,12 @@ def _demo() -> None:
 
         result = await safe_execute(dummy_task, 21)
         print(f"  safe_execute(dummy_task, 21) = {result}")
+
+        def sync_task(x: int) -> int:
+            return x + 1
+
+        sync_result = await safe_execute(sync_task, 9)
+        print(f"  safe_execute(sync_task, 9) = {sync_result}")
 
         # 演示异常捕获
         async def failing_task() -> None:

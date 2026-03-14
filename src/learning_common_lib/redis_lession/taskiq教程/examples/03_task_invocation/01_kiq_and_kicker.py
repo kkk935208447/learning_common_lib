@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 
+from taskiq import Context, TaskiqDepends
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 
 # ── 1. 创建 Broker + Result Backend ──
@@ -60,10 +61,23 @@ broker = ListQueueBroker(
 
 
 @broker.task(task_name="examples.03_task_invocation.01_kiq_and_kicker.process_order")
-async def process_order(order_id: int, amount: float) -> dict:
+async def process_order(
+    order_id: int,
+    amount: float,
+    context: Context = TaskiqDepends(),
+) -> dict:
     """处理订单 — 模拟业务逻辑。"""
+    labels = dict(context.message.labels)
     print(f"📦 Worker 处理订单: order_id={order_id}, amount={amount}")
-    result = {"order_id": order_id, "amount": amount, "status": "completed"}
+    print(f"   task_id={context.message.task_id}")
+    print(f"   labels={labels}")
+    result = {
+        "order_id": order_id,
+        "amount": amount,
+        "status": "completed",
+        "task_id": context.message.task_id,
+        "labels": labels,
+    }
     print(f"✅ 订单处理完成: {result}")
     return result
 
@@ -75,11 +89,17 @@ async def main() -> None:
     """演示：kiq() 快捷调用 vs kicker() 高级调用。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("对照目标: kiq() 负责最短路径发送; kicker() 负责先组装再发送")
+        print("=" * 60)
+        print()
+
         # ── 3a. kiq() 快捷调用 ──
         # kiq() 等价于 kicker().kiq()，最简方式发送任务
         print("🚀 [方式一] kiq() 快捷调用")
         handle_simple = await process_order.kiq(order_id=1001, amount=99.9)
         print(f"   task_id = {handle_simple.task_id}")
+        print("   发送时没有额外 labels，也没有自定义 task_id")
 
         result_simple = await handle_simple.wait_result(timeout=10)
         print(f"   返回值  = {result_simple.return_value}")
@@ -87,21 +107,30 @@ async def main() -> None:
 
         # ── 3b. kicker() 高级调用 ──
         print("🚀 [方式二] kicker() 高级调用")
-        handle_advanced = await (
+        advanced_kicker = (
             process_order.kicker()
             .with_labels(priority="high", source="api-gateway")
             .with_task_id("custom-123")
-            .kiq(order_id=2002, amount=199.9)
         )
+        print("   发送前先组装 AsyncKicker:")
+        print("     with_labels(priority='high', source='api-gateway')")
+        print("     with_task_id('custom-123')")
+        handle_advanced = await advanced_kicker.kiq(order_id=2002, amount=199.9)
         print(f"   task_id = {handle_advanced.task_id}")
 
         result_advanced = await handle_advanced.wait_result(timeout=10)
         print(f"   返回值  = {result_advanced.return_value}")
         print()
 
-        print("💡 对比总结:")
-        print("   kiq()    → 快捷发送，适合大多数场景（类比 Celery delay()）")
-        print("   kicker() → 高级发送，可链式配置元数据（类比 Celery apply_async()）")
+        print("对比总结:")
+        print("  kiq()")
+        print("    - 一步完成发送")
+        print("    - 适合大多数普通场景")
+        print("    - worker 看到的 labels 通常较少")
+        print("  kicker()")
+        print("    - 先组装发送参数，再显式 kiq()")
+        print("    - 适合补 task_id、labels、路由元数据")
+        print("    - 更接近 Celery 的 apply_async() 心智模型")
     finally:
         await broker.shutdown()
 
