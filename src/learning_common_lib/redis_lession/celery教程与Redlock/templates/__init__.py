@@ -1,10 +1,17 @@
 """
 Celery 企业级模板包。
 
-提供配置、App 工厂、任务基类、异常体系、分布式锁与 FastAPI 集成能力。
+提供 async-first 的配置、App 工厂、任务基类、分布式锁与 FastAPI 集成能力。
 """
 
-from .celery_app import async_apply, async_delay, create_celery_app, get_celery_app, init_celery_app
+from .celery_app import (
+    CUSTOM_AIO_POOL_CLASS,
+    async_apply,
+    async_delay,
+    create_celery_app,
+    get_celery_app,
+    init_celery_app,
+)
 from .celery_config import CeleryConfig
 from .distributed_lock import async_distributed_lock, distributed_lock, with_lock
 from .error_handling import (
@@ -39,6 +46,7 @@ __all__ = [
     "create_celery_app",
     "init_celery_app",
     "get_celery_app",
+    "CUSTOM_AIO_POOL_CLASS",
     "async_delay",
     "async_apply",
     "TaskError",

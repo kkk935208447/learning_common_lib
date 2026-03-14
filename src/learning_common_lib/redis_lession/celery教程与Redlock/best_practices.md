@@ -109,7 +109,7 @@
 ## 11. FastAPI 集成
 
 - 使用 lifespan 管理 Celery app 和 Redis 连接的生命周期
-- 任务发布用 `asyncio.to_thread()` 包装，不阻塞 ASGI 事件循环
+- 接受 FastAPI 发布侧继续用 `asyncio.to_thread()` 包装；这只是 Celery 客户端兼容层，不代表 worker 没有 async 化
 - 提供 `/tasks/{task_id}/status` 轮询端点，返回标准化状态
 - 考虑 WebSocket 推送替代轮询（高频场景）
 
@@ -119,7 +119,7 @@
   ```ini
   # /etc/supervisor/conf.d/celery_worker.conf
   [program:celery_worker]
-  command=celery -A myproj.celery_app:app worker -l info -c 4
+  command=celery -A myproj.celery_app:app worker -l info -P custom -c 20 -Q aio_jobs
   autostart=true
   autorestart=true
   stopwaitsecs=600

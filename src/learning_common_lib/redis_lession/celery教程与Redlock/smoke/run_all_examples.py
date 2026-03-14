@@ -29,7 +29,7 @@ import redis as redis_lib
 
 SKIP_FILES = {
     "__init__.py",
-    "redlock.py",  # 历史兼容别名，不单独作为模板 demo 运行
+    "清理redis的代码.py",  # 仅本地运维工具，不是可启动 worker 的教程示例
 }
 
 # 不需要 worker 的文件（只读配置、只定义 beat_schedule、或纯演示）
@@ -106,8 +106,62 @@ WORKER_SPECS = {
             "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
         },
     ],
+    "examples/05_result_backend/01_async_result.py": [
+        {
+            "queues": "aio_results",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/05_result_backend/02_result_expiry.py": [
+        {
+            "queues": "aio_results",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/06_error_handling/01_retry_basics.py": [
+        {
+            "queues": "aio_retries",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/06_error_handling/02_autoretry.py": [
+        {
+            "queues": "aio_autoretry",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
     "examples/07_routing_and_queues/01_task_queues.py": [
         {"queues": "default,email_queue,report_queue,notification_queue"},
+    ],
+    "examples/11_fastapi_integration/01_fastapi_celery.py": [
+        {
+            "queues": "aio_fastapi",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/11_fastapi_integration/03_watchdog_lock_with_celery.py": [
+        {
+            "queues": "aio_watchdog",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
     ],
 }
 

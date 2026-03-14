@@ -98,11 +98,10 @@ celery教程与Redlock/
 └── templates/
     ├── __init__.py          ← 公开 API 导出
     ├── celery_config.py     ← 生产级配置
-    ├── celery_app.py        ← App 工厂 + 异步包装
+    ├── celery_app.py        ← async-first App 工厂 + producer 侧异步包装
     ├── error_handling.py    ← 异常层级树
-    ├── task_base.py         ← 基础任务类
+    ├── task_base.py         ← async-first 任务基类
     ├── distributed_lock.py  ← 企业级 python-redis-lock 分布式锁模板
-    ├── redlock.py           ← 历史兼容别名
     └── fastapi_celery.py    ← FastAPI 集成
 ```
 
@@ -204,13 +203,13 @@ celery -A myproj worker -l info
 | 02 | 任务定义 | @app.task 参数、bind=True、序列化约束 |
 | 03 | 任务调用 | delay/apply_async、Signature、countdown/ETA |
 | 04 | Async Worker | `prefork → gevent → custom aio pool`、`asyncio.run()`、mixed deployment |
-| 05 | 结果后端 | AsyncResult 状态机、result_expires |
-| 06 | 错误与重试 | self.retry()、autoretry_for、指数退避 |
+| 05 | 结果后端 | `custom aio pool + async task` 下的 AsyncResult 状态机、result_expires |
+| 06 | 错误与重试 | `custom aio pool + async task` 下的 self.retry() / autoretry_for / 指数退避 |
 | 07 | 路由与队列 | 多队列分流、task_routes、优先级队列 |
 | 08 | 定时任务 | Celery Beat、crontab、动态调度 |
 | 09 | 工作流 | chain/group/chord/chunks |
 | 10 | 信号与监控 | task signals、Flower、自定义事件 |
-| 11 | FastAPI 集成 | 触发任务/轮询状态/Redis 分布式锁 |
+| 11 | FastAPI 集成 | async-first worker + FastAPI 触发任务/轮询状态/Redis 分布式锁 |
 
 第 11 章中的锁示例分为两层：
 - `02_distributed_lock.py`：基础篇，对比“短任务固定 TTL 正常”与“长任务固定 TTL 失锁”

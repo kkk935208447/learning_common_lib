@@ -7,9 +7,9 @@
     或持锁逻辑跨系统事务边界太长，仍应拆分更小的临界区
 
 锁的三种使用方式:
-  1. distributed_lock()        — 同步上下文管理器
-  2. async_distributed_lock()  — 异步包装版上下文管理器
-  3. @with_lock(name_template)  — 装饰器，支持动态锁名
+  1. async_distributed_lock()   — async-first 主路径
+  2. @with_lock(name_template)  — 装饰器，支持 async def / def
+  3. distributed_lock()         — 同步上下文管理器（兼容同步场景）
 """
 
 from __future__ import annotations
@@ -218,10 +218,10 @@ def _resolve_redis_client(arguments: dict[str, Any], redis_attr: str) -> Any:
 
 
 def _demo() -> None:
-    """演示：基于 python-redis-lock 的企业级分布式锁三种使用方式。"""
+    """演示：基于 python-redis-lock 的 async-first 企业级分布式锁用法。"""
     import redis
 
-    print("🔒 === 企业级单 Redis 分布式锁演示（python-redis-lock） ===\n")
+    print("🔒 === 企业级单 Redis 分布式锁演示（async-first） ===\n")
 
     redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2)
     try:
@@ -232,37 +232,45 @@ def _demo() -> None:
         print("请确保 Redis 运行在 localhost:6379，密码为 123456")
         return
 
-    print("📌 方式一: distributed_lock() 上下文管理器")
-    with distributed_lock(redis_client, "order:12345", timeout=10, auto_renewal=True):
-        print("  📦 临界区: 处理订单 12345")
+    print("📌 方式一: async_distributed_lock() 上下文管理器")
+
+    async def run_async_lock_demo() -> None:
+        async with async_distributed_lock(redis_client, "order:12345", timeout=10, auto_renewal=True):
+            print("  📦 async 临界区: 处理订单 12345")
+
+    asyncio.run(run_async_lock_demo())
     print("  🔓 锁已释放\n")
 
-    print("📌 方式二: @with_lock 装饰器（动态锁名）")
+    print("📌 方式二: @with_lock 装饰器（async def + 动态锁名）")
 
     class OrderService:
         def __init__(self) -> None:
             self.redis_client = redis_client
 
         @with_lock("order:{order_id}", timeout=15, auto_renewal=True)
-        def process_order(self, order_id: str) -> dict[str, str]:
-            print(f"  📦 临界区: 处理订单 {order_id}")
+        async def process_order(self, order_id: str) -> dict[str, str]:
+            await asyncio.sleep(0.05)
+            print(f"  📦 async 临界区: 处理订单 {order_id}")
             return {"order_id": order_id, "status": "done"}
 
     svc = OrderService()
-    print(f"  结果: {svc.process_order('ORD-999')}\n")
+    print(f"  结果: {asyncio.run(svc.process_order('ORD-999'))}\n")
 
     print("📌 方式三: 获取锁失败 → LockAcquireError")
     held_lock = _build_lock(redis_client, "order:conflict", timeout=30, auto_renewal=False)
     held_lock.acquire(blocking=False)
     try:
-        with distributed_lock(
-            redis_client,
-            "order:conflict",
-            timeout=5,
-            blocking_timeout=0.1,
-            auto_renewal=True,
-        ):
-            pass
+        async def fail_to_acquire() -> None:
+            async with async_distributed_lock(
+                redis_client,
+                "order:conflict",
+                timeout=5,
+                blocking_timeout=0.1,
+                auto_renewal=True,
+            ):
+                pass
+
+        asyncio.run(fail_to_acquire())
     except LockAcquireError as exc:
         print(f"  ❌ 捕获 LockAcquireError: {exc}")
         print(f"  detail: {exc.detail}")
@@ -273,7 +281,7 @@ def _demo() -> None:
             pass
 
     redis_client.close()
-    print("\n✅ 企业级单 Redis 分布式锁演示完成")
+    print("\n✅ async-first 企业级单 Redis 分布式锁演示完成")
 
 
 if __name__ == "__main__":

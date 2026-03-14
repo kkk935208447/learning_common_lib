@@ -45,14 +45,14 @@ uv sync
 
 ## 阶段三：结果与容错（第 5-6 章）
 
-> 目标：掌握结果获取与错误恢复策略
+> 目标：在 async-first worker 主线下掌握结果获取与错误恢复策略
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 13 | `examples/05_result_backend/01_async_result.py` | AsyncResult 状态机、get/forget | 通过状态对比知道任务执行到哪了 |
-| 14 | `examples/05_result_backend/02_result_expiry.py` | result_expires 配置 | 防止 Redis 内存爆炸 |
-| 15 | `examples/06_error_handling/01_retry_basics.py` | self.retry/max_retries/countdown | 任务失败不可怕，重试才是关键 |
-| 16 | `examples/06_error_handling/02_autoretry.py` | autoretry_for/retry_backoff | 自动重试更省心 |
+| 13 | `examples/05_result_backend/01_async_result.py` | async task + AsyncResult 状态机、get/forget | 在 async-first worker 下继续理解状态语义 |
+| 14 | `examples/05_result_backend/02_result_expiry.py` | async task + result_expires 配置 | 防止 Redis 内存爆炸 |
+| 15 | `examples/06_error_handling/01_retry_basics.py` | async task + self.retry/max_retries/countdown | 任务失败不可怕，重试才是关键 |
+| 16 | `examples/06_error_handling/02_autoretry.py` | async task + autoretry_for/retry_backoff | 自动重试更省心 |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
@@ -79,7 +79,7 @@ uv sync
 |------|------|--------|-------------|
 | 23 | `examples/10_signals_and_monitoring/01_task_signals.py` | task_prerun/postrun/failure 信号 | 任务生命周期钩子 |
 | 24 | `examples/10_signals_and_monitoring/02_flower_and_events.py` | Flower 监控 + 自定义事件 | 生产可观测性 |
-| 25 | `examples/11_fastapi_integration/01_fastapi_celery.py` | FastAPI + Celery 触发/轮询 | Web 框架集成 |
+| 25 | `examples/11_fastapi_integration/01_fastapi_celery.py` | FastAPI + async-first Celery 触发/轮询 | Web 框架集成 |
 | 26 | `examples/11_fastapi_integration/02_distributed_lock.py` | 固定 TTL 锁的短任务/长任务对比 | 先理解为什么长任务会失锁 |
 | 27 | `examples/11_fastapi_integration/03_watchdog_lock_with_celery.py` | 无看门狗 vs 有看门狗 | 理解看门狗续期真正解决的问题 |
 
@@ -92,11 +92,11 @@ uv sync
 | 顺序 | 文件 | 用途 |
 |------|------|------|
 | 28 | `templates/celery_config.py` | 生产级配置对象 |
-| 29 | `templates/celery_app.py` | App 工厂 + 异步包装 |
+| 29 | `templates/celery_app.py` | async-first App 工厂 + producer 侧兼容包装 |
 | 30 | `templates/error_handling.py` | 异常层级树 |
-| 31 | `templates/task_base.py` | 基础任务类 |
+| 31 | `templates/task_base.py` | async-first 任务基类 |
 | 32 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
-| 33 | `templates/fastapi_celery.py` | FastAPI 集成 |
+| 33 | `templates/fastapi_celery.py` | async-first worker 的 FastAPI 集成 |
 
 ## 建议学习方式
 

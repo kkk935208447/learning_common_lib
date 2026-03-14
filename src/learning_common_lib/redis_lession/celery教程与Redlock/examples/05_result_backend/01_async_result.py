@@ -1,19 +1,22 @@
 """
-目标: 用对比方式理解 AsyncResult 的状态与结果可用性 (AsyncResult by Comparison)
+目标: 用 async task 演示 AsyncResult 的状态与结果可用性 (AsyncResult with async tasks)
 关键概念:
-  - PENDING: 任务未知、结果过期、或尚未完成
-  - SUCCESS / FAILURE: 状态与结果是否可用要一起看
-  - forget(): 删除 backend 结果后，重新查询会回到 PENDING
+  - worker 侧任务已经切到 `custom aio pool + async def task`
+  - AsyncResult 仍然是客户端接口，查询结果时通常需要线程包装
+  - PENDING / SUCCESS / FAILURE / forget 后回到 PENDING 的语义不变
 关键 API: AsyncResult, .get(), .state, .ready(), .successful(), .failed(), .forget()
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
   - 从上级目录: cd examples/05_result_backend
 运行方式:
-  Worker: celery -A examples.05_result_backend.01_async_result worker -l info
-  Client: python examples/05_result_backend/01_async_result.py
+  Worker:
+    CELERY_CUSTOM_WORKER_POOL='celery_aio_pool.pool:AsyncIOPool' \
+    celery -A examples.05_result_backend.01_async_result worker -l info -P custom -Q aio_results -c 20
+  Client:
+    python examples/05_result_backend/01_async_result.py
 预期现象:
-  - 同一个 AsyncResult 接口，在不同状态下会有完全不同的含义
-  - SUCCESS/FAILURE 都属于 ready=True
+  - worker 执行的是 async def task
+  - 状态机语义与同步任务时代一致
   - forget() 删除结果后，重新查询会回到 PENDING
 """
 
@@ -32,21 +35,25 @@ app = Celery(
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
-app.conf.update(task_track_started=True)
+app.conf.update(
+    task_default_queue="aio_results",
+    task_track_started=True,
+)
 
 
 def print_section(title: str) -> None:
     print(f"── {title} ──")
 
 
-@app.task(bind=True)
-def compute(self: Any, x: int, y: int) -> int:
-    print(f"  📦 compute({x}, {y}) 执行中...")
+@app.task(bind=True, name=f"{MODULE}.compute")
+async def compute(self: Any, x: int, y: int) -> int:
+    await asyncio.sleep(0.2)
     return x + y
 
 
-@app.task
-def fail_task() -> None:
+@app.task(bind=True, name=f"{MODULE}.fail_task")
+async def fail_task(self: Any) -> None:
+    await asyncio.sleep(0.1)
     raise ValueError("故意抛出的错误")
 
 
@@ -66,7 +73,7 @@ def print_snapshot(label: str, result: AsyncResult) -> None:
 
 
 async def main() -> None:
-    print("🚀 AsyncResult 状态与结果可用性对比\n")
+    print("🚀 AsyncResult 状态与结果可用性对比（async task）\n")
 
     print_section("场景 A: PENDING 不一定代表“任务在排队”")
     fake_result = AsyncResult("non-existent-id", app=app)
@@ -95,7 +102,7 @@ async def main() -> None:
     err = await asyncio.to_thread(retry_failure.get, timeout=30, propagate=False)
     print(f"  ✅ 失败任务 get(propagate=False): {err!r}")
     print(f"     类型: {type(err).__name__}")
-    print("  结论: 生产里一定要区分“阻塞等待结果”和“失败时是否抛异常”。\n")
+    print("  结论: 即使 worker 已 async-first，结果查询客户端接口仍然主要是同步风格。\n")
 
     print_section("场景 D: forget() 删除结果后，状态会回到 PENDING")
     forget_result = await asyncio.to_thread(compute.delay, 1, 1)

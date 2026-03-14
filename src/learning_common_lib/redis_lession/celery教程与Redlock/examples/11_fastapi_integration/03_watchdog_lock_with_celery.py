@@ -1,40 +1,42 @@
 """
-目标: 在相同参数下对比“无看门狗”和“有看门狗” (Watchdog Comparison)
+目标: 在 async-first worker 中对比“无看门狗”和“有看门狗” (Watchdog Comparison with async task)
 关键概念:
-  - auto_renewal=False: 长任务期间锁可能提前过期
-  - auto_renewal=True: 后台看门狗会持续续期
-  - 关键不是“能不能加锁”，而是“长任务期间锁会不会失效”
-关键 API: templates.distributed_lock.distributed_lock, auto_renewal, redis_lock.Lock
+  - worker 侧任务已经切到 `custom aio pool + async def task`
+  - `auto_renewal=False` 时，长任务中途可能失锁
+  - `auto_renewal=True` 时，看门狗会持续续期
+关键 API: async_distributed_lock, auto_renewal, redis_lock.Lock
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
   - 从上级目录: cd examples/11_fastapi_integration
 运行方式:
-  Worker: celery -A examples.11_fastapi_integration.03_watchdog_lock_with_celery worker -l info -P solo
-  Client: python examples/11_fastapi_integration/03_watchdog_lock_with_celery.py
+  Worker:
+    CELERY_CUSTOM_WORKER_POOL='celery_aio_pool.pool:AsyncIOPool' \
+    celery -A examples.11_fastapi_integration.03_watchdog_lock_with_celery worker -l info -P custom -Q aio_watchdog -c 20
+  Client:
+    python examples/11_fastapi_integration/03_watchdog_lock_with_celery.py
 预期现象:
-  - 同样是 8 秒任务 + 3 秒初始 TTL，无看门狗时中途可被抢锁
+  - 相同参数下，无看门狗时中途可被抢锁
   - 开启看门狗后，中途不可被抢锁
-  - 两个场景都在任务结束后重新拿回锁
+  - 两个场景在任务结束后都应释放锁
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
 import redis
 from celery import Celery, Task
 
 try:
-    from ...templates.distributed_lock import distributed_lock
+    from ...templates.distributed_lock import async_distributed_lock
 except ImportError:
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from templates.distributed_lock import distributed_lock  # type: ignore[no-redef]
+    from templates.distributed_lock import async_distributed_lock  # type: ignore[no-redef]
 
 logging.getLogger("redis_lock").setLevel(logging.ERROR)
 
@@ -45,6 +47,7 @@ app = Celery(
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
+app.conf.task_default_queue = "aio_watchdog"
 
 redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2, decode_responses=True)
 
@@ -53,8 +56,8 @@ def print_section(title: str) -> None:
     print(f"── {title} ──")
 
 
-@app.task(bind=True, name="examples.watchdog_lock.compare")
-def process_order_with_lock_mode(
+@app.task(bind=True, name=f"{MODULE}.process_order_with_lock_mode")
+async def process_order_with_lock_mode(
     self: Task,
     order_id: str,
     work_seconds: int = 8,
@@ -64,7 +67,7 @@ def process_order_with_lock_mode(
     lock_name = f"order:{order_id}"
     mode = "watchdog_on" if auto_renewal else "watchdog_off"
     print(f"  🔒 [{mode}] 准备获取锁: {lock_name}")
-    with distributed_lock(
+    async with async_distributed_lock(
         redis_client,
         lock_name,
         timeout=expire_seconds,
@@ -77,13 +80,14 @@ def process_order_with_lock_mode(
         )
         for index in range(work_seconds):
             print(f"  ⏱️ [{mode}] 第 {index + 1}/{work_seconds} 秒")
-            time.sleep(1)
+            await asyncio.sleep(1)
         return {
             "task_id": self.request.id,
             "order_id": order_id,
             "work_seconds": work_seconds,
             "expire_seconds": expire_seconds,
             "auto_renewal": auto_renewal,
+            "task_shape": "async def",
             "message": "业务执行完成",
         }
 
@@ -131,7 +135,7 @@ async def run_comparison_case(order_id: str, *, auto_renewal: bool) -> dict[str,
 
 
 async def main() -> None:
-    print("🚀 看门狗续期对比示例\n")
+    print("🚀 看门狗续期对比示例（async task）\n")
     print("同样参数: work_seconds=8, expire_seconds=3")
     print("差别只在于 auto_renewal 是否开启。\n")
 

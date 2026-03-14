@@ -1,7 +1,7 @@
 """
-解决什么问题: 提供 Celery App 工厂函数和单例管理，避免多处重复创建 App 实例
+解决什么问题: 提供 async-first 的 Celery App 工厂函数和单例管理，统一 custom aio pool worker 配置约定
 输入输出约定: create_celery_app() 返回 Celery 实例；get_celery_app() 返回模块级单例；
-    async_delay / async_apply 是异步包装，在 asyncio 事件循环中安全调用 Celery 同步 API
+    async_delay / async_apply 是 producer 侧兼容包装，在 asyncio 事件循环中安全调用 Celery 同步 API
 失败策略: get_celery_app() 在未初始化时抛出 RuntimeError；async 包装透传底层异常
 不适用场景: 需要多个独立 Celery App 的场景应直接使用 create_celery_app()，不依赖单例
 
@@ -26,6 +26,8 @@ except ImportError:
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from templates.celery_config import CeleryConfig  # type: ignore[no-redef]
+
+CUSTOM_AIO_POOL_CLASS = "celery_aio_pool.pool:AsyncIOPool"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ def get_celery_app() -> Celery:
 
 
 # ---------------------------------------------------------------------------
-# 异步包装 — 在 asyncio 事件循环中安全调用 Celery 同步 API
+# Producer 侧异步包装 — 在 asyncio 事件循环中安全调用 Celery 同步 API
 # ---------------------------------------------------------------------------
 
 
@@ -127,34 +129,39 @@ async def async_apply(
 
 
 def _demo() -> None:
-    """演示：用 CeleryConfig 创建 App，定义任务并验证 App 创建成功。
+    """演示：用 async-first CeleryConfig 创建 App，注册 async task 并打印 worker 启动方式。
 
-    注意: 实际执行任务需要启动 Celery Worker 和 Redis Broker。
+    注意: 实际执行任务需要启动 Redis 和 custom aio pool worker。
     """
-    # 1. 创建 App（使用真实 Redis 配置）
     app = create_celery_app(name="demo", config=CeleryConfig)
     print(f"🏭 创建 Celery App: {app.main}")
     print(f"  broker_url: {app.conf.broker_url}")
     print(f"  result_backend: {app.conf.result_backend}")
+    print(f"  task_default_queue: {app.conf.task_default_queue}")
+    print(f"  worker_pool: {app.conf.worker_pool}")
+    print(f"  custom_worker_pool: {app.conf.custom_worker_pool}")
 
-    # 2. 定义一个简单任务
-    @app.task(name="demo.add")
-    def add(x: int, y: int) -> int:
-        return x + y
+    @app.task(name="demo.fetch_order")
+    async def fetch_order(order_id: str) -> dict[str, str]:
+        await asyncio.sleep(0.1)
+        return {"order_id": order_id, "status": "ready"}
 
-    print(f"\n📦 注册任务: {add.name}")
+    print(f"\n📦 注册任务: {fetch_order.name}")
+    print("  task 形态: async def")
 
-    # 3. 演示单例模式
     print("\n🔗 === 单例模式 ===")
     singleton = init_celery_app(name="singleton_demo", config=CeleryConfig)
     same = get_celery_app()
     print(f"  init_celery_app() is get_celery_app(): {singleton is same}")
 
-    print("\n💡 要执行任务，请先启动 Redis，然后运行 Celery Worker:")
-    print("   celery -A myproj.celery_app:app worker --loglevel=info")
-    print("   # 如果包根导出了 app，也可以简写成: celery -A myproj worker --loglevel=info")
+    print("\n💡 async-first worker 启动方式:")
+    print(
+        f"   CELERY_CUSTOM_WORKER_POOL='{CUSTOM_AIO_POOL_CLASS}' "
+        "celery -A myproj.celery_app:app worker -P custom -Q aio_jobs --loglevel=info -c 20"
+    )
+    print("   # producer 侧仍可通过 async_delay/async_apply 包装 Celery 同步客户端 API")
 
-    print("\n✅ Celery App 工厂演示完成")
+    print("\n✅ async-first Celery App 工厂演示完成")
 
 
 if __name__ == "__main__":

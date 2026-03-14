@@ -1,5 +1,5 @@
 """
-解决什么问题: FastAPI 与 Celery 的集成层，提供生命周期管理、依赖注入、异步任务派发、状态轮询
+解决什么问题: FastAPI 与 async-first Celery worker 的集成层，提供生命周期管理、依赖注入、异步任务派发、状态轮询
 输入输出约定: celery_lifespan 管理 Celery App + Redis 连接生命周期；
     get_celery() / get_redis() 作为 Depends 注入；send_task() 异步派发任务；
     /tasks/{task_id}/status 轮询任务状态
@@ -7,11 +7,11 @@
 不适用场景: 非 FastAPI 框架；不需要 HTTP 轮询的场景（可用 WebSocket 或回调替代）
 
 集成模式:
-  FastAPI lifespan → 初始化 Celery App + Redis 连接
+  FastAPI lifespan → 初始化 async-first Celery App + Redis 连接
   Depends(get_celery) → 注入 Celery App
   Depends(get_redis) → 注入同步 Redis 客户端（用于企业级分布式锁）
-  send_task() → asyncio.to_thread 包装，不阻塞事件循环
-  GET /tasks/{task_id}/status → 轮询任务执行状态
+  send_task() → asyncio.to_thread 包装 Celery 同步客户端 API，不阻塞事件循环
+  GET /tasks/{task_id}/status → 轮询 async task 执行状态
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def _build_task_status_response(task_id: str, celery_app: Any) -> dict[str, Any]
 
 @asynccontextmanager
 async def celery_lifespan(app: Any) -> AsyncGenerator[None, None]:
-    """FastAPI 生命周期管理器，启动时初始化 Celery App 和 Redis 连接。
+    """FastAPI 生命周期管理器，启动时初始化 async-first Celery App 和 Redis 连接。
 
     用法:
         from fastapi import FastAPI
@@ -198,8 +198,8 @@ def create_task_status_router(prefix: str = "/tasks") -> Any:
 
 
 def _demo() -> None:
-    """演示：打印 FastAPI + Celery 集成模式，不启动实际服务器。"""
-    print("🌐 === FastAPI + Celery 集成模式 ===\n")
+    """演示：打印 FastAPI + async-first Celery 集成模式，不启动实际服务器。"""
+    print("🌐 === FastAPI + async-first Celery 集成模式 ===\n")
 
     print("1️⃣  生命周期管理 (celery_lifespan):")
     print("   from fastapi import FastAPI")
@@ -220,7 +220,7 @@ def _demo() -> None:
     print("3️⃣  异步任务派发 (send_task):")
     print("   from templates.fastapi_celery import send_task")
     print("   result = await send_task(celery_app, 'tasks.process_order', args=('ORD-001',))")
-    print("   # 返回 AsyncResult，不阻塞事件循环")
+    print("   # producer 侧仍通过 to_thread 包装 Celery 同步客户端 API")
     print()
 
     print("4️⃣  任务状态轮询路由:")
@@ -234,6 +234,7 @@ def _demo() -> None:
     print("   @app.post('/orders/{order_id}/process')")
     print("   async def process(order_id: str, redis=Depends(get_redis)):")
     print("       async with async_distributed_lock(redis, f'order:{order_id}'):")
+    print("           # worker 侧 task 主线应为 async def + custom aio pool")
     print("           ...")
     print()
 
@@ -245,7 +246,7 @@ def _demo() -> None:
     print(f"  send_task: {send_task}")
     print(f"  create_task_status_router: {create_task_status_router}")
 
-    print("\n✅ FastAPI + Celery 集成模式展示完成（未启动服务器）")
+    print("\n✅ FastAPI + async-first Celery 集成模式展示完成（未启动服务器）")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-解决什么问题: 提供生产级 Celery 配置对象，统一序列化、超时、并发、限流、可靠投递等关键参数
+解决什么问题: 提供 async-first 的生产级 Celery 配置对象，统一序列化、超时、并发、可靠投递与 custom aio pool 约定
 输入输出约定: CeleryConfig 类属性即配置项，直接传给 app.config_from_object(CeleryConfig)
 失败策略: 配置本身不会失败；运行时由 Celery 框架根据配置执行对应的超时/重试/拒绝策略
 不适用场景: 多环境差异化配置建议继承 CeleryConfig 覆盖属性，或用环境变量注入
@@ -8,8 +8,8 @@
   序列化与时区: accept_content, task_serializer, result_serializer, timezone, enable_utc
   超时与限流: task_soft_time_limit, task_time_limit, task_default_rate_limit
   Broker 传输层: broker_transport_options
-  连接池与结果: broker_pool_limit, result_expires
-  并发与预取: worker_concurrency, worker_prefetch_multiplier
+  连接池与结果: broker_pool_limit, result_expires, task_track_started
+  async worker: task_default_queue, worker_pool, custom_worker_pool, worker_concurrency
   可靠投递: task_acks_late, task_reject_on_worker_lost
 """
 
@@ -27,6 +27,14 @@ class CeleryConfig:
         class DevConfig(CeleryConfig):
             broker_url = "redis://:mypassword@localhost:6379/0"
     """
+
+    # --- async-first worker 约定 ---
+    worker_pool: str = os.getenv("CELERY_WORKER_POOL", "custom")
+    custom_worker_pool: str = os.getenv(
+        "CELERY_CUSTOM_WORKER_POOL",
+        "celery_aio_pool.pool:AsyncIOPool",
+    )
+    task_default_queue: str = os.getenv("CELERY_DEFAULT_QUEUE", "aio_jobs")
 
     # --- Broker / Backend ---
     broker_url: str = os.getenv(
@@ -66,9 +74,10 @@ class CeleryConfig:
     }
     broker_pool_limit: int = 10       # Broker 连接池上限
     result_expires: int = 3600        # 结果过期时间（秒）
+    task_track_started: bool = True
 
     # --- 并发与预取 ---
-    worker_concurrency: int = int(os.getenv("CELERY_CONCURRENCY", "4"))
+    worker_concurrency: int = int(os.getenv("CELERY_CONCURRENCY", "20"))
     worker_prefetch_multiplier: int = 1  # 公平调度，每次只预取 1 条
 
     # --- 可靠投递 ---
