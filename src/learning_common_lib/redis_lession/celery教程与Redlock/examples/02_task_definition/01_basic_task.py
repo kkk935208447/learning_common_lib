@@ -116,7 +116,7 @@ async def main() -> None:
     # ignore_result 演示
     print("── ignore_result: 不存储结果 ──")
     r3 = await asyncio.to_thread(fire_and_forget.delay, "这条消息不保存结果")
-    print(f"  ✅ result.ready(): {r3.ready()}")
+    print(f"  ✅ result.ready(): {await asyncio.to_thread(r3.ready)}")
     print(f"  ✅ ignore_result=True 时结果不存储到 backend\n")
 
     # 任务继承演示

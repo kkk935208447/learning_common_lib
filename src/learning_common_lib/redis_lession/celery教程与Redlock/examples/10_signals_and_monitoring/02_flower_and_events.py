@@ -123,10 +123,11 @@ async def main() -> None:
     r1 = await asyncio.to_thread(task_with_progress.delay, 200)
     # 轮询进度 (update_state 写入 Redis backend，客户端可读取)
     for _ in range(20):
-        meta = r1.info
-        state = r1.state
+        meta = await asyncio.to_thread(lambda: r1.info)
+        state = await asyncio.to_thread(lambda: r1.state)
         if state == "PROGRESS":
-            print(f"  📈 进度: {meta.get('percent', '?')}%")
+            progress = meta.get("percent", "?") if isinstance(meta, dict) else "?"
+            print(f"  📈 进度: {progress}%")
         elif state == "SUCCESS":
             break
         await asyncio.sleep(0.5)

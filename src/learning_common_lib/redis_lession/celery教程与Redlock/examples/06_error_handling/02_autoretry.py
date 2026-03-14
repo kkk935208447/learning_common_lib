@@ -189,32 +189,32 @@ async def main() -> None:
     print("── 基本 autoretry_for ──")
     r1 = await asyncio.to_thread(basic_autoretry.delay, 3)
     result1 = await asyncio.to_thread(r1.get, timeout=30, propagate=False)
-    print(f"  {'✅ 结果' if r1.successful() else '❌ 失败'}: {result1}")
+    print(f"  {'✅ 结果' if await asyncio.to_thread(r1.successful) else '❌ 失败'}: {result1}")
     print()
 
     print("── retry_backoff 指数退避 ──")
     r2 = await asyncio.to_thread(backoff_task.delay)
     result2 = await asyncio.to_thread(r2.get, timeout=120, propagate=False)
-    print(f"  {'✅ 结果' if r2.successful() else '❌ 失败'}: {result2}")
+    print(f"  {'✅ 结果' if await asyncio.to_thread(r2.successful) else '❌ 失败'}: {result2}")
     print()
 
     print("── retry_jitter 抖动 ──")
     r3 = await asyncio.to_thread(jitter_task.delay)
     result3 = await asyncio.to_thread(r3.get, timeout=30, propagate=False)
-    print(f"  {'✅ 结果' if r3.successful() else '❌ 失败'}: {result3}")
+    print(f"  {'✅ 结果' if await asyncio.to_thread(r3.successful) else '❌ 失败'}: {result3}")
     print()
 
     print("── on_failure / on_retry / on_success 回调 ──")
     r4 = await asyncio.to_thread(monitored_task.delay, True)
     result4 = await asyncio.to_thread(r4.get, timeout=30, propagate=False)
-    if r4.failed():
+    if await asyncio.to_thread(r4.failed):
         print(f"  ✅ 任务在 max_retries 次后最终失败: {type(result4).__name__}")
     print()
 
     print("── autoretry_for 只捕获指定异常 ──")
     r5 = await asyncio.to_thread(selective_retry.delay, "permanent")
     result5 = await asyncio.to_thread(r5.get, timeout=30, propagate=False)
-    if r5.failed():
+    if await asyncio.to_thread(r5.failed):
         print(f"  ✅ PermanentError 直接失败 (未重试): {type(result5).__name__}: {result5}")
     print()
 

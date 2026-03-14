@@ -68,8 +68,9 @@ def snapshot(result: AsyncResult) -> dict[str, Any]:
     }
 
 
-def print_snapshot(label: str, result: AsyncResult) -> None:
-    print(f"  📋 {label}: {snapshot(result)}")
+async def print_snapshot(label: str, result: AsyncResult) -> None:
+    data = await asyncio.to_thread(snapshot, result)
+    print(f"  📋 {label}: {data}")
 
 
 async def main() -> None:
@@ -77,7 +78,7 @@ async def main() -> None:
 
     print_section("场景 A: PENDING 不一定代表“任务在排队”")
     fake_result = AsyncResult("non-existent-id", app=app)
-    print_snapshot("未知 task_id", fake_result)
+    await print_snapshot("未知 task_id", fake_result)
     print("  结论: PENDING 既可能是任务还没跑，也可能是 task_id 错了，或结果已经被删掉。\n")
 
     print_section("场景 B: SUCCESS 与 FAILURE 都是 ready=True")
@@ -87,10 +88,10 @@ async def main() -> None:
     success_value = await asyncio.to_thread(success_result.get, timeout=30)
     failure_value = await asyncio.to_thread(failure_result.get, timeout=30, propagate=False)
 
-    print_snapshot("SUCCESS", success_result)
+    await print_snapshot("SUCCESS", success_result)
     print(f"  get(): {success_value}")
     print()
-    print_snapshot("FAILURE", failure_result)
+    await print_snapshot("FAILURE", failure_result)
     print(f"  get(propagate=False): {failure_value!r}")
     print("  结论: ready=True 只表示“任务结束了”，不表示它成功了。\n")
 
@@ -108,9 +109,9 @@ async def main() -> None:
     forget_result = await asyncio.to_thread(compute.delay, 1, 1)
     task_id = forget_result.id
     await asyncio.to_thread(forget_result.get, timeout=30)
-    print_snapshot("forget 前", forget_result)
-    forget_result.forget()
-    print_snapshot("forget 后重新查询", AsyncResult(task_id, app=app))
+    await print_snapshot("forget 前", forget_result)
+    await asyncio.to_thread(forget_result.forget)
+    await print_snapshot("forget 后重新查询", AsyncResult(task_id, app=app))
     print("  结论: PENDING 还可能表示结果被 backend 清掉了。\n")
 
     print_section("状态 vs 结果可用性总结")

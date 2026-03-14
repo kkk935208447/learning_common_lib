@@ -4,19 +4,21 @@
   - 单 Redis 锁已经可以保护分布式部署的多个服务实例
   - 短任务 + 固定 TTL 通常够用
   - 长任务超过 TTL 后，即使业务没做完，也可能已经失锁
-关键 API: redis.lock.Lock, acquire(), release(), timeout, blocking_timeout
+关键 API: redis.lock.Lock, 上下文管理器, timeout, blocking_timeout, pttl()
 运行方式:
   Client: python examples/11_fastapi_integration/02_distributed_lock.py
 预期现象:
   - 基础获取/释放和竞争互斥都能正常工作
-  - 固定 TTL 在短任务下表现正常
-  - 同样的固定 TTL 放到长任务里，会出现“任务仍在跑，但别人已经能拿到锁”
+  - 固定 TTL 在短任务下表现正常，TTL 会一路倒计时到任务结束
+  - 同样的固定 TTL 放到长任务里，会出现“任务仍在跑，但 TTL 已归零”
+  - 客户端会直接打印 Redis 中的 TTL 时间轴，不依赖额外日志
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import contextmanager
 from typing import Any
 
 import redis
@@ -28,9 +30,97 @@ def print_section(title: str) -> None:
     print(f"── {title} ──")
 
 
-def clear_demo_keys() -> None:
-    for key in redis_client.keys("demo:*"):
-        redis_client.delete(key)
+def format_pttl(pttl_ms: int) -> str:
+    if pttl_ms == -2:
+        return "key 不存在"
+    if pttl_ms == -1:
+        return "无过期时间"
+    return f"{pttl_ms / 1000:.2f}s"
+
+
+def describe_ttl(previous_ms: int | None, current_ms: int) -> str:
+    if current_ms == -2 and previous_ms is None:
+        return "等待持有者进入临界区"
+    if current_ms > 0 and (previous_ms is None or previous_ms == -2):
+        return "锁刚刚获取成功"
+    if previous_ms is not None and previous_ms > 0 and current_ms == -2:
+        return "TTL 已归零，锁已过期或已释放"
+    if current_ms > 0:
+        return "锁仍在倒计时"
+    return "锁不存在"
+
+
+async def clear_demo_keys() -> None:
+    keys = await asyncio.to_thread(lambda: list(redis_client.scan_iter("demo:*")))
+    if keys:
+        await asyncio.to_thread(redis_client.delete, *keys)
+
+
+async def read_pttl(lock_key: str) -> int:
+    return await asyncio.to_thread(redis_client.pttl, lock_key)
+
+
+async def key_exists(lock_key: str) -> bool:
+    return bool(await asyncio.to_thread(redis_client.exists, lock_key))
+
+
+@contextmanager
+def fixed_ttl_lock(name: str, timeout: int):
+    """最小固定 TTL 锁上下文管理器，用来直观展示锁边界。"""
+    lock = redis_client.lock(name, timeout=timeout, thread_local=False)
+    acquired = lock.acquire(blocking=True, blocking_timeout=1)
+    if not acquired:
+        raise RuntimeError(f"获取锁失败: {name}")
+    try:
+        yield lock
+    finally:
+        lock.release()
+
+
+async def probe_same_lock(lock_name: str, timeout: int, label: str) -> bool:
+    ttl_before = await read_pttl(lock_name)
+    probe = redis_client.lock(lock_name, timeout=timeout, thread_local=False)
+    acquired = await asyncio.to_thread(probe.acquire, blocking=False)
+    print(f"  {label}: ttl={format_pttl(ttl_before)}, acquired={acquired}")
+    if acquired:
+        await asyncio.to_thread(probe.release)
+        print(f"  {label}: release=True")
+    return acquired
+
+
+async def wait_until_lock_seen(lock_name: str, timeout_s: float = 2.0) -> None:
+    waited = 0.0
+    while waited < timeout_s:
+        ttl_ms = await read_pttl(lock_name)
+        if ttl_ms > 0 or ttl_ms == -1:
+            print(f"  锁已建立: ttl={format_pttl(ttl_ms)}，后续时间轴从这里开始计时")
+            return
+        await asyncio.sleep(0.1)
+        waited += 0.1
+    print("  ⚠️ 等待锁建立超时，下面继续按当前状态观察")
+
+
+async def monitor_lock_timeline(
+    lock_name: str,
+    *,
+    timeout: int,
+    work_seconds: int,
+    probe_after: int,
+    label: str,
+) -> bool:
+    await wait_until_lock_seen(lock_name)
+    print("  时间点      剩余 TTL      观察")
+    previous_ms: int | None = None
+    probe_acquired = False
+    for second in range(work_seconds + 1):
+        ttl_ms = await read_pttl(lock_name)
+        note = describe_ttl(previous_ms, ttl_ms)
+        print(f"  t={second:>2}s   {format_pttl(ttl_ms):<12} {note}")
+        if second == probe_after:
+            probe_acquired = await probe_same_lock(lock_name, timeout, f"{label} / 第 {second}s 探测")
+        previous_ms = ttl_ms
+        await asyncio.sleep(1)
+    return probe_acquired
 
 
 async def run_fixed_ttl_scenario(
@@ -43,65 +133,78 @@ async def run_fixed_ttl_scenario(
     lock_name = f"demo:{label}"
 
     def holder() -> dict[str, Any]:
-        lock = redis_client.lock(lock_name, timeout=timeout, thread_local=False)
-        acquired = lock.acquire(blocking=True, blocking_timeout=1)
-        if not acquired:
-            return {"holder_acquired": False}
-
-        print(f"  持有者: 获取锁成功 -> {lock_name}, timeout={timeout}s, work={work_seconds}s")
-        time.sleep(work_seconds)
         try:
-            lock.release()
-            print("  持有者: 正常释放锁")
+            with fixed_ttl_lock(lock_name, timeout):
+                print(
+                    f"  持有者: 进入上下文 -> {lock_name}, "
+                    f"timeout={timeout}s, work={work_seconds}s"
+                )
+                time.sleep(work_seconds)
+            print("  持有者: 离开上下文，释放成功")
             release_status = "released"
+            holder_acquired = True
+        except RuntimeError as exc:
+            print(f"  持有者: 获取锁失败 -> {exc}")
+            release_status = "not_acquired"
+            holder_acquired = False
         except redis.exceptions.LockError as exc:
-            print(f"  持有者: 释放失败，说明锁已不属于自己 -> {type(exc).__name__}")
+            print(
+                "  持有者: 离开上下文时释放失败，"
+                f"说明锁在任务结束前已不属于自己 -> {type(exc).__name__}"
+            )
             release_status = type(exc).__name__
-        return {"holder_acquired": True, "release_status": release_status}
+            holder_acquired = True
+        return {"holder_acquired": holder_acquired, "release_status": release_status}
 
     holder_future = asyncio.create_task(asyncio.to_thread(holder))
-    await asyncio.sleep(probe_after)
-
-    probe = redis_client.lock(lock_name, timeout=timeout, thread_local=False)
-    probe_acquired = await asyncio.to_thread(probe.acquire, blocking=False)
-    print(f"  探测者: 在第 {probe_after}s 时尝试获取同一把锁 -> {probe_acquired}")
-    if probe_acquired:
-        await asyncio.to_thread(probe.release)
-        print("  探测者: 释放自己拿到的锁")
-
+    probe_acquired = await monitor_lock_timeline(
+        lock_name,
+        timeout=timeout,
+        work_seconds=work_seconds,
+        probe_after=probe_after,
+        label=label,
+    )
     holder_info = await holder_future
+    lock_exists_after_finish = await key_exists(lock_name)
     return {
         "label": label,
         "timeout": timeout,
         "work_seconds": work_seconds,
         "probe_after": probe_after,
         "probe_acquired_midway": probe_acquired,
+        "lock_exists_after_finish": lock_exists_after_finish,
         **holder_info,
     }
 
 
 async def main() -> None:
     print("🚀 固定 TTL 分布式锁对比示例\n")
-    clear_demo_keys()
+    print("下面的 TTL 时间轴由客户端直接读取 Redis，因此能直观看到锁什么时候失效。\n")
+    await clear_demo_keys()
 
     print_section("场景 A: 基础获取 / 释放")
-    lock = redis_client.lock("demo:basic_lock", timeout=10)
-    acquired = lock.acquire(blocking=False)
-    print(f"  ✅ 获取锁: {acquired}")
-    print(f"  ✅ 锁存在: {bool(redis_client.exists('demo:basic_lock'))}")
-    lock.release()
-    print(f"  ✅ 释放后仍存在: {bool(redis_client.exists('demo:basic_lock'))}\n")
+    def basic_context_demo() -> None:
+        with fixed_ttl_lock("demo:basic_lock", timeout=10):
+            print("  ✅ 获取锁: True")
+            print(f"  ✅ 锁存在: {bool(redis_client.exists('demo:basic_lock'))}")
+        print(f"  ✅ 释放后仍存在: {bool(redis_client.exists('demo:basic_lock'))}\n")
+
+    await asyncio.to_thread(basic_context_demo)
 
     print_section("场景 B: 竞争互斥")
-    lock_a = redis_client.lock("demo:competition", timeout=10)
-    lock_b = redis_client.lock("demo:competition", timeout=10)
-    lock_a.acquire(blocking=False)
-    print("  Worker A: acquired=True")
-    print(f"  Worker B: acquired={lock_b.acquire(blocking=False)}")
-    lock_a.release()
-    print(f"  Worker B 再次尝试: acquired={lock_b.acquire(blocking=False)}")
-    lock_b.release()
-    print("  结论: 同一时刻只有一个持有者。\n")
+    def competition_demo() -> None:
+        with fixed_ttl_lock("demo:competition", timeout=10):
+            print("  Worker A: 通过上下文管理器持有锁")
+            contender = redis_client.lock("demo:competition", timeout=10, thread_local=False)
+            print(f"  Worker B: acquired={contender.acquire(blocking=False)}")
+        second_try = redis_client.lock("demo:competition", timeout=10, thread_local=False)
+        reacquired = second_try.acquire(blocking=False)
+        print(f"  Worker B 再次尝试: acquired={reacquired}")
+        if reacquired:
+            second_try.release()
+        print("  结论: 同一时刻只有一个持有者。\n")
+
+    await asyncio.to_thread(competition_demo)
 
     print_section("场景 C: 固定 TTL 放在短任务里，通常是够用的")
     short_case = await run_fixed_ttl_scenario(
@@ -121,7 +224,7 @@ async def main() -> None:
         probe_after=4,
     )
     print(f"  ✅ {long_case}")
-    print("  结论: 原任务还在执行，但探测者已经能拿到锁，这就是长任务的固定 TTL 风险。\n")
+    print("  结论: 原任务还在执行，但 TTL 已归零，探测者已经能拿到锁。\n")
 
     print_section("最终总结")
     rows = [
@@ -132,8 +235,8 @@ async def main() -> None:
     for label, value, note in rows:
         print(f"  {label:<14} {value:<10} {note}")
 
-    clear_demo_keys()
-    redis_client.close()
+    await clear_demo_keys()
+    await asyncio.to_thread(redis_client.close)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@
 
 - 优先用 `apply_async()` 而非 `delay()`，前者支持所有参数
 - 异步发布侧用 `asyncio.to_thread(task.delay, ...)` 包装，避免阻塞事件循环
+- 在 async producer 中，`AsyncResult.state/ready/successful/failed/forget()` 也应通过 `asyncio.to_thread(...)` 调用，因为它们同样可能触发同步 backend IO
 - 设置 `expires` 防止过期消息堆积
 - 不要在任务内部同步调用另一个任务的 `.get()`（死锁风险）
 
@@ -42,6 +43,7 @@
 - `prefork` 仍是默认基线，优先给 CPU 任务、阻塞式 SDK、传统同步代码
 - `gevent` 是 Celery 官方 greenlet 中间态：适合 cooperative IO，但 task 依然是 `sync def`
 - `async def task` 只适合真正使用异步库的 IO 场景，例如 `httpx.AsyncClient`、异步数据库驱动、异步 Redis 客户端
+- Celery 的 producer API、`AsyncResult`、`python-redis-lock` 在这个教程里都仍是同步客户端；async 场景只是通过 `asyncio.to_thread(...)` 包装这些边界
 - 迁移期可以先在同步 task 中使用 `asyncio.run(...)` 桥接协程，但大量 async IO 更适合拆独立 aio worker
 - `celery-aio-pool` 适合放到专门队列，例如 `aio_jobs`；不要让同步、greenlet、aio 任务无界混跑
 - CPU 密集型任务仍优先 `prefork`，不要因为风格统一而强行改成 async task
@@ -101,10 +103,14 @@
 - 锁超时（timeout）必须大于任务最大执行时间，否则锁提前释放导致并发问题
 - 教程基础篇可先用 redis-py 内置 `Lock` 理解原理
 - 企业模板默认使用 `python-redis-lock`，优先开启 `auto_renewal=True`
+- `async_distributed_lock()` 的含义是“async 调用侧不阻塞事件循环”，不是“锁客户端已经 fully async”
+- 优先用 `async with async_distributed_lock(...)` / `with distributed_lock(...)` 明确标出临界区，装饰器只在重复样板很多时再上
 - 锁名使用业务语义：`lock:order:{order_id}`，不要用 UUID
 - 获取锁失败时快速失败（抛异常），不要无限等待
 - 长任务不要只依赖固定 TTL；要先演示“固定 TTL 的失败态”，再引入看门狗续期
+- 教学上优先打印 TTL 时间轴，再引入封装；否则很容易把“续期”理解成黑盒魔法
 - 看门狗解决的是“长任务期间持续续期”，不是把所有锁问题都自动消灭
+- 锁释放阶段如果出现“锁已过期 / owner 不匹配 / Redis 异常”，业务层可以不二次抛错，但必须保留结构化日志
 
 ## 11. FastAPI 集成
 

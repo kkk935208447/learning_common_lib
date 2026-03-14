@@ -141,7 +141,7 @@ async def main() -> None:
     print("── 基本 self.retry() ──")
     r1 = await asyncio.to_thread(fetch_data.delay, "https://api.example.com")
     result = await asyncio.to_thread(r1.get, timeout=30, propagate=False)
-    print(f"  {'✅ 最终成功' if r1.successful() else '❌ 最终失败'}: {result}")
+    print(f"  {'✅ 最终成功' if await asyncio.to_thread(r1.successful) else '❌ 最终失败'}: {result}")
     print()
 
     print("── 区分可重试与不可重试异常 ──")
@@ -159,7 +159,7 @@ async def main() -> None:
     print("── 手动指数退避 ──")
     r4 = await asyncio.to_thread(exponential_retry.delay)
     result4 = await asyncio.to_thread(r4.get, timeout=60, propagate=False)
-    print(f"  {'✅ 最终结果' if r4.successful() else '❌ 最终失败'}: {result4}")
+    print(f"  {'✅ 最终结果' if await asyncio.to_thread(r4.successful) else '❌ 最终失败'}: {result4}")
     print()
 
     print("── self.request.retries 说明 ──")

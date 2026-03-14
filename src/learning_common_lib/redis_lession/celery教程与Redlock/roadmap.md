@@ -81,7 +81,8 @@ uv sync
 | 24 | `examples/10_signals_and_monitoring/02_flower_and_events.py` | Flower 监控 + 自定义事件 | 生产可观测性 |
 | 25 | `examples/11_fastapi_integration/01_fastapi_celery.py` | FastAPI + async-first Celery 触发/轮询 | Web 框架集成 |
 | 26 | `examples/11_fastapi_integration/02_distributed_lock.py` | 固定 TTL 锁的短任务/长任务对比 | 先理解为什么长任务会失锁 |
-| 27 | `examples/11_fastapi_integration/03_watchdog_lock_with_celery.py` | 无看门狗 vs 有看门狗 | 理解看门狗续期真正解决的问题 |
+| 27 | `examples/11_fastapi_integration/03_python_redis_lock_watchdog_minimal.py` | 纯 `python-redis-lock` 看门狗 | 先看懂续期线程自己怎么工作 |
+| 28 | `examples/11_fastapi_integration/04_watchdog_lock_with_celery.py` | 无看门狗 vs 有看门狗 | 把同样结论放进 Celery async worker |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
@@ -91,12 +92,12 @@ uv sync
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 28 | `templates/celery_config.py` | 生产级配置对象 |
-| 29 | `templates/celery_app.py` | async-first App 工厂 + producer 侧兼容包装 |
-| 30 | `templates/error_handling.py` | 异常层级树 |
-| 31 | `templates/task_base.py` | async-first 任务基类 |
-| 32 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
-| 33 | `templates/fastapi_celery.py` | async-first worker 的 FastAPI 集成 |
+| 29 | `templates/celery_config.py` | 生产级配置对象 |
+| 30 | `templates/celery_app.py` | async-first App 工厂 + producer 侧兼容包装 |
+| 31 | `templates/error_handling.py` | 异常层级树 |
+| 32 | `templates/task_base.py` | async-first 任务基类 |
+| 33 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
+| 34 | `templates/fastapi_celery.py` | async-first worker 的 FastAPI 集成 |
 
 ## 建议学习方式
 

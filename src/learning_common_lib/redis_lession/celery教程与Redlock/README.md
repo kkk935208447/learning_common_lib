@@ -94,7 +94,7 @@ celery教程与Redlock/
 │   ├── 08_periodic_tasks/   ← 定时任务
 │   ├── 09_workflows/        ← 工作流编排
 │   ├── 10_signals_and_monitoring/ ← 信号与监控
-│   └── 11_fastapi_integration/   ← FastAPI + Redis 分布式锁（基础篇 + 企业篇）
+│   └── 11_fastapi_integration/   ← FastAPI + Redis 分布式锁（固定 TTL → 最小看门狗 → 企业篇）
 └── templates/
     ├── __init__.py          ← 公开 API 导出
     ├── celery_config.py     ← 生产级配置
@@ -162,6 +162,12 @@ uv run python smoke/run_all_examples.py
 
 因此本教程把 async worker 单独拆成第 4 章，先讲清 `prefork → gevent → custom aio pool` 的边界，再继续学习结果后端、重试、队列、FastAPI 等后续章节。
 
+再补一条很容易混淆的边界：
+
+- 第 11 章里的 `send_task()`、`AsyncResult`、`async_distributed_lock()` 也都不是“底层 fully async 客户端”
+- 它们仍然分别建立在 Celery 同步客户端、同步结果客户端、`python-redis-lock` 同步锁之上
+- 教程里使用 `asyncio.to_thread(...)` 的目的，是让 async 调用侧不阻塞事件循环，而不是声称这些底层实现已经完成 async 化
+
 ## 命名与启动的生产约定
 
 教程示例为了方便演示，很多文件把 `app` 和任务写在同一个模块里，并直接用
@@ -209,11 +215,17 @@ celery -A myproj worker -l info
 | 08 | 定时任务 | Celery Beat、crontab、动态调度 |
 | 09 | 工作流 | chain/group/chord/chunks |
 | 10 | 信号与监控 | task signals、Flower、自定义事件 |
-| 11 | FastAPI 集成 | async-first worker + FastAPI 触发任务/轮询状态/Redis 分布式锁 |
+| 11 | FastAPI 集成 | async-first worker + FastAPI 触发任务/轮询状态/Redis 分布式锁时间轴 |
 
-第 11 章中的锁示例分为两层：
-- `02_distributed_lock.py`：基础篇，对比“短任务固定 TTL 正常”与“长任务固定 TTL 失锁”
-- `03_watchdog_lock_with_celery.py`：企业篇，在相同参数下对比“无看门狗”和“有看门狗”
+第 11 章中的锁示例分为三层：
+- `02_distributed_lock.py`：基础篇，用上下文管理器演示“短任务固定 TTL 正常”与“长任务固定 TTL 失锁”，并打印客户端侧 TTL 时间轴
+- `03_python_redis_lock_watchdog_minimal.py`：最小看门狗篇，不引入 Celery，只看 `python-redis-lock` 的 `auto_renewal` 如何续期
+- `04_watchdog_lock_with_celery.py`：企业篇，把同样结论放进 `custom aio pool + async task` 的 worker 场景
+
+第 11 章默认先坚持上下文管理器视角：
+
+- 先把获取锁、TTL 倒计时、续期、释放这些中间态看明白
+- 再接受模板里保留 `@with_lock` 这类语法糖，但不把它作为第一阅读入口
 
 ## Redis 连接约定
 

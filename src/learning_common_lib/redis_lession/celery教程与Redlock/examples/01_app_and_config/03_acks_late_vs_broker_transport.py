@@ -81,14 +81,14 @@ async def main() -> None:
         kwargs={"sleep_seconds": 2},
     )
     print("  task_id:", result.id)
-    print("  初始状态:", result.state)
+    print("  初始状态:", await asyncio.to_thread(lambda: result.state))
     print()
 
     print("── 轮询状态 ──")
     for _ in range(10):
-        state = result.state
+        state = await asyncio.to_thread(lambda: result.state)
         print("  当前状态:", state)
-        if result.ready():
+        if await asyncio.to_thread(result.ready):
             break
         await asyncio.sleep(0.5)
     print()

@@ -2,7 +2,8 @@
 
 配套文件：
 - 基础示例：`examples/11_fastapi_integration/02_distributed_lock.py`
-- 企业示例：`examples/11_fastapi_integration/03_watchdog_lock_with_celery.py`
+- 最小看门狗示例：`examples/11_fastapi_integration/03_python_redis_lock_watchdog_minimal.py`
+- 企业示例：`examples/11_fastapi_integration/04_watchdog_lock_with_celery.py`
 - 企业模板：`templates/distributed_lock.py`
 
 ## Part 1: Redis 分布式锁原理
@@ -79,13 +80,63 @@ with lock:
 - Celery 长任务经常明显超过初始锁 TTL
 - 固定 TTL 容易在任务未完成时提前失锁
 - `python-redis-lock` 的 `auto_renewal=True` 能通过后台线程持续续期
+- 它的锁实现和 Redis 客户端本身仍是同步的；模板里的 `async_distributed_lock()` 只是用 `asyncio.to_thread(...)` 把这个同步边界包起来
 - 因此教程基础篇用 `redis-py` 讲原理，企业模板直接用 `python-redis-lock`
+- 模板代码默认优先推荐 `async_distributed_lock()` / `distributed_lock()` 上下文管理器，再按需使用 `@with_lock`
+
+### async-first 模板的准确边界
+
+这里要把几个层次分开：
+
+1. `custom aio pool + async def task`
+   这是真正跑在 asyncio worker 执行层上的主线。
+2. `task.delay()` / `AsyncResult.get()` / `python-redis-lock`
+   这些接口本身仍然是同步客户端。
+3. `asyncio.to_thread(...)`
+   它解决的是“在 async 调用侧不阻塞事件循环”，不是把底层客户端改造成原生 async。
+
+所以在第 11 章里，正确理解应当是：
+
+- worker 内部业务协程是 async 的
+- 锁和结果查询这些边界仍然是同步客户端，只是包装成了 async-friendly 调用
 
 ### 教程里的对比主线
 
 - `02_distributed_lock.py`: 先证明固定 TTL 在短任务里是够用的
 - `02_distributed_lock.py`: 再证明同样的固定 TTL 放到长任务里会中途失锁
-- `03_watchdog_lock_with_celery.py`: 最后在相同参数下对比 `auto_renewal=False/True`
+- `03_python_redis_lock_watchdog_minimal.py`: 先用最小脚本看懂 `python-redis-lock` 的 `auto_renewal` 会如何续期
+- `04_watchdog_lock_with_celery.py`: 最后在 Celery async worker 中对比 `auto_renewal=False/True`
+
+### 最小可视化流程（建议先看）
+
+先不要急着上装饰器，先用上下文管理器把锁边界看清楚：
+
+1. 获取锁
+2. 每秒读取 Redis 中锁 key 的 `PTTL`
+3. 在固定时刻用第二个持有者 `acquire(blocking=False)` 探测能否抢锁
+4. 任务结束后再探测一次，确认锁已释放
+
+固定 TTL 和看门狗示例现在都采用这条观察路径，并且时间轴打印来自客户端直接读 Redis，不依赖 worker 控制台。
+`@with_lock` 仍然保留在模板里，但应视为最后再上的语法糖，而不是主教学入口。
+
+```python
+async with async_distributed_lock(
+    redis_client,
+    "order:123",
+    timeout=3,
+    auto_renewal=True,
+):
+    for _ in range(5):
+        ttl_ms = await asyncio.to_thread(redis_client.pttl, "lock:order:123")
+        print("ttl:", ttl_ms)
+        await asyncio.sleep(1)
+```
+
+说明：
+
+- `redis-py Lock` 的 key 就是你传入的锁名，例如 `demo:order:123`
+- `python-redis-lock` 的真实锁 key 会带 `lock:` 前缀，例如 `lock:order:123`
+- 因此企业篇读取 TTL 时，要观察的是 `lock:{name}`
 
 ## Part 2: Celery 队列与分布式锁的关系
 

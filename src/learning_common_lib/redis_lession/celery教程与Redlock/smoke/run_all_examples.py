@@ -36,6 +36,7 @@ SKIP_FILES = {
 NO_WORKER_NEEDED = {
     "02_config_patterns.py",     # 只读配置，不调度任务
     "02_distributed_lock.py",  # 只演示 Redis 锁，不提交 Celery 任务
+    "03_python_redis_lock_watchdog_minimal.py",  # 只演示 python-redis-lock，不提交 Celery 任务
     "04_sync_vs_greenlet_vs_asyncio.py",  # 纯对比总结脚本
 }
 
@@ -48,7 +49,7 @@ CUSTOM_POOL_STARTUP_WAIT = 8
 EXAMPLE_TIMEOUT_OVERRIDES = {
     "02_official_greenlet_pools.py": 90,
     "05_mixed_deployment_patterns.py": 90,
-    "03_watchdog_lock_with_celery.py": 120,
+    "04_watchdog_lock_with_celery.py": 120,
 }
 
 ASYNCIO_POOL_CLASS = "celery_aio_pool.pool:AsyncIOPool"
@@ -154,7 +155,7 @@ WORKER_SPECS = {
             "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
         },
     ],
-    "examples/11_fastapi_integration/03_watchdog_lock_with_celery.py": [
+    "examples/11_fastapi_integration/04_watchdog_lock_with_celery.py": [
         {
             "queues": "aio_watchdog",
             "pool": "custom",

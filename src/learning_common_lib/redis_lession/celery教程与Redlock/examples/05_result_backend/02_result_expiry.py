@@ -47,6 +47,14 @@ async def notify(self: Any, msg: str) -> None:
     print(f"  📦 notify: {msg} (结果不存储)")
 
 
+async def read_state(result: AsyncResult) -> str:
+    return await asyncio.to_thread(lambda: result.state)
+
+
+async def read_ready(result: AsyncResult) -> bool:
+    return await asyncio.to_thread(result.ready)
+
+
 async def main() -> None:
     print("🚀 结果过期与扩展元数据示例（async task）\n")
 
@@ -63,14 +71,14 @@ async def main() -> None:
     task_id = r1.id
     print("  阶段 1 - 结果可用:")
     val1 = await asyncio.to_thread(r1.get, timeout=30)
-    print(f"    state: {r1.state}")
+    print(f"    state: {await read_state(r1)}")
     print(f"    result: {val1}")
-    print(f"    ready: {r1.ready()}")
+    print(f"    ready: {await read_ready(r1)}")
 
     print("  阶段 2 - forget() 手动清理:")
-    r1.forget()
+    await asyncio.to_thread(r1.forget)
     r1_check = AsyncResult(task_id, app=app)
-    print(f"    清理后 state: {r1_check.state}")
+    print(f"    清理后 state: {await read_state(r1_check)}")
     print("    💡 forget() 立即删除，不等过期时间")
     print()
 
@@ -80,7 +88,7 @@ async def main() -> None:
     r2_val = await asyncio.to_thread(r2.get, timeout=30)
     result_meta: dict[str, Any] = {
         "id": r2.id,
-        "state": r2.state,
+        "state": await read_state(r2),
         "result": r2_val,
     }
     for attr in ("name", "args", "kwargs", "worker", "queue"):
@@ -93,7 +101,7 @@ async def main() -> None:
     print("── ignore_result 与过期 ──")
     r3 = await asyncio.to_thread(notify.delay, "用户注册成功")
     print("  ignore_result=True 的任务:")
-    print(f"    state: {r3.state}")
+    print(f"    state: {await read_state(r3)}")
     print("    💡 ignore_result=True 的任务不写入 backend，无需担心过期")
     print()
 

@@ -4,7 +4,22 @@
 
 ## 使用方式
 
-将 `templates/` 目录复制到你的项目中，通过环境变量 `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` / `CELERY_CUSTOM_WORKER_POOL` 配置 Redis 连接与 worker pool。锁模板依赖 `python-redis-lock`，适合需要自动续期的 Celery 长任务。每个模板文件底部都有 `_demo()` 函数，可直接运行查看效果。
+将 `templates/` 目录复制到你的项目中，通过环境变量 `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` / `CELERY_CUSTOM_WORKER_POOL` 配置 Redis 连接与 worker pool。锁模板依赖 `python-redis-lock`，适合需要自动续期的 Celery 长任务。推荐先使用 `async_distributed_lock()` / `distributed_lock()` 上下文管理器，`@with_lock` 只在重复样板很多时再启用。每个模板文件底部都有 `_demo()` 函数，可直接运行查看效果。
+
+## 同步边界说明
+
+这套模板是 async-first，不是“所有底层客户端都已经 fully async”：
+
+- worker 主线在 `custom aio pool + async def task` 下是真正的 asyncio 执行
+- producer 侧的 `delay()` / `apply_async()` / `send_task()` 仍然是 Celery 同步客户端 API，只是通过 `asyncio.to_thread(...)` 包装
+- `AsyncResult.state/ready/successful/failed/get/forget()` 也仍然属于同步结果客户端
+- `python-redis-lock` 和这里使用的 `redis.Redis` 也是同步实现，`async_distributed_lock()` 只是 async 调用包装
+
+因此，这里的准确说法应是：
+
+- `async-friendly` 调用方式已经就位
+- worker 侧 `async def task` 已经跑在 asyncio 上
+- 但发布、查结果、锁客户端这些边界仍然是“同步客户端 + 线程包装”
 
 推荐 worker 启动方式：
 
@@ -43,8 +58,13 @@ from templates import (
     async_get_result,
     distributed_lock,
     async_distributed_lock,
-    with_lock,
 )
+```
+
+如果确实需要装饰器语法糖，再额外导入：
+
+```python
+from templates import with_lock
 ```
 
 ## 模块说明
@@ -56,7 +76,7 @@ from templates import (
 | `celery_app.py` | App 工厂、单例管理、producer 侧 async 包装 |
 | `error_handling.py` | 异常层级树，区分可重试/不可重试 |
 | `task_base.py` | async-first 任务基类，统一生命周期回调、日志、重试决策 |
-| `distributed_lock.py` | 企业级分布式锁，默认推荐 `async_distributed_lock()` |
+| `distributed_lock.py` | 企业级分布式锁，上下文管理器优先，装饰器作为补充 |
 | `fastapi_celery.py` | FastAPI 集成：lifespan、依赖注入、任务派发、状态轮询 |
 
 ## 决策表
@@ -65,7 +85,7 @@ from templates import (
 |------|---------|------|
 | 新项目初始化 Celery | `celery_config` + `celery_app` | 先配置，再建 App |
 | async-first 任务日志和重试 | `task_base` + `error_handling` | `BaseTask` 默认面向 `async def task` |
-| Celery 长任务锁保护 | `distributed_lock` | 默认推荐 `async_distributed_lock()` |
+| Celery 长任务锁保护 | `distributed_lock` | 默认推荐 `async_distributed_lock()` / `distributed_lock()` |
 | FastAPI 项目集成 Celery | `fastapi_celery` | producer 侧继续保留 `to_thread` 兼容包装 |
 | 只需要异常分类 | `error_handling` | 独立使用，不依赖其他模板 |
 
@@ -90,7 +110,10 @@ from templates import (
 - [ ] 可重试异常继承 `TaskRetryableError`，不可重试异常继承 `TaskFatalError`
 - [ ] 分布式锁的 `timeout` 大于临界区最大执行时间
 - [ ] Celery 长任务优先开启 `auto_renewal=True`
+- [ ] 接受 `python-redis-lock` 和 `redis.Redis` 仍是同步客户端，`async_distributed_lock()` 只是 `to_thread` 包装
+- [ ] async producer 中对 `AsyncResult.state/ready/successful/failed/forget()` 的访问也通过 `asyncio.to_thread(...)` 包装
 - [ ] FastAPI 通过 `send_task()` / 状态路由与 Celery 交互
 - [ ] 接受 producer 侧 `to_thread` 是客户端兼容层，不把它误解为 worker 未 async 化
+- [ ] 锁释放异常不向业务层二次抛出，但要确保日志系统能看见 `lock_name` / `release_error_type`
 - [ ] Redis 连接配置了密码和 TLS（生产环境）
 - [ ] Worker 部署使用 supervisor / systemd 管理进程

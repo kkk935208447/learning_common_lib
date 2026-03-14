@@ -57,14 +57,14 @@ async def main() -> None:
     print("── delay() 调用 ──")
     result = await asyncio.to_thread(add.delay, 3, 7)
     print(f"  ✅ delay() 返回类型: {type(result).__name__}")
-    print(f"  ✅ ready (任务提交后): {result.ready()}")
+    print(f"  ✅ ready (任务提交后): {await asyncio.to_thread(result.ready)}")
 
     # 短暂等待以观察状态变化
     await asyncio.sleep(0.1)
-    print(f"  ✅ ready (等待后): {result.ready()}")
+    print(f"  ✅ ready (等待后): {await asyncio.to_thread(result.ready)}")
 
     print(f"  ✅ 结果: {await asyncio.to_thread(result.get, timeout=300)}")
-    print(f"  ✅ ready (获取结果后): {result.ready()}")
+    print(f"  ✅ ready (获取结果后): {await asyncio.to_thread(result.ready)}")
     print()
 
     # apply() — 本地同步调用（始终在当前进程执行，不经过 broker）
