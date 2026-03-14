@@ -48,6 +48,7 @@ TaskIQ 定时任务 — RedisScheduleSource 动态调度管理。
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 
 from taskiq import TaskiqScheduler
@@ -55,6 +56,10 @@ from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend, RedisSchedule
 
 BROKER_URL = "redis://default:123456@localhost:6379/0"
 RESULT_BACKEND_URL = "redis://default:123456@localhost:6379/1"
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:07_scheduling:01_redis_schedule_source",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -63,6 +68,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url=BROKER_URL,
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 # ── 2. 创建 Redis 调度源与 Scheduler ──
@@ -157,6 +163,7 @@ async def main() -> None:
     print("   - RedisScheduleSource 将调度持久化到 Redis，重启不丢失")
     print("   - task.schedule_by_* 会帮你构造 ScheduledTask，避免手工拼对象")
     print("   - scheduler 负责到点触发，worker 负责实际执行")
+    print(f"   - 当前 worker/scheduler 共享的 queue_name = {broker.queue_name!r}")
     print("   - 对比 Celery Beat: TaskIQ 支持动态增删调度，无需重启")
 
 

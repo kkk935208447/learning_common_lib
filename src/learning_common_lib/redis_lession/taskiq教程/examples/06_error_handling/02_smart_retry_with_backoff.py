@@ -43,9 +43,15 @@ TaskIQ 智能重试策略 — 结合中间件 + labels 实现指数退避重试�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:06_error_handling:02_smart_retry_with_backoff",
+)
 
 
 # ── 1. 自定义异常分类 ──
@@ -131,6 +137,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend).with_middlewares(
     SmartRetryMiddleware(),
 )

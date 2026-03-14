@@ -47,6 +47,7 @@ TaskIQ 多队列路由 — 通过多个 broker.queue_name 隔离不同优先级�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 try:
@@ -61,22 +62,32 @@ BROKER_URL = "redis://default:123456@localhost:6379/0"
 RESULT_BACKEND_URL = "redis://default:123456@localhost:6379/1"
 
 
-def create_queue_broker(queue_name: str) -> ListQueueBroker:
+def create_queue_broker(queue_name: str, env_key: str) -> ListQueueBroker:
     """为单个 queue_name 创建专用 broker。"""
     backend = RedisAsyncResultBackend(
         redis_url=RESULT_BACKEND_URL,
         result_ex_time=3600,
     )
+    resolved_queue_name = os.getenv(env_key, queue_name)
     return ListQueueBroker(
         url=BROKER_URL,
-        queue_name=queue_name,
+        queue_name=resolved_queue_name,
     ).with_result_backend(backend)
 
 
 # ── 1. 为不同队列创建不同 broker ──
-default_broker = create_queue_broker("default")
-high_priority_broker = create_queue_broker("high_priority")
-batch_broker = create_queue_broker("batch")
+default_broker = create_queue_broker(
+    "default",
+    "TASKIQ_QUEUE_NAME_DEFAULT_BROKER",
+)
+high_priority_broker = create_queue_broker(
+    "high_priority",
+    "TASKIQ_QUEUE_NAME_HIGH_PRIORITY_BROKER",
+)
+batch_broker = create_queue_broker(
+    "batch",
+    "TASKIQ_QUEUE_NAME_BATCH_BROKER",
+)
 
 
 # ── 2. 在各自的 broker 上注册任务 ──

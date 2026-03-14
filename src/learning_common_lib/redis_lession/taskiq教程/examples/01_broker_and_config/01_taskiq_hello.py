@@ -42,14 +42,21 @@ TaskIQ 最小可运行示例 — Broker 创建、任务定义、任务发送。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq.exceptions import ResultBackendError
 from taskiq_redis import ListQueueBroker
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:01_broker_and_config:01_taskiq_hello",
+)
 
 # ── 1. 创建 Broker ──
 # ListQueueBroker 使用 Redis List 作为消息队列，多个 Worker 竞争消费（类似 Celery）
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 )
 
 # ── 2. 定义任务 ──

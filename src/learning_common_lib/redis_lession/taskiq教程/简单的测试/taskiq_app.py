@@ -1,10 +1,17 @@
 # taskiq_app.py
 import asyncio
+import os
 from taskiq_redis import ListQueueBroker
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:simple_test:taskiq_app",
+)
 
 # 创建 Redis Broker（任务队列）
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 )
 
 # 定义任务 1：发送邮件

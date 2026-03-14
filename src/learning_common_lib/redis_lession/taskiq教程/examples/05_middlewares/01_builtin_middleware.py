@@ -49,9 +49,15 @@ TaskIQ 内置中间件基类与 6 个钩子方法 — 理解中间件生命周�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:05_middlewares:01_builtin_middleware",
+)
 
 # ── 1. 自定义日志中间件 — 重写全部 6 个钩子 ──
 
@@ -118,6 +124,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend).with_middlewares(
     SimpleLogMiddleware(),
 )

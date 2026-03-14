@@ -5,7 +5,7 @@
 不适用场景: worker 进程数、threadpool/process pool 这类运行参数应放到 taskiq worker CLI，而不是 Broker 配置对象里
 
 配置分组:
-  Broker 连接: broker_url
+  Broker 连接: broker_url, queue_name
   结果后端: result_backend_url, result_ex_time
 """
 
@@ -35,6 +35,12 @@ class TaskiqConfig:
             "redis://default:123456@localhost:6379/0",
         ),
     )
+    queue_name: str = field(
+        default_factory=lambda: os.getenv(
+            "TASKIQ_QUEUE_NAME",
+            "taskiq:default",
+        ),
+    )
 
     # --- 结果后端 ---
     result_backend_url: str = field(
@@ -53,8 +59,11 @@ class TaskiqConfig:
     # ------------------------------------------------------------------
 
     def create_broker(self) -> ListQueueBroker:
-        """创建 ListQueueBroker 实例，使用当前配置的 broker_url。"""
-        return ListQueueBroker(url=self.broker_url)
+        """创建 ListQueueBroker 实例，使用当前配置的 broker_url 和 queue_name。"""
+        return ListQueueBroker(
+            url=self.broker_url,
+            queue_name=self.queue_name,
+        )
 
     def create_result_backend(self) -> RedisAsyncResultBackend:
         """创建 RedisAsyncResultBackend 实例，使用当前配置的 result_backend_url。"""
@@ -75,6 +84,7 @@ def _demo() -> None:
 
     print("🔧 === TaskiqConfig 生产配置 ===")
     print(f"  broker_url          = {cfg.broker_url!r}")
+    print(f"  queue_name          = {cfg.queue_name!r}")
     print(f"  result_backend_url  = {cfg.result_backend_url!r}")
     print(f"  result_ex_time      = {cfg.result_ex_time!r}")
     print()

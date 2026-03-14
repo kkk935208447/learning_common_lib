@@ -57,6 +57,7 @@ async def main():
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `TASKIQ_BROKER_URL` | `redis://default:123456@localhost:6379/0` | Broker 连接 |
+| `TASKIQ_QUEUE_NAME` | `taskiq:default` | Broker 监听的逻辑队列名 |
 | `TASKIQ_RESULT_BACKEND_URL` | `redis://default:123456@localhost:6379/1` | Result Backend 连接 |
 | `TASKIQ_RESULT_EX_TIME` | `3600` | 结果过期时间（秒） |
 
@@ -69,6 +70,8 @@ Worker 并发、threadpool、大型 CPU 任务建议通过 `taskiq worker` CLI �
 - `create_task(...)` 默认会生成稳定的 `task_name="<module>.<func_name>"`，避免跨模块撞名
 - `safe_execute(...)` 同时支持 `sync def` 和 `async def`
 - `RetryMiddleware` / `SlowTaskWarningMiddleware` 对脏 labels 会回退到默认值，而不是直接把任务打崩
+- `TaskiqConfig.create_broker()` 会显式传入 `queue_name`，不依赖 TaskIQ 默认队列 `taskiq`
+- 不同服务不要共享同一个默认队列；至少通过 `TASKIQ_QUEUE_NAME` 做服务级隔离
 
 ## 每个模板都可独立运行
 

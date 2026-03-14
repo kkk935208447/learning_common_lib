@@ -42,6 +42,7 @@ TaskIQ Broker 模式对比 — PubSubBroker 广播 vs ListQueueBroker 竞争消�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, PubSubBroker, RedisAsyncResultBackend
 try:
@@ -52,6 +53,15 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
+LIST_QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME_LIST_BROKER",
+    "taskiq:examples:09_broker_patterns:01_pubsub_broker:list",
+)
+PUBSUB_QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME_PUBSUB_BROKER",
+    "taskiq:examples:09_broker_patterns:01_pubsub_broker:pubsub",
+)
+
 # ── 1. 创建两种 Broker ──
 
 # ListQueueBroker — 基于 Redis List，竞争消费模式
@@ -61,12 +71,14 @@ result_backend = RedisAsyncResultBackend(
 )
 list_broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=LIST_QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 # PubSubBroker — 基于 Redis Pub/Sub，广播模式
 # 所有订阅的 worker 都会收到消息，不支持 result_backend
 pubsub_broker = PubSubBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=PUBSUB_QUEUE_NAME,
 )
 
 

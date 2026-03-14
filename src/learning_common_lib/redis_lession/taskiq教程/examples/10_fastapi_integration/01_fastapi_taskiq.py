@@ -46,6 +46,7 @@ FastAPI + TaskIQ 集成 — lifespan 管理、API 端点发送任务、查询结
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -53,12 +54,18 @@ from taskiq.exceptions import ResultBackendError
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 from taskiq_redis.exceptions import ResultIsMissingError
 
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:10_fastapi_integration:01_fastapi_taskiq",
+)
+
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 

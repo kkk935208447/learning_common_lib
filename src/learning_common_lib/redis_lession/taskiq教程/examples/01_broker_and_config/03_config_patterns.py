@@ -5,7 +5,7 @@ TaskIQ 配置模式 — 环境变量覆盖、builder 链式调用。
     演示 TaskIQ 配置模式 — 环境变量覆盖、builder 链式调用
 
 关键概念:
-    - 环境变量覆盖 broker_url
+    - 环境变量覆盖 broker_url / queue_name
     - 链式 .with_result_backend().with_middlewares()
     - 配置与任务定义分离
 
@@ -33,7 +33,8 @@ TaskIQ 配置模式 — 环境变量覆盖、builder 链式调用。
 
 技术要点:
     - os.getenv() 提供默认值，开发环境零配置即可运行
-    - 链式调用每一步都返回新对象，最终赋值给 broker
+    - queue_name 和 broker_url 解决的是两件事：前者做消费隔离，后者做连接定位
+    - with_result_backend()/with_middlewares() 会原地更新当前 broker，并返回 self
     - with_middlewares() 接受可变参数，可一次注册多个中间件
 """
 
@@ -46,6 +47,10 @@ from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 # ── 1. 模式一：环境变量覆盖 ──
 # 开发环境使用默认值，生产环境通过环境变量注入
 BROKER_URL = os.getenv("TASKIQ_BROKER_URL", "redis://default:123456@localhost:6379/0")
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:01_broker_and_config:03_config_patterns",
+)
 RESULT_BACKEND_URL = os.getenv(
     "TASKIQ_RESULT_BACKEND_URL",
     "redis://default:123456@localhost:6379/1",
@@ -59,7 +64,10 @@ def create_broker_from_env() -> ListQueueBroker:
         redis_url=RESULT_BACKEND_URL,
         result_ex_time=RESULT_EX_TIME,
     )
-    broker = ListQueueBroker(url=BROKER_URL).with_result_backend(backend)
+    broker = ListQueueBroker(
+        url=BROKER_URL,
+        queue_name=QUEUE_NAME,
+    ).with_result_backend(backend)
     return broker
 
 
@@ -70,7 +78,10 @@ def create_broker_from_env() -> ListQueueBroker:
 def create_broker_chained() -> ListQueueBroker:
     """链式调用一步到位（适合简单项目）。"""
     broker = (
-        ListQueueBroker(url="redis://default:123456@localhost:6379/0")
+        ListQueueBroker(
+            url="redis://default:123456@localhost:6379/0",
+            queue_name="taskiq:examples:01_broker_and_config:03_config_patterns:builder",
+        )
         .with_result_backend(
             RedisAsyncResultBackend(
                 redis_url="redis://default:123456@localhost:6379/1",
@@ -91,10 +102,12 @@ class TaskiqSettings:
     def __init__(
         self,
         broker_url: str = "redis://default:123456@localhost:6379/0",
+        queue_name: str = "taskiq:examples:01_broker_and_config:03_config_patterns:settings",
         result_url: str = "redis://default:123456@localhost:6379/1",
         result_ex_time: int = 3600,
     ) -> None:
         self.broker_url = broker_url
+        self.queue_name = queue_name
         self.result_url = result_url
         self.result_ex_time = result_ex_time
 
@@ -104,12 +117,16 @@ class TaskiqSettings:
             redis_url=self.result_url,
             result_ex_time=self.result_ex_time,
         )
-        return ListQueueBroker(url=self.broker_url).with_result_backend(backend)
+        return ListQueueBroker(
+            url=self.broker_url,
+            queue_name=self.queue_name,
+        ).with_result_backend(backend)
 
     def summary(self) -> str:
         """返回配置摘要字符串。"""
         return (
             f"broker_url     = {self.broker_url}\n"
+            f"queue_name     = {self.queue_name}\n"
             f"result_url     = {self.result_url}\n"
             f"result_ex_time = {self.result_ex_time}s"
         )
@@ -128,6 +145,7 @@ def main() -> None:
     # 模式一：环境变量
     print("── 模式一：环境变量覆盖 ──")
     print(f"   BROKER_URL       = {BROKER_URL}")
+    print(f"   QUEUE_NAME       = {QUEUE_NAME}")
     print(f"   RESULT_BACKEND   = {RESULT_BACKEND_URL}")
     print(f"   RESULT_EX_TIME   = {RESULT_EX_TIME}s")
     broker_env = create_broker_from_env()

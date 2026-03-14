@@ -39,7 +39,7 @@ def create_taskiq_broker(config: TaskiqConfig | None = None) -> ListQueueBroker:
         config: TaskIQ 配置对象，为 None 时使用默认 TaskiqConfig()
 
     返回:
-        配置好 result_backend 的 ListQueueBroker 实例
+        配置好 queue_name 和 result_backend 的 ListQueueBroker 实例
     """
     if config is None:
         config = TaskiqConfig()
@@ -140,6 +140,7 @@ def _demo() -> None:
     broker_a = create_taskiq_broker()
     print("=== 工厂函数 create_taskiq_broker() ===")
     print(f"  broker_a          = {broker_a!r}")
+    print(f"  queue_name        = {broker_a.queue_name!r}")
     print(f"  result_backend    = {broker_a.result_backend!r}")
     print()
 
@@ -149,6 +150,7 @@ def _demo() -> None:
     print("=== 单例模式 init_broker() / get_broker() ===")
     print(f"  broker_s1 is broker_s2 = {broker_s1 is broker_s2}")
     print(f"  get_broker()           = {get_broker()!r}")
+    print(f"  singleton queue_name   = {broker_s1.queue_name!r}")
     print()
 
     # 3. 工厂实例与单例实例是不同对象
@@ -158,6 +160,7 @@ def _demo() -> None:
     print("=== 客户端侧上下文管理器 ===")
     print("  async with broker_session(broker_a):")
     print("      await my_task.kiq(...)")
+    print("  # 生产环境建议通过 TASKIQ_QUEUE_NAME 为不同服务配置不同队列")
     print()
     print("✅ taskiq_app 模块验证通过")
 

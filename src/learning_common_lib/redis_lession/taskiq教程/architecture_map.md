@@ -140,4 +140,5 @@ Producer                    Broker                     Worker
 
 补充:
 - `smoke/run_all_examples.py` 会同时验证 `examples/` 与 `templates/`
-- 需要 worker 的 example 会在 smoke 中被包装成独立 `queue_name`，避免不同案例互相抢队列
+- 需要 worker 的 example 会在 smoke 中注入独立 `queue_name`，避免不同案例互相抢队列
+- `TaskiqConfig.queue_name` 负责 broker 级消费隔离；`task_name` 只负责 worker 本地分发

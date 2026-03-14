@@ -40,9 +40,15 @@ TaskIQ 依赖注入基础 — TaskiqDepends 的基本用法。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqDepends
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:04_dependency_injection:01_depends_basics",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -50,6 +56,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 DEPENDENCY_STEP = 0

@@ -40,9 +40,15 @@ TaskIQ 依赖嵌套 — 依赖链自动解析与 generator 依赖生命周期。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqDepends
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:04_dependency_injection:03_nested_depends",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -50,6 +56,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 RESOLUTION_TRACE: list[str] = []

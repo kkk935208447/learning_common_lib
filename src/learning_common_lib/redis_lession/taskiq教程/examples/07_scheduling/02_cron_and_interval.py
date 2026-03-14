@@ -39,10 +39,16 @@ TaskIQ 定时任务 — cron 表达式与间隔调度的配置方式。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqScheduler
 from taskiq.schedule_sources import LabelScheduleSource
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:07_scheduling:02_cron_and_interval",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -50,6 +56,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 
@@ -217,6 +224,7 @@ async def main() -> None:
     print("   - LabelScheduleSource: 从 @broker.task(schedule=[...]) 读取调度")
     print("   - RedisScheduleSource: 动态管理调度（见 01_redis_schedule_source.py）")
     print("   - schedule 参数是列表，一个任务可配置多个调度")
+    print(f"   - 当前调度任务默认发布到 queue_name = {broker.queue_name!r}")
     print("   - 启动调度器: taskiq scheduler module:scheduler")
     print()
     print("📊 对比 Celery Beat:")

@@ -40,12 +40,19 @@ TaskIQ labels 系统 — 任务元数据标签。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:02_task_definition:02_task_labels",
+)
 
 # ── 1. 创建 Broker + ResultBackend ──
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(
     RedisAsyncResultBackend(
         redis_url="redis://default:123456@localhost:6379/1",

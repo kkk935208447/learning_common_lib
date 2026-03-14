@@ -164,7 +164,15 @@ uv run python -m templates.task_base
 - `examples/` 默认运行 `main()`；需要 worker 的案例由 smoke 自动启动对应 worker
 - `templates/` 默认运行各模块 `_demo()`，不启动 worker
 - smoke 会为需要 worker 的示例注入独立 `queue_name`，避免和你手工启动的教程 worker 抢同一个队列
+- TaskIQ 的 `ListQueueBroker` 是先竞争消费、再按 `task_name` 找函数；同队列上即使 `task_name` 不同，也可能被其他 worker 抢走并丢弃
+- 单 broker 示例统一支持 `TASKIQ_QUEUE_NAME`；多 broker 示例支持 `TASKIQ_QUEUE_NAME_<BROKER_NAME>`
 - 每个文件运行前后都会清理 Redis DB 0/1/2/3，尽量减少示例之间的状态污染
+
+这个问题不是 smoke 独有问题，而是 TaskIQ + Redis ListQueueBroker 的工作方式决定的：
+
+- Redis 先把消息从队列里弹出
+- worker 再在本地按 `task_name` 查任务注册表
+- 如果抢到消息的 worker 没注册这个任务，消息会被直接丢弃，而不是自动回队列
 
 ## 章节概览
 

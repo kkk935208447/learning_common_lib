@@ -11,7 +11,7 @@ TaskIQ RedisAsyncResultBackend 配置与结果获取。
 
 关键 API:
     - RedisAsyncResultBackend  — 基于 Redis 的异步结果后端
-    - broker.with_result_backend() — 为 Broker 绑定结果后端（返回新 Broker）
+    - broker.with_result_backend() — 为 Broker 绑定结果后端（原地更新并返回自身）
     - handle.wait_result()     — 异步等待任务执行结果
     - TaskiqResult             — 结果对象，包含 return_value / is_err / error / execution_time
 
@@ -34,21 +34,29 @@ TaskIQ RedisAsyncResultBackend 配置与结果获取。
     - 不需要结果的任务（fire-and-forget）可以不配置 result_backend
 
 技术要点:
-    - broker.with_result_backend() 返回的是 **新 Broker**，必须重新赋值
+    - broker.with_result_backend() 会原地更新 Broker，并返回自身
     - result_backend 使用独立的 Redis DB（db=1），与 broker（db=0）隔离
+    - 可通过环境变量 TASKIQ_QUEUE_NAME 覆盖 queue_name，避免不同示例互相抢消息
     - TaskiqResult.execution_time 单位为秒（float）
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:01_broker_and_config:02_result_backend",
+)
 
 # ── 1. 创建 Broker + ResultBackend ──
 # Broker 负责消息传递（db=0），ResultBackend 负责结果存储（db=1）
 _broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 )
 
 result_backend = RedisAsyncResultBackend(
@@ -56,9 +64,8 @@ result_backend = RedisAsyncResultBackend(
     result_ex_time=3600,  # 结果过期时间：3600 秒 = 1 小时
 )
 
-# ⚠️ 关键：with_result_backend() 返回 **新 Broker**，必须重新赋值！
-# 错误写法: _broker.with_result_backend(result_backend)  ← 返回值被丢弃
-# 正确写法: broker = _broker.with_result_backend(result_backend)
+# ⚠️ 关键：with_result_backend() 会原地更新当前 broker，并返回 self。
+# 这里继续显式赋值，是为了把“完成结果绑定后的 broker”命名得更清楚。
 broker = _broker.with_result_backend(result_backend)
 
 
@@ -86,10 +93,12 @@ async def main() -> None:
         print("阶段 1: 给 Broker 绑定 Result Backend")
         print("=" * 60)
         print(f"_broker is broker ? {_broker is broker}")
+        print(f"broker.queue_name = {broker.queue_name!r}")
         print("解释:")
         print("  - _broker 只负责消息队列")
-        print("  - with_result_backend(...) 会返回一个新 broker")
-        print("  - 新 broker 同时具备发消息 + 查结果的能力")
+        print("  - with_result_backend(...) 会原地更新 broker，并返回 self")
+        print("  - 绑定后，这个 broker 同时具备发消息 + 查结果的能力")
+        print("  - 当前示例也显式固定了 queue_name，避免和其他教程 worker 互抢")
         print()
 
         print("🚀 发送任务: add(3, 7)")
