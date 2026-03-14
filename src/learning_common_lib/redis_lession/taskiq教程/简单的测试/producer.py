@@ -9,6 +9,14 @@ import asyncio
 # 使用 `python -m 简单的测试.worker` 才能正常运行（大型项目中推荐使用这种方案）
 # 更简单的方法就是 使用 try-except 捕获 ImportError 异常，如下所示可以支持项目运行的相对导入，同时也支持 IDE 直接运行.py脚本时的绝对导入。
 
+
+# 运行方式：
+# 1. 先启动 Worker：
+#   cd src/learning_common_lib/redis_lession/taskiq教程 && uv run taskiq worker 简单的测试.taskiq_app:broker
+# 2. 再启动 Producer：
+#    直接运行 producer.py 文件即可
+
+
 try:
     from .taskiq_app import send_email, process_data, heavy_calculation
 except ImportError:
