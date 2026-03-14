@@ -12,7 +12,8 @@ TaskIQ 教程 smoke 测试
     1. 运行结构尽量贴近 celery教程与Redlock/smoke/run_all_examples.py
     2. 不使用临时 wrapper module，不注入虚拟包裹
     3. TaskIQ + Redis ListQueueBroker 是“先竞争消费，再按 task_name 找函数”
-       同一个 queue_name 上，即使 task_name 不同，也可能被其他 worker 抢走并丢弃
+       同一组同构 worker 共享一个 queue_name 是正常模式；
+       真正危险的是任务注册集合不一致的 worker 共享同一个 queue_name
     4. 为避免误消费，smoke 会通过环境变量为每个案例注入独立 queue_name
     5. worker 使用独立进程组启动，并在每轮结束后做 TERM/KILL 双阶段回收
 

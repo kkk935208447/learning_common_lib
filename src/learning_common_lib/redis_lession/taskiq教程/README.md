@@ -164,7 +164,9 @@ uv run python -m templates.task_base
 - `examples/` 默认运行 `main()`；需要 worker 的案例由 smoke 自动启动对应 worker
 - `templates/` 默认运行各模块 `_demo()`，不启动 worker
 - smoke 会为需要 worker 的示例注入独立 `queue_name`，避免和你手工启动的教程 worker 抢同一个队列
-- TaskIQ 的 `ListQueueBroker` 是先竞争消费、再按 `task_name` 找函数；同队列上即使 `task_name` 不同，也可能被其他 worker 抢走并丢弃
+- 单个 worker 完全可以在同一个队列里处理多个不同 `task_name`
+- 多个 worker 也可以共享同一个队列，但前提是它们本来就是同一组消费者：注册的任务集合一致，或者至少都认识这批任务
+- TaskIQ 的 `ListQueueBroker` 是先竞争消费、再按 `task_name` 找函数；真正危险的是“任务注册集合不一致的 worker”共享同一个队列
 - 单 broker 示例统一支持 `TASKIQ_QUEUE_NAME`；多 broker 示例支持 `TASKIQ_QUEUE_NAME_<BROKER_NAME>`
 - 每个文件运行前后都会清理 Redis DB 0/1/2/3，尽量减少示例之间的状态污染
 
@@ -173,6 +175,7 @@ uv run python -m templates.task_base
 - Redis 先把消息从队列里弹出
 - worker 再在本地按 `task_name` 查任务注册表
 - 如果抢到消息的 worker 没注册这个任务，消息会被直接丢弃，而不是自动回队列
+- 所以“同一组同构 worker 共享一个队列”是正常模式；“不同服务或不同示例共享一个队列”才是风险点
 
 ## 章节概览
 

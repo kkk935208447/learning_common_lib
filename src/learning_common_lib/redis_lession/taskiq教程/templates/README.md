@@ -71,6 +71,7 @@ Worker 并发、threadpool、大型 CPU 任务建议通过 `taskiq worker` CLI �
 - `safe_execute(...)` 同时支持 `sync def` 和 `async def`
 - `RetryMiddleware` / `SlowTaskWarningMiddleware` 对脏 labels 会回退到默认值，而不是直接把任务打崩
 - `TaskiqConfig.create_broker()` 会显式传入 `queue_name`，不依赖 TaskIQ 默认队列 `taskiq`
+- 同一组同构 worker 共享一个队列用于扩容是正常模式
 - 不同服务不要共享同一个默认队列；至少通过 `TASKIQ_QUEUE_NAME` 做服务级隔离
 
 ## 每个模板都可独立运行

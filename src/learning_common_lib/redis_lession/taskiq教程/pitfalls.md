@@ -29,10 +29,14 @@ await broker.shutdown()
 - 重启电脑或杀掉后台 worker 之后，现象暂时消失
 - 同一个 Redis 实例上跑了多个 TaskIQ worker，看起来都“连通正常”，但任务偶发丢失
 
-**错误认知**:
-- “只要 `task_name` 不同，同一个队列上多个 worker 也不会冲突”
+**先澄清一个前提**:
+- 单个 worker 完全可以在一个队列里处理多个不同 `task_name`
+- 多个 worker 共享同一个队列也完全可以，这是标准的横向扩容方式
+- 真正有问题的是：这些 worker 监听了同一个队列，但它们注册的任务集合并不一致
 
-这个认知在 TaskIQ + `ListQueueBroker` 下是错误的。
+**错误认知**:
+- “只要队列一样，任何 worker 都能安全混在一起”
+- “只要 `task_name` 不同，共享同一个队列也天然没问题”
 
 **真实原因**:
 - `ListQueueBroker` 底层使用 Redis `LPUSH / BRPOP`
@@ -75,9 +79,13 @@ async def process_order():
 
 如果 `worker_b` 先从同一个 `taskiq` 队列里抢到 `a.send_email` 的消息，它会发现本地没有这个任务，然后直接丢弃。
 
+反过来说：
+- 如果 `worker_a` 和 `worker_b` 都注册了 `a.send_email`，那它们共享同一个队列就是正常的竞争消费
+- 问题不在于“多个 worker”，而在于“多个不兼容的 worker”
+
 **正确做法**:
-- 不同服务使用不同 `queue_name`
-- 不同教程案例不要长期共享默认队列
+- 同一组同构 worker 可以共享一个 `queue_name`
+- 不同服务、不同教程案例、不同职责边界的 worker 不要长期共享同一个队列
 - 单 broker 示例统一使用 `TASKIQ_QUEUE_NAME`
 - 多 broker 示例统一使用 `TASKIQ_QUEUE_NAME_<BROKER_NAME>`
 - 模板层通过 `TaskiqConfig.queue_name` / `TASKIQ_QUEUE_NAME` 显式指定逻辑队列
@@ -108,6 +116,7 @@ task "xxx" is not found. Maybe you forgot to import it?
 **边界说明**:
 - 这个问题属于 `ListQueueBroker`
 - `PubSubBroker` 是广播模式，不会“只被一个 worker 抢到”，但它也不是任务队列隔离方案
+- 如果你本来就是要做“同类 worker 横向扩容”，共享同一个 `queue_name` 是正确用法
 
 ## 3. 在 `async def` 里塞同步阻塞代码
 

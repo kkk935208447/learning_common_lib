@@ -23,6 +23,7 @@ pubsub = PubSubBroker(
 ```
 
 - 不要长期依赖 TaskIQ 默认队列名 `taskiq`
+- 同一组同构 worker 可以共享一个 `queue_name` 做横向扩容
 - 不同服务、不同教程案例、不同职责的 worker 应显式使用不同 `queue_name`
 - `task_name` 只决定 worker 拿到消息后如何分发，不负责 broker 层的消费隔离
 
