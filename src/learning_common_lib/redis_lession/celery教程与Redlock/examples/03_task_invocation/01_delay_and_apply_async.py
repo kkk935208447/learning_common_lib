@@ -11,6 +11,14 @@
 运行方式:
   Worker: celery -A examples.03_task_invocation.01_delay_and_apply_async worker -l info -Q default,high_priority,greetings
   Client: python examples/03_task_invocation/01_delay_and_apply_async.py
+
+开启 default, high_priority, greetings 队列后的redis 0 数据库的 key 如下：
+    Key (键名)	Type (类型)	Value (值 / 集合内容)
+    _kombu.bi...	set	[celerycelery]                        # 默认队列
+    _kombu.bi...	set	[defaultdefault]                      # 开启 default 队列
+    _kombu.bi...	set	[greetingsgreetings]                  # 开启 greetings 队列
+    _kombu.bi...	set	[high_priorityhigh_priority]          # 开启 high_priority 队列
+
 预期现象:
   - delay() 与 apply_async(args=..., kwargs=...) 在基础调用上效果一致
   - 一旦需要调度或路由，必须切到 apply_async()
