@@ -123,7 +123,7 @@ async def on_shutdown(state: TaskiqState) -> None:
 # ── 4. 定义任务（访问 state 中的共享资源） ──
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.01_startup_shutdown.query_user")
 async def query_user(
     user_id: int,
     state: TaskiqState = TaskiqDepends(),
@@ -146,7 +146,7 @@ async def query_user(
     }
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.01_startup_shutdown.update_cache")
 async def update_cache(
     key: str,
     value: str,

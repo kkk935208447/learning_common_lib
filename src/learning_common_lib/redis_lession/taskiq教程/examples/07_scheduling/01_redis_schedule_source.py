@@ -76,19 +76,19 @@ scheduler = TaskiqScheduler(
 # ── 3. 定义可被调度的任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.07_scheduling.01_redis_schedule_source.heartbeat")
 async def heartbeat() -> str:
     """心跳任务。"""
     return "alive"
 
 
-@broker.task
+@broker.task(task_name="examples.07_scheduling.01_redis_schedule_source.cleanup_expired")
 async def cleanup_expired(table: str, days: int = 30) -> dict:
     """清理过期数据。"""
     return {"table": table, "days": days, "status": "cleaned"}
 
 
-@broker.task
+@broker.task(task_name="examples.07_scheduling.01_redis_schedule_source.generate_report")
 async def generate_report(report_type: str) -> dict:
     """生成报表。"""
     return {"report_type": report_type, "status": "generated"}

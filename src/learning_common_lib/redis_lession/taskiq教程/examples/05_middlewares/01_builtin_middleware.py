@@ -113,7 +113,7 @@ broker = ListQueueBroker(
 # ── 3. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.05_middlewares.01_builtin_middleware.say_hello")
 async def say_hello(name: str) -> str:
     """简单问候任务 — 用于触发中间件钩子。"""
     print(f"📦 Worker 正在执行: say_hello({name!r})")

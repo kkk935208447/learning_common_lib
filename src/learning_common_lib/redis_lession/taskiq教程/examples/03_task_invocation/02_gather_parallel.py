@@ -56,7 +56,7 @@ broker = ListQueueBroker(
 # ── 2. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.03_task_invocation.02_gather_parallel.compute_task")
 async def compute_task(task_num: int, value: int) -> dict:
     """模拟计算任务 — 短暂 sleep 后返回结果。"""
     print(f"📦 Worker 执行计算任务 #{task_num}, value={value}")

@@ -65,7 +65,7 @@ RESOURCE_AVAILABLE = True
 # ── 3. 定义任务（通过 Context 控制消息确认） ──
 
 
-@broker.task
+@broker.task(task_name="examples.06_error_handling.01_reject_and_requeue.process_order")
 async def process_order(
     order_data: dict,
     context: Context = TaskiqDepends(),

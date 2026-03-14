@@ -80,7 +80,7 @@ async def get_redis_client() -> dict:
 # ── 3. 定义任务（使用依赖注入） ──
 
 
-@broker.task
+@broker.task(task_name="examples.04_dependency_injection.01_depends_basics.process_with_deps")
 async def process_with_deps(
     order_id: int,
     config: dict = TaskiqDepends(get_config),

@@ -106,7 +106,7 @@ broker = ListQueueBroker(
 # ── 4. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.05_middlewares.02_custom_middleware.slow_add")
 async def slow_add(x: int, y: int) -> int:
     """模拟耗时计算任务。"""
     print(f"📦 Worker 正在执行: slow_add({x}, {y})")

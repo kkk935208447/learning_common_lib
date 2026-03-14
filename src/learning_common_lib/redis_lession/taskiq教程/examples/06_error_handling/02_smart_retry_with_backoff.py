@@ -136,7 +136,11 @@ broker = ListQueueBroker(
 # ── 4. 定义任务（通过 labels 配置重试策略） ──
 
 
-@broker.task(max_retries=3, retry_delay=1.0)
+@broker.task(
+    task_name="examples.06_error_handling.02_smart_retry_with_backoff.fetch_external_api",
+    max_retries=3,
+    retry_delay=1.0,
+)
 async def fetch_external_api(url: str) -> dict:
     """调用外部 API — 可能因网络问题失败（可重试）。"""
     print(f"📦 Worker 调用外部 API: {url}")
@@ -146,7 +150,11 @@ async def fetch_external_api(url: str) -> dict:
     return {"url": url, "status": 200, "data": "ok"}
 
 
-@broker.task(max_retries=5, retry_delay=0.5)
+@broker.task(
+    task_name="examples.06_error_handling.02_smart_retry_with_backoff.process_payment",
+    max_retries=5,
+    retry_delay=0.5,
+)
 async def process_payment(order_id: int, amount: float) -> dict:
     """处理支付 — 可能因服务繁忙失败（可重试）。"""
     print(f"📦 Worker 处理支付: order_id={order_id}, amount={amount}")
@@ -155,7 +163,11 @@ async def process_payment(order_id: int, amount: float) -> dict:
     return {"order_id": order_id, "amount": amount, "status": "paid"}
 
 
-@broker.task(max_retries=3, retry_delay=1.0)
+@broker.task(
+    task_name="examples.06_error_handling.02_smart_retry_with_backoff.validate_data",
+    max_retries=3,
+    retry_delay=1.0,
+)
 async def validate_data(data: dict) -> dict:
     """校验数据 — 格式错误是致命异常，不应重试。"""
     print(f"📦 Worker 校验数据: {data}")

@@ -73,7 +73,7 @@ pubsub_broker = PubSubBroker(
 # ── 2. 在 ListQueueBroker 上定义任务 ──
 
 
-@list_broker.task
+@list_broker.task(task_name="examples.09_broker_patterns.01_pubsub_broker.process_order")
 async def process_order(order_id: int) -> dict:
     """处理订单 — 竞争消费，只有一个 worker 处理。"""
     print(f"📦 [List] Worker 处理订单: order_id={order_id}")
@@ -85,7 +85,7 @@ async def process_order(order_id: int) -> dict:
 # ── 3. 在 PubSubBroker 上定义任务 ──
 
 
-@pubsub_broker.task
+@pubsub_broker.task(task_name="examples.09_broker_patterns.01_pubsub_broker.broadcast_cache_invalidation")
 async def broadcast_cache_invalidation(cache_key: str) -> None:
     """广播缓存失效通知 — 所有 worker 都会收到。"""
     print(f"📢 [PubSub] 收到缓存失效广播: cache_key={cache_key}")

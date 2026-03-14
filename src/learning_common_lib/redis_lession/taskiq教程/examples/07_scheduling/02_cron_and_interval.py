@@ -58,7 +58,10 @@ broker = ListQueueBroker(
 # 这是静态调度方式，调度信息写在代码中
 
 
-@broker.task(schedule=[{"cron": "* * * * *"}])
+@broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.every_minute_task",
+    schedule=[{"cron": "* * * * *"}],
+)
 async def every_minute_task() -> str:
     """每分钟执行一次的任务。
 
@@ -69,7 +72,10 @@ async def every_minute_task() -> str:
     return "every_minute"
 
 
-@broker.task(schedule=[{"cron": "*/5 * * * *"}])
+@broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.every_5_minutes_task",
+    schedule=[{"cron": "*/5 * * * *"}],
+)
 async def every_5_minutes_task() -> str:
     """每 5 分钟执行一次的任务。
 
@@ -80,7 +86,10 @@ async def every_5_minutes_task() -> str:
     return "every_5_minutes"
 
 
-@broker.task(schedule=[{"cron": "0 2 * * *"}])
+@broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.daily_cleanup",
+    schedule=[{"cron": "0 2 * * *"}],
+)
 async def daily_cleanup() -> str:
     """每天凌晨 2 点执行的清理任务。
 
@@ -91,7 +100,10 @@ async def daily_cleanup() -> str:
     return "daily_cleanup"
 
 
-@broker.task(schedule=[{"cron": "0 9 * * 1"}])
+@broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.weekly_report",
+    schedule=[{"cron": "0 9 * * 1"}],
+)
 async def weekly_report() -> str:
     """每周一上午 9 点生成周报。
 
@@ -102,7 +114,10 @@ async def weekly_report() -> str:
     return "weekly_report"
 
 
-@broker.task(schedule=[{"cron": "0 0 1 * *"}])
+@broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.monthly_billing",
+    schedule=[{"cron": "0 0 1 * *"}],
+)
 async def monthly_billing() -> str:
     """每月 1 号零点执行的账单任务。
 
@@ -117,6 +132,7 @@ async def monthly_billing() -> str:
 
 
 @broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.cleanup_expired",
     schedule=[
         {
             "cron": "*/10 * * * *",
@@ -135,6 +151,7 @@ async def cleanup_expired(table: str, days: int = 30) -> dict:
 
 
 @broker.task(
+    task_name="examples.07_scheduling.02_cron_and_interval.twice_daily_sync",
     schedule=[
         {"cron": "0 9 * * *"},   # 每天 9 点
         {"cron": "0 18 * * *"},  # 每天 18 点

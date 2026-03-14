@@ -82,21 +82,21 @@ batch_broker = create_queue_broker("batch")
 # ── 2. 在各自的 broker 上注册任务 ──
 
 
-@default_broker.task
+@default_broker.task(task_name="examples.09_broker_patterns.02_multiple_queues.default_task")
 async def default_task(message: str) -> dict:
     """默认队列任务。"""
     print(f"📦 [default] 处理消息: {message}")
     return {"queue_name": "default", "message": message, "status": "done"}
 
 
-@high_priority_broker.task
+@high_priority_broker.task(task_name="examples.09_broker_patterns.02_multiple_queues.high_priority_task")
 async def high_priority_task(order_id: int) -> dict:
     """高优先级任务。"""
     print(f"🔥 [high_priority] 紧急处理订单: order_id={order_id}")
     return {"queue_name": "high_priority", "order_id": order_id, "status": "done"}
 
 
-@batch_broker.task
+@batch_broker.task(task_name="examples.09_broker_patterns.02_multiple_queues.batch_task")
 async def batch_task(batch_id: str, count: int) -> dict:
     """批处理任务。"""
     print(f"📊 [batch] 批量处理: batch_id={batch_id}, count={count}")

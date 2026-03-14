@@ -88,7 +88,7 @@ async def get_app_config() -> dict:
 # ── 3. TaskIQ 任务（使用 TaskiqDepends 注入共享依赖） ──
 
 
-@broker.task
+@broker.task(task_name="examples.10_fastapi_integration.02_fastapi_depends_shared.background_process")
 async def background_process(
     order_id: int,
     redis_pool: dict = TaskiqDepends(get_redis_pool),

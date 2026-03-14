@@ -129,7 +129,7 @@ broker = ListQueueBroker(
 # 通过 message.labels["_retry_count"] 推导当前尝试次数，避免多进程下的全局计数失真
 
 
-@broker.task
+@broker.task(task_name="examples.05_middlewares.03_retry_middleware.unstable_task")
 async def unstable_task(
     item: str,
     context: Context = TaskiqDepends(),

@@ -65,7 +65,7 @@ broker = ListQueueBroker(
 # ── 2. 定义异步任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.10_fastapi_integration.01_fastapi_taskiq.process_order")
 async def process_order(order_id: int, amount: float) -> dict:
     """处理订单 — 模拟耗时业务逻辑。"""
     import random

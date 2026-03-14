@@ -89,7 +89,7 @@ async def get_db_session(
 # ── 3. 定义任务（使用嵌套依赖） ──
 
 
-@broker.task
+@broker.task(task_name="examples.04_dependency_injection.03_nested_depends.query_orders")
 async def query_orders(
     customer_id: int,
     db_session: dict = TaskiqDepends(get_db_session),

@@ -137,7 +137,7 @@ async def cleanup_resources(state: TaskiqState) -> None:
 # ── 4. 定义任务（通过 TaskiqState 访问共享资源） ──
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.02_broker_events.get_user_profile")
 async def get_user_profile(
     user_id: int,
     state: TaskiqState = TaskiqDepends(),
@@ -167,7 +167,7 @@ async def get_user_profile(
     }
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.02_broker_events.batch_cache_warmup")
 async def batch_cache_warmup(
     keys: list[str],
     state: TaskiqState = TaskiqDepends(),

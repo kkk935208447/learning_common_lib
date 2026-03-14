@@ -59,7 +59,7 @@ broker = ListQueueBroker(
 # ── 2. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.03_task_invocation.01_kiq_and_kicker.process_order")
 async def process_order(order_id: int, amount: float) -> dict:
     """处理订单 — 模拟业务逻辑。"""
     print(f"📦 Worker 处理订单: order_id={order_id}, amount={amount}")

@@ -83,7 +83,7 @@ async def shutdown(state: TaskiqState) -> None:
 # ── 3. 定义任务 — 使用 Context ──
 
 
-@broker.task
+@broker.task(task_name="examples.04_dependency_injection.02_context_and_state.task_with_context")
 async def task_with_context(
     order_id: int,
     context: Context = TaskiqDepends(),
@@ -104,7 +104,7 @@ async def task_with_context(
 # ── 4. 定义任务 — 使用 TaskiqState ──
 
 
-@broker.task
+@broker.task(task_name="examples.04_dependency_injection.02_context_and_state.task_with_state")
 async def task_with_state(
     query: str,
     state: TaskiqState = TaskiqDepends(),
