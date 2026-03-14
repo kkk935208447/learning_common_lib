@@ -32,6 +32,10 @@ app.conf.update(
 
 
 # ── 2. 回显任务 ──
+# 通常来说，当task 未给定 name 参数时，celery 会从自动拼接： worker启动模块路径 + 函数名进行自动拼接为： ”模块路径.func“。因此如果是这种方式需要满足： ”Celery 实例名 == Wroker 启动模块路径“。
+# 而如果task 给定 name 参数时，需要该字符串在整个celery都是独一无二的（celery是根据这个字符串来判断谁提交的任务），这时 celery 实例名和 task name 可以随意命名。
+# 如：@app.task(name="ddjdddddddjdjdj")
+# 强烈建议使用显示注册：“模块路径.func” 来命名，如：@app.task(name="examples.02_task_definition.02_serialization.echo")
 @app.task
 def echo(data: Any) -> Any:
     """原样返回参数，用于测试序列化"""
