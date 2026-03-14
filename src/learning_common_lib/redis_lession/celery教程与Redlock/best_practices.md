@@ -36,7 +36,17 @@
 - 设置 `expires` 防止过期消息堆积
 - 不要在任务内部同步调用另一个任务的 `.get()`（死锁风险）
 
-## 4. 错误处理
+## 4. Async Worker 与 Async Task
+
+- 先区分 producer async 和 worker async：`asyncio.to_thread(task.delay, ...)` 只是在 async Web/RPC 场景下安全发布任务
+- `prefork` 仍是默认基线，优先给 CPU 任务、阻塞式 SDK、传统同步代码
+- `gevent` 是 Celery 官方 greenlet 中间态：适合 cooperative IO，但 task 依然是 `sync def`
+- `async def task` 只适合真正使用异步库的 IO 场景，例如 `httpx.AsyncClient`、异步数据库驱动、异步 Redis 客户端
+- 迁移期可以先在同步 task 中使用 `asyncio.run(...)` 桥接协程，但大量 async IO 更适合拆独立 aio worker
+- `celery-aio-pool` 适合放到专门队列，例如 `aio_jobs`；不要让同步、greenlet、aio 任务无界混跑
+- CPU 密集型任务仍优先 `prefork`，不要因为风格统一而强行改成 async task
+
+## 5. 错误处理
 
 - 区分可重试错误和致命错误
   ```python
@@ -47,7 +57,7 @@
 - 设置合理的 `max_retries`（推荐 3-5 次），避免无限重试
 - `acks_late=True` + `reject_on_worker_lost=True`：worker 崩溃时任务重新入队
 
-## 5. 队列与路由
+## 6. 队列与路由
 
 - 按任务类型分队列：CPU 密集型、IO 密集型、快速任务分开
 - 不同队列启动不同 concurrency 的 worker
@@ -55,45 +65,55 @@
   celery -A myproj.celery_app:app worker -Q cpu_heavy --concurrency=2
   celery -A myproj.celery_app:app worker -Q io_tasks --concurrency=20
   ```
+- async task 建议独立部署 aio worker
+  ```bash
+  export CELERY_CUSTOM_WORKER_POOL='celery_aio_pool.pool:AsyncIOPool'
+  celery -A myproj.celery_app:app worker -P custom -Q aio_jobs --concurrency=50
+  ```
+- cooperative IO 任务可以放到官方 greenlet worker
+  ```bash
+  celery -A myproj.celery_app:app worker -P gevent -Q greenlet_jobs --concurrency=100
+  ```
 - `worker_prefetch_multiplier=1`：一次只预取一个任务，配合 `acks_late` 实现公平调度
 
-## 6. 定时任务
+## 7. 定时任务
 
 - 生产环境只运行一个 Beat 进程（多个会导致重复调度）
 - 使用 `django-celery-beat` 或自定义 DatabaseScheduler 实现动态调度
 - crontab 表达式注意时区：`timezone = "Asia/Shanghai"`
 
-## 7. 工作流
+## 8. 工作流
 
 - chain 中某个任务失败，后续任务不会执行（错误传播）
 - chord 的 callback 只在所有 header 任务成功后才执行
 - 避免超长 chain（>10 步），改用状态机或 saga 模式
 - group 中的任务数量不要过大（>1000），考虑用 chunks 分批
 
-## 8. 监控
+## 9. 监控
 
 - 生产环境部署 Flower：`celery -A myproj.celery_app:app flower --port=5555`
 - 开启 `worker_send_task_events=True` 获取实时事件
 - 利用 task signals 做结构化日志、指标采集
 - 监控队列长度，设置告警阈值
 
-## 9. 分布式锁
+## 10. 分布式锁
 
 - 锁超时（timeout）必须大于任务最大执行时间，否则锁提前释放导致并发问题
 - 教程基础篇可先用 redis-py 内置 `Lock` 理解原理
 - 企业模板默认使用 `python-redis-lock`，优先开启 `auto_renewal=True`
 - 锁名使用业务语义：`lock:order:{order_id}`，不要用 UUID
 - 获取锁失败时快速失败（抛异常），不要无限等待
-- 长任务不要只依赖固定 TTL；看门狗续期更适合 Celery worker
+- 长任务不要只依赖固定 TTL；要先演示“固定 TTL 的失败态”，再引入看门狗续期
+- 看门狗解决的是“长任务期间持续续期”，不是把所有锁问题都自动消灭
 
-## 10. FastAPI 集成
+## 11. FastAPI 集成
 
 - 使用 lifespan 管理 Celery app 和 Redis 连接的生命周期
 - 任务发布用 `asyncio.to_thread()` 包装，不阻塞 ASGI 事件循环
 - 提供 `/tasks/{task_id}/status` 轮询端点，返回标准化状态
 - 考虑 WebSocket 推送替代轮询（高频场景）
 
-## 11. Worker 部署
+## 12. Worker 部署
 
 - 使用 supervisor 或 systemd 管理 worker 进程，确保崩溃自动重启
   ```ini
@@ -107,9 +127,10 @@
 - 统一提供单一 app 入口，例如 `myproj/celery_app.py`，避免 worker / beat / Flower 分别指向不同模块
 - 日志配置：`--logfile=/var/log/celery/worker.log --loglevel=info`
 - 多队列部署：每个队列一个 worker 组，独立扩缩容
+- 同步队列、greenlet 队列、aio 队列分开部署，避免 pool 模型互相牵制
 - 代码更新后必须重启 worker（worker 不会自动加载新代码）
 
-## 12. Redis Broker 调优
+## 13. Redis Broker 调优
 
 - 设置 `maxmemory` 和 `maxmemory-policy allkeys-lru`，防止 OOM
 - Broker 和 Backend 使用不同 Redis db（或不同实例），隔离故障域

@@ -7,11 +7,11 @@
 关键 API: chain(), group(), .s(), .si(), | 操作符
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
-  - 从上级目录: cd examples/08_workflows
+  - 从上级目录: cd examples/09_workflows
 运行方式:
-  Worker: celery -A examples.08_workflows.01_chain_and_group worker -l info -P solo
+  Worker: celery -A examples.09_workflows.01_chain_and_group worker -l info -P solo
     (-P solo 使用单线程池，便于观察执行顺序)
-  Client: python examples/08_workflows/01_chain_and_group.py
+  Client: python examples/09_workflows/01_chain_and_group.py
     (演示各种工作流组合模式)
 预期现象:
   - Chain 任务按顺序执行，每个任务接收前一个的结果
@@ -34,7 +34,7 @@ from celery import Celery, chain, group
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.08_workflows.01_chain_and_group",
+    "examples.09_workflows.01_chain_and_group",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

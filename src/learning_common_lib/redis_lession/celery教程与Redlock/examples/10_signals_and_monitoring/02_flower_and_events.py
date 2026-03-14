@@ -6,9 +6,9 @@ Python 版本: 3.11+
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
-    celery -A examples.09_signals_and_monitoring.02_flower_and_events worker -l info -P solo
+    celery -A examples.10_signals_and_monitoring.02_flower_and_events worker -l info -P solo
   终端 2 (运行示例):
-    uv run python examples/09_signals_and_monitoring/02_flower_and_events.py
+    uv run python examples/10_signals_and_monitoring/02_flower_and_events.py
   (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
 预期现象: 打印 Flower 配置、事件类型、监控命令，演示事件配置
 生产提醒: Flower 需独立部署，建议与 worker 共用稳定 app 入口
@@ -25,7 +25,7 @@ from celery import Celery
 
 # ── 1. 创建 Celery 应用并配置事件 ──
 app = Celery(
-    "examples.09_signals_and_monitoring.02_flower_and_events",
+    "examples.10_signals_and_monitoring.02_flower_and_events",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

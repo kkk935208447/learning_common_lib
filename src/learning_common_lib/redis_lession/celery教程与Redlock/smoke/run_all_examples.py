@@ -10,8 +10,9 @@ Celery 教程与 Redis 分布式锁 smoke 测试
 
 前置条件：
     1. celery[redis] 已安装（uv sync）
-    2. Redis 已启动（密码 123456）
-    3. 本脚本会清空教程专用 Redis DB 0/1，避免不同示例互相污染
+    2. gevent / celery-aio-pool 已安装（第 4 章 worker 对比示例需要）
+    3. Redis 已启动（密码 123456）
+    4. 本脚本会清空教程专用 Redis DB 0/1/2，避免不同示例互相污染
 
 运行方式（从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录）：
     uv run python smoke/run_all_examples.py
@@ -35,13 +36,79 @@ SKIP_FILES = {
 NO_WORKER_NEEDED = {
     "02_config_patterns.py",     # 只读配置，不调度任务
     "02_distributed_lock.py",  # 只演示 Redis 锁，不提交 Celery 任务
+    "04_sync_vs_greenlet_vs_asyncio.py",  # 纯对比总结脚本
 }
 
 EXAMPLE_TIMEOUT = 60
 WORKER_STARTUP_WAIT = 5
+PREFORK_STARTUP_WAIT = 8
+GREENLET_STARTUP_WAIT = 8
+CUSTOM_POOL_STARTUP_WAIT = 8
 
 EXAMPLE_TIMEOUT_OVERRIDES = {
-    "03_watchdog_lock_with_celery.py": 90,
+    "02_official_greenlet_pools.py": 90,
+    "05_mixed_deployment_patterns.py": 90,
+    "03_watchdog_lock_with_celery.py": 120,
+}
+
+ASYNCIO_POOL_CLASS = "celery_aio_pool.pool:AsyncIOPool"
+
+WORKER_SPECS = {
+    "examples/03_task_invocation/01_delay_and_apply_async.py": [
+        {"queues": "default,high_priority,greetings"},
+    ],
+    "examples/03_task_invocation/02_signatures.py": [
+        {"queues": "default,math_queue"},
+    ],
+    "examples/04_async_worker_tasks/01_sync_worker_baseline.py": [
+        {
+            "queues": "prefork_jobs",
+            "pool": "prefork",
+            "concurrency": 2,
+            "startup_wait": PREFORK_STARTUP_WAIT,
+        },
+    ],
+    "examples/04_async_worker_tasks/02_official_greenlet_pools.py": [
+        {
+            "queues": "prefork_jobs",
+            "pool": "prefork",
+            "concurrency": 2,
+            "startup_wait": PREFORK_STARTUP_WAIT,
+        },
+        {
+            "queues": "greenlet_jobs",
+            "pool": "gevent",
+            "concurrency": 20,
+            "startup_wait": GREENLET_STARTUP_WAIT,
+        },
+    ],
+    "examples/04_async_worker_tasks/03_custom_aio_pool_async_task.py": [
+        {
+            "queues": "aio_jobs",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/04_async_worker_tasks/05_mixed_deployment_patterns.py": [
+        {
+            "queues": "prefork_jobs",
+            "pool": "prefork",
+            "concurrency": 2,
+            "startup_wait": PREFORK_STARTUP_WAIT,
+        },
+        {
+            "queues": "aio_jobs",
+            "pool": "custom",
+            "concurrency": 20,
+            "startup_wait": CUSTOM_POOL_STARTUP_WAIT,
+            "env": {"CELERY_CUSTOM_WORKER_POOL": ASYNCIO_POOL_CLASS},
+        },
+    ],
+    "examples/07_routing_and_queues/01_task_queues.py": [
+        {"queues": "default,email_queue,report_queue,notification_queue"},
+    ],
 }
 
 
@@ -66,46 +133,50 @@ def get_celery_module(path: Path, base: Path) -> str:
     return str(rel.with_suffix("")).replace(os.sep, ".")
 
 
-def needs_worker(path: Path) -> bool:
-    """判断文件是否需要启动 worker。"""
+def get_worker_specs(path: Path, base: Path) -> list[dict[str, object]]:
+    """按示例文件返回 worker 规格。"""
     # template 文件不需要 worker（它们的 _demo 自行处理）
     if "templates" in path.parts:
-        return False
+        return []
     # 特定文件不需要 worker
     if path.name in NO_WORKER_NEEDED:
-        return False
-    return True
+        return []
+    rel_path = str(path.relative_to(base))
+    return WORKER_SPECS.get(rel_path, [{}])
 
 
-def start_worker(module: str, base: Path, queues: str | None = None) -> subprocess.Popen:
+def needs_worker(path: Path, base: Path) -> bool:
+    """判断文件是否需要启动 worker。"""
+    return bool(get_worker_specs(path, base))
+
+
+def start_worker(module: str, base: Path, spec: dict[str, object]) -> subprocess.Popen:
     """启动 Celery worker 子进程。"""
+    pool = str(spec.get("pool", "solo"))
+    concurrency = spec.get("concurrency")
     cmd = [
         sys.executable, "-m", "celery",
         "-A", module,
         "worker",
         "-l", "error",
-        "-P", "solo",
+        "-P", pool,
     ]
+    if concurrency:
+        cmd.extend(["-c", str(concurrency)])
+    queues = spec.get("queues")
     if queues:
-        cmd.extend(["-Q", queues])
+        cmd.extend(["-Q", str(queues)])
+
+    env = os.environ.copy()
+    env.update({k: str(v) for k, v in dict(spec.get("env", {})).items()})
 
     return subprocess.Popen(
         cmd,
         cwd=str(base),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-
-
-def get_worker_queues(path: Path) -> str | None:
-    """某些文件需要 worker 消费特定队列。"""
-    if path.name == "01_task_queues.py":
-        return "default,email_queue,report_queue,notification_queue"
-    if path.name == "01_delay_and_apply_async.py":
-        return "default,high_priority,greetings"
-    if path.name == "02_signatures.py":
-        return "default,math_queue"
-    return None
 
 
 def get_example_timeout(path: Path) -> int:
@@ -135,22 +206,21 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
     if rel in SKIP_FILES:
         return (str(path), True, "SKIPPED")
 
-    worker_proc = None
+    worker_procs: list[subprocess.Popen] = []
     try:
         reset_tutorial_redis()
         timeout = get_example_timeout(path)
 
-        if needs_worker(path):
+        if needs_worker(path, base):
             module = get_celery_module(path, base)
-            queues = get_worker_queues(path)
-            worker_proc = start_worker(module, base, queues)
-            # 等待 worker 启动
-            time.sleep(WORKER_STARTUP_WAIT)
-
-            # 检查 worker 是否已崩溃
-            if worker_proc.poll() is not None:
-                stderr = worker_proc.stderr.read().decode() if worker_proc.stderr else ""
-                return (str(path), False, f"Worker 启动失败: {stderr[-500:]}")
+            worker_specs = get_worker_specs(path, base)
+            for spec in worker_specs:
+                proc = start_worker(module, base, spec)
+                worker_procs.append(proc)
+                time.sleep(int(spec.get("startup_wait", WORKER_STARTUP_WAIT)))
+                if proc.poll() is not None:
+                    stderr = proc.stderr.read().decode() if proc.stderr else ""
+                    return (str(path), False, f"Worker 启动失败: {stderr[-500:]}")
 
         # 运行示例脚本
         result = subprocess.run(
@@ -172,13 +242,13 @@ def run_one(path: Path, base: Path) -> tuple[str, bool, str]:
     except Exception as exc:
         return (str(path), False, f"ERROR: {exc}")
     finally:
-        if worker_proc is not None:
+        for proc in reversed(worker_procs):
             try:
-                worker_proc.send_signal(signal.SIGTERM)
-                worker_proc.wait(timeout=10)
+                proc.send_signal(signal.SIGTERM)
+                proc.wait(timeout=10)
             except Exception:
-                worker_proc.kill()
-                worker_proc.wait(timeout=5)
+                proc.kill()
+                proc.wait(timeout=5)
         reset_tutorial_redis()
 
 
@@ -220,7 +290,10 @@ def main() -> None:
             print(f"  SKIP  {rel_path}", flush=True)
             skipped += 1
         elif ok:
-            w = " (w/ worker)" if needs_worker(path) else ""
+            worker_specs = get_worker_specs(path, base)
+            worker_count = len(worker_specs)
+            label = "workers" if worker_count != 1 else "worker"
+            w = f" (w/ {worker_count} {label})" if worker_specs else ""
             print(f"  PASS  {rel_path}{w}", flush=True)
             passed += 1
         else:

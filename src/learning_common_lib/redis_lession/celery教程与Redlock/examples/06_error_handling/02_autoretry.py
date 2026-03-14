@@ -7,11 +7,11 @@
 关键 API: autoretry_for, retry_backoff, retry_jitter, on_failure, retry_backoff_max
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
-  - 从上级目录: cd examples/05_error_handling
+  - 从上级目录: cd examples/06_error_handling
 运行方式:
-  Worker: celery -A examples.05_error_handling.02_autoretry worker -l info
+  Worker: celery -A examples.06_error_handling.02_autoretry worker -l info
     (观察自动重试的指数退避和抖动过程)
-  Client: python examples/05_error_handling/02_autoretry.py
+  Client: python examples/06_error_handling/02_autoretry.py
     (触发不同异常类型并观察自动重试行为)
 预期现象:
   - autoretry_for 异常自动重试，其他异常直接失败
@@ -35,7 +35,7 @@ from celery import Celery, Task
 
 # ── 1. 创建应用 ──
 app = Celery(
-    "examples.05_error_handling.02_autoretry",
+    "examples.06_error_handling.02_autoretry",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

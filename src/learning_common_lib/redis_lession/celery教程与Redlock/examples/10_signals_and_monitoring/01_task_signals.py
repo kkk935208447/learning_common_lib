@@ -6,9 +6,9 @@ Python 版本: 3.11+
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
-    celery -A examples.09_signals_and_monitoring.01_task_signals worker -l info -P solo
+    celery -A examples.10_signals_and_monitoring.01_task_signals worker -l info -P solo
   终端 2 (运行示例):
-    uv run python examples/09_signals_and_monitoring/01_task_signals.py
+    uv run python examples/10_signals_and_monitoring/01_task_signals.py
   (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
 预期现象: Worker 终端打印信号触发顺序，客户端终端显示任务结果
 生产提醒: 信号处理器应轻量快速，避免阻塞
@@ -32,7 +32,7 @@ from celery.signals import (
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.09_signals_and_monitoring.01_task_signals",
+    "examples.10_signals_and_monitoring.01_task_signals",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

@@ -7,11 +7,11 @@
 关键 API: FastAPI, TestClient, AsyncResult, lifespan, asyncio.to_thread
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
-  - 从上级目录: cd examples/10_fastapi_integration
+  - 从上级目录: cd examples/11_fastapi_integration
 运行方式:
-  Worker: celery -A examples.10_fastapi_integration.01_fastapi_celery worker -l info
+  Worker: celery -A examples.11_fastapi_integration.01_fastapi_celery worker -l info
     (启动 worker 处理来自 FastAPI 的任务)
-  Client: python examples/10_fastapi_integration/01_fastapi_celery.py
+  Client: python examples/11_fastapi_integration/01_fastapi_celery.py
     (使用 TestClient 模拟 HTTP 请求和任务轮询)
 预期现象:
   - POST 请求立即返回任务 ID，不阻塞 HTTP 响应
@@ -40,7 +40,7 @@ from starlette.testclient import TestClient
 
 # ── 1. 创建 Celery 应用 ──
 celery_app = Celery(
-    "examples.10_fastapi_integration.01_fastapi_celery",
+    "examples.11_fastapi_integration.01_fastapi_celery",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

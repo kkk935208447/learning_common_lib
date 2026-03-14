@@ -144,7 +144,7 @@ chunks:   [item1, item2, ..., itemN]
   2. 连接 Broker (Redis db=0)
   3. 连接 Result Backend (Redis db=1)
   4. 注册所有任务
-  5. 启动 Worker Pool (prefork/solo/gevent/eventlet)
+  5. 启动 Worker Pool (prefork/solo/gevent/custom)
   6. 开始消费队列消息
 
 运行阶段:
@@ -163,7 +163,7 @@ chunks:   [item1, item2, ..., itemN]
 | prefork | 多进程 | CPU 密集型（默认） | `-P prefork -c 4` |
 | solo | 单线程 | 教程演示、调试 | `-P solo` |
 | gevent | 协程 | IO 密集型 | `-P gevent -c 100` |
-| eventlet | 协程 | IO 密集型 | `-P eventlet -c 100` |
+| custom (AsyncIOPool) | asyncio | async def task / 异步 IO | `CELERY_CUSTOM_WORKER_POOL=celery_aio_pool.pool:AsyncIOPool celery ... -P custom -c 100` |
 
 ## 消息流转详细图
 
@@ -188,10 +188,11 @@ Producer                    Broker (Redis)              Worker
 | 配置层 | App 创建、参数 | 01 章 | `celery_config.py`, `celery_app.py` |
 | 任务层 | 定义、序列化 | 02 章 | `task_base.py` |
 | 发布层 | 调用、签名 | 03 章 | `celery_app.py` (async_delay) |
-| 结果层 | 状态、过期 | 04 章 | `celery_config.py` (result_expires) |
-| 容错层 | 重试、异常 | 05 章 | `error_handling.py`, `task_base.py` |
-| 路由层 | 队列、优先级 | 06 章 | `celery_config.py` (task_routes) |
-| 调度层 | Beat、动态 | 07 章 | — |
-| 编排层 | chain/group/chord | 08 章 | — |
-| 监控层 | 信号、Flower | 09 章 | — |
-| 集成层 | FastAPI、Redis 分布式锁 | 10 章 | `fastapi_celery.py`, `distributed_lock.py` |
+| Async Worker 层 | prefork 基线、gevent 中间态、custom aio pool | 04 章 | — |
+| 结果层 | 状态、过期 | 05 章 | `celery_config.py` (result_expires) |
+| 容错层 | 重试、异常 | 06 章 | `error_handling.py`, `task_base.py` |
+| 路由层 | 队列、优先级 | 07 章 | `celery_config.py` (task_routes) |
+| 调度层 | Beat、动态 | 08 章 | — |
+| 编排层 | chain/group/chord | 09 章 | — |
+| 监控层 | 信号、Flower | 10 章 | — |
+| 集成层 | FastAPI、Redis 分布式锁 | 11 章 | `fastapi_celery.py`, `distributed_lock.py` |

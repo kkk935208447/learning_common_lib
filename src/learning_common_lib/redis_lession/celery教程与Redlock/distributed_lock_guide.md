@@ -1,8 +1,8 @@
 # 单 Redis 分布式锁原理与队列关系指南
 
 配套文件：
-- 基础示例：`examples/10_fastapi_integration/02_distributed_lock.py`
-- 企业示例：`examples/10_fastapi_integration/03_watchdog_lock_with_celery.py`
+- 基础示例：`examples/11_fastapi_integration/02_distributed_lock.py`
+- 企业示例：`examples/11_fastapi_integration/03_watchdog_lock_with_celery.py`
 - 企业模板：`templates/distributed_lock.py`
 
 ## Part 1: Redis 分布式锁原理
@@ -81,6 +81,12 @@ with lock:
 - `python-redis-lock` 的 `auto_renewal=True` 能通过后台线程持续续期
 - 因此教程基础篇用 `redis-py` 讲原理，企业模板直接用 `python-redis-lock`
 
+### 教程里的对比主线
+
+- `02_distributed_lock.py`: 先证明固定 TTL 在短任务里是够用的
+- `02_distributed_lock.py`: 再证明同样的固定 TTL 放到长任务里会中途失锁
+- `03_watchdog_lock_with_celery.py`: 最后在相同参数下对比 `auto_renewal=False/True`
+
 ## Part 2: Celery 队列与分布式锁的关系
 
 ### 核心结论
@@ -127,7 +133,7 @@ lock_client = redis.Redis(
 
 ## Part 3: 教程中多队列使用的合理性
 
-### 第 6 章多队列设计
+### 第 7 章多队列设计
 
 ```python
 app.conf.task_queues = (

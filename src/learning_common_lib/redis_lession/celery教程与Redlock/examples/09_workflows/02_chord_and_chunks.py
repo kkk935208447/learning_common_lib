@@ -6,9 +6,9 @@ Python 版本: 3.11+
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
-    celery -A examples.08_workflows.02_chord_and_chunks worker -l info -P solo
+    celery -A examples.09_workflows.02_chord_and_chunks worker -l info -P solo
   终端 2 (运行示例):
-    uv run python examples/08_workflows/02_chord_and_chunks.py
+    uv run python examples/09_workflows/02_chord_and_chunks.py
   (从 src/learning_common_lib/redis_lession/celery教程与Redlock 目录)
 预期现象: 演示 chord 并行+回调、chunks 分块处理、错误处理
 生产提醒: chord 依赖 result backend；chord 中任一任务失败会触发 chord_error 而非 callback
@@ -22,7 +22,7 @@ from celery import Celery, chord, group
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.08_workflows.02_chord_and_chunks",
+    "examples.09_workflows.02_chord_and_chunks",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

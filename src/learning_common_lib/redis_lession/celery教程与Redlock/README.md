@@ -1,8 +1,29 @@
 # Celery 教程与 Redis 分布式锁
 
+## 删除重置 redis 内容
+```python
+import redis as redis_lib
+def reset_tutorial_redis() -> None:
+    """清空教程专用 Redis DB，避免示例之间互相污染。"""
+    for db in (0, 1, 2, 3, 4):
+        client = redis_lib.Redis(
+            host="localhost",
+            port=6379,
+            password="123456",
+            db=db,
+            socket_connect_timeout=3,
+        )
+        try:
+            client.flushdb()
+        finally:
+            client.close()
+reset_tutorial_redis()
+````
+
+
 ## 定位
 
-从零掌握 Celery 分布式任务队列 + Redis 分布式锁，覆盖配置、任务定义、调用、结果、重试、路由、定时、工作流、监控、FastAPI 集成共 10 章渐进式示例，外加一套企业级可复用模板。
+从零掌握 Celery 分布式任务队列 + Redis 分布式锁，覆盖配置、任务定义、调用、async worker、结果、重试、路由、定时、工作流、监控、FastAPI 集成共 11 章渐进式示例，外加一套企业级可复用模板。
 
 说明：
 - 当前目录名仍然保留历史名称 `celery教程与Redlock`
@@ -21,11 +42,13 @@
 |------|------|------|
 | Python | 3.11+ | 运行环境 |
 | celery[redis] | 5.3+ | 任务队列 + Redis broker/backend |
+| celery-aio-pool | 0.1.0rc8+ | 第 4 章 async worker / async task |
+| gevent | 25.5+ | 第 4 章官方 greenlet 中间态 |
 | redis | 5.0+ | redis-py（内置 Lock 支持） |
 | python-redis-lock | 4.0+ | 企业级分布式锁自动续期 |
-| flower | 2.0+ | 第 9 章监控 |
-| fastapi | 0.100+ | 第 10 章集成 |
-| uvicorn | 0.20+ | 第 10 章集成 |
+| flower | 2.0+ | 第 10 章监控 |
+| fastapi | 0.100+ | 第 11 章集成 |
+| uvicorn | 0.20+ | 第 11 章集成 |
 
 ## 环境准备
 
@@ -37,7 +60,7 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # 应返回 PONG
 python -c "import redis; print(redis.Redis(host='localhost', port=6379, password='123456').ping())"
 
 # 2. 安装依赖
-uv add "celery[redis]" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
+uv add "celery[redis]" "celery-aio-pool>=0.1.0rc8" "gevent>=25.5.1" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
 ```
 
 ## 终端查看后台开启的 celery 进程
@@ -64,13 +87,14 @@ celery教程与Redlock/
 │   ├── 01_app_and_config/   ← Celery 实例与配置（含 acks_late 运行时示例）
 │   ├── 02_task_definition/  ← 任务定义
 │   ├── 03_task_invocation/  ← 任务调用
-│   ├── 04_result_backend/   ← 结果后端
-│   ├── 05_error_handling/   ← 错误与重试
-│   ├── 06_routing_and_queues/ ← 路由与队列
-│   ├── 07_periodic_tasks/   ← 定时任务
-│   ├── 08_workflows/        ← 工作流编排
-│   ├── 09_signals_and_monitoring/ ← 信号与监控
-│   └── 10_fastapi_integration/   ← FastAPI + Redis 分布式锁（基础篇 + 企业篇）
+│   ├── 04_async_worker_tasks/ ← prefork → gevent → custom aio pool
+│   ├── 05_result_backend/   ← 结果后端
+│   ├── 06_error_handling/   ← 错误与重试
+│   ├── 07_routing_and_queues/ ← 路由与队列
+│   ├── 08_periodic_tasks/   ← 定时任务
+│   ├── 09_workflows/        ← 工作流编排
+│   ├── 10_signals_and_monitoring/ ← 信号与监控
+│   └── 11_fastapi_integration/   ← FastAPI + Redis 分布式锁（基础篇 + 企业篇）
 └── templates/
     ├── __init__.py          ← 公开 API 导出
     ├── celery_config.py     ← 生产级配置
@@ -106,14 +130,38 @@ uv run python smoke/run_all_examples.py
 
 | 终端 | 命令 | 说明 |
 |------|------|------|
-| 终端 1 | `celery -A examples.XX_topic.YY_file worker -l info -P solo` | 启动 Worker |
+| 终端 1 | `celery -A examples.XX_topic.YY_file worker -l info -P <pool>` | 启动 Worker |
 | 终端 2 | `uv run python examples/XX_topic/YY_file.py` | 运行客户端脚本 |
 
 参数说明：
 - `-A`: 指定 Celery app 所在模块
 - `-l info`: 日志级别
-- `-P solo`: 单线程池，适合教程演示
-- `-Q queue1,queue2`: 指定消费的队列（第 6 章路由示例需要）
+- `-P prefork|solo|gevent|custom`: 指定 worker 并发模型
+- `-c N`: 设置并发数，greenlet/aio pool 示例通常需要显式配置
+- `-Q queue1,queue2`: 指定消费的队列（第 7 章路由示例需要）
+
+第 4 章 async worker 示例额外需要：
+- `-P prefork`: 作为传统同步 worker 基线
+- `-P gevent`: 官方 greenlet 并发池
+- `CELERY_CUSTOM_WORKER_POOL='celery_aio_pool.pool:AsyncIOPool'`
+- `-P custom`: 告诉 Celery 使用自定义 worker pool
+- 建议把三类任务拆到独立队列，例如 `prefork_jobs / greenlet_jobs / aio_jobs`
+
+## Async Worker 先导说明
+
+第 4 章会明确对比三层执行模型：
+
+- `prefork`: 默认基线，worker 执行 sync def task
+- `gevent`: 官方 greenlet 中间态，仍是 sync def task，但适合 cooperative IO
+- `custom aio pool`: 真正把 worker 执行层接到 `asyncio`
+
+在进入第 4 章之前，所有示例都主要建立在 Celery 经典同步执行模型上：
+
+- `asyncio.to_thread(task.delay, ...)` 只是在 async producer 中安全调用 Celery 同步 API
+- 它不会自动把 worker 侧变成原生 async 执行
+- 如果你想在 worker 中真正运行 `async def task`，需要 `custom aio pool`
+
+因此本教程把 async worker 单独拆成第 4 章，先讲清 `prefork → gevent → custom aio pool` 的边界，再继续学习结果后端、重试、队列、FastAPI 等后续章节。
 
 ## 命名与启动的生产约定
 
@@ -155,17 +203,18 @@ celery -A myproj worker -l info
 | 01 | App 与配置 | Celery 实例创建、broker/backend 角色、配置方式对比、`acks_late` 与 `broker_transport_options` 区别 |
 | 02 | 任务定义 | @app.task 参数、bind=True、序列化约束 |
 | 03 | 任务调用 | delay/apply_async、Signature、countdown/ETA |
-| 04 | 结果后端 | AsyncResult 状态机、result_expires |
-| 05 | 错误与重试 | self.retry()、autoretry_for、指数退避 |
-| 06 | 路由与队列 | 多队列分流、task_routes、优先级队列 |
-| 07 | 定时任务 | Celery Beat、crontab、动态调度 |
-| 08 | 工作流 | chain/group/chord/chunks |
-| 09 | 信号与监控 | task signals、Flower、自定义事件 |
-| 10 | FastAPI 集成 | 触发任务/轮询状态/Redis 分布式锁 |
+| 04 | Async Worker | `prefork → gevent → custom aio pool`、`asyncio.run()`、mixed deployment |
+| 05 | 结果后端 | AsyncResult 状态机、result_expires |
+| 06 | 错误与重试 | self.retry()、autoretry_for、指数退避 |
+| 07 | 路由与队列 | 多队列分流、task_routes、优先级队列 |
+| 08 | 定时任务 | Celery Beat、crontab、动态调度 |
+| 09 | 工作流 | chain/group/chord/chunks |
+| 10 | 信号与监控 | task signals、Flower、自定义事件 |
+| 11 | FastAPI 集成 | 触发任务/轮询状态/Redis 分布式锁 |
 
-第 10 章中的锁示例分为两层：
-- `02_distributed_lock.py`：基础篇，使用 `redis-py Lock`
-- `03_watchdog_lock_with_celery.py`：企业篇，使用 `python-redis-lock` + Celery 长任务
+第 11 章中的锁示例分为两层：
+- `02_distributed_lock.py`：基础篇，对比“短任务固定 TTL 正常”与“长任务固定 TTL 失锁”
+- `03_watchdog_lock_with_celery.py`：企业篇，在相同参数下对比“无看门狗”和“有看门狗”
 
 ## Redis 连接约定
 

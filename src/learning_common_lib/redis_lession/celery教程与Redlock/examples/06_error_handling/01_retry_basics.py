@@ -7,11 +7,11 @@
 关键 API: self.retry(), max_retries, MaxRetriesExceededError, countdown
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
-  - 从上级目录: cd examples/05_error_handling
+  - 从上级目录: cd examples/06_error_handling
 运行方式:
-  Worker: celery -A examples.05_error_handling.01_retry_basics worker -l info
+  Worker: celery -A examples.06_error_handling.01_retry_basics worker -l info
     (观察重试过程和异常处理日志)
-  Client: python examples/05_error_handling/01_retry_basics.py
+  Client: python examples/06_error_handling/01_retry_basics.py
     (触发各种异常场景并观察重试行为)
 预期现象:
   - Worker 显示重试次数递增和 countdown 延迟
@@ -35,7 +35,7 @@ from celery.exceptions import MaxRetriesExceededError
 
 # ── 1. 创建应用 ──
 app = Celery(
-    "examples.05_error_handling.01_retry_basics",
+    "examples.06_error_handling.01_retry_basics",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

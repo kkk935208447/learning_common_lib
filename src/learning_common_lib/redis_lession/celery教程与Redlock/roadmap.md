@@ -29,60 +29,74 @@ uv sync
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
-## 阶段二：结果与容错（第 4-5 章）
+## 阶段二：Async Worker 边界（第 4 章）
+
+> 目标：按 `prefork → gevent → custom aio pool` 的顺序理解中间态与终态
+
+| 顺序 | 文件 | 学什么 | 为什么在这里 |
+|------|------|--------|-------------|
+| 8 | `examples/04_async_worker_tasks/01_sync_worker_baseline.py` | prefork 基线、producer async vs worker sync | 先建立默认同步模型的参照系 |
+| 9 | `examples/04_async_worker_tasks/02_official_greenlet_pools.py` | gevent、cooperative IO、中间态边界 | 说明官方 greenlet pool 与 async def 不是一回事 |
+| 10 | `examples/04_async_worker_tasks/03_custom_aio_pool_async_task.py` | `custom aio pool`、最小 `async def task` | 跑通真正的 asyncio worker |
+| 11 | `examples/04_async_worker_tasks/04_sync_vs_greenlet_vs_asyncio.py` | 三条路线并排比较 | 把 prefork / greenlet / aio 的边界一次看清 |
+| 12 | `examples/04_async_worker_tasks/05_mixed_deployment_patterns.py` | 一个 app 中混合部署三类 worker | 为渐进式迁移提供生产拓扑样板 |
+
+> 这一章是后续 async 化改造的前置章节。建议在进入结果后端、重试、FastAPI 之前先跑完。
+
+## 阶段三：结果与容错（第 5-6 章）
 
 > 目标：掌握结果获取与错误恢复策略
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 8 | `examples/04_result_backend/01_async_result.py` | AsyncResult 状态机、get/forget | 知道任务执行到哪了 |
-| 9 | `examples/04_result_backend/02_result_expiry.py` | result_expires 配置 | 防止 Redis 内存爆炸 |
-| 10 | `examples/05_error_handling/01_retry_basics.py` | self.retry/max_retries/countdown | 任务失败不可怕，重试才是关键 |
-| 11 | `examples/05_error_handling/02_autoretry.py` | autoretry_for/retry_backoff | 自动重试更省心 |
+| 13 | `examples/05_result_backend/01_async_result.py` | AsyncResult 状态机、get/forget | 通过状态对比知道任务执行到哪了 |
+| 14 | `examples/05_result_backend/02_result_expiry.py` | result_expires 配置 | 防止 Redis 内存爆炸 |
+| 15 | `examples/06_error_handling/01_retry_basics.py` | self.retry/max_retries/countdown | 任务失败不可怕，重试才是关键 |
+| 16 | `examples/06_error_handling/02_autoretry.py` | autoretry_for/retry_backoff | 自动重试更省心 |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
-## 阶段三：生产级特性（第 6-8 章）
+## 阶段四：生产级特性（第 7-9 章）
 
 > 目标：多队列路由、定时调度、工作流编排
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 12 | `examples/06_routing_and_queues/01_task_queues.py` | 多队列、task_routes | 不同任务走不同通道 |
-| 13 | `examples/06_routing_and_queues/02_priority.py` | 优先级队列 | 紧急任务插队 |
-| 14 | `examples/07_periodic_tasks/01_celery_beat.py` | beat_schedule/crontab | 定时任务调度 |
-| 15 | `examples/07_periodic_tasks/02_dynamic_schedule.py` | 运行时增删定时任务 | 动态调度需求 |
-| 16 | `examples/08_workflows/01_chain_and_group.py` | chain/group/错误传播 | 任务编排基础 |
-| 17 | `examples/08_workflows/02_chord_and_chunks.py` | chord/chunks | 并行计算 + 汇总 |
+| 17 | `examples/07_routing_and_queues/01_task_queues.py` | 默认队列、自动路由、显式覆盖 | 把逻辑分流和部署分流区分开 |
+| 18 | `examples/07_routing_and_queues/02_priority.py` | 优先级队列 | 紧急任务插队 |
+| 19 | `examples/08_periodic_tasks/01_celery_beat.py` | beat_schedule/crontab | 定时任务调度 |
+| 20 | `examples/08_periodic_tasks/02_dynamic_schedule.py` | 运行时增删定时任务 | 动态调度需求 |
+| 21 | `examples/09_workflows/01_chain_and_group.py` | chain/group/错误传播 | 任务编排基础 |
+| 22 | `examples/09_workflows/02_chord_and_chunks.py` | chord/chunks | 并行计算 + 汇总 |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
-## 阶段四：监控与集成（第 9-10 章）
+## 阶段五：监控与集成（第 10-11 章）
 
 > 目标：生产监控、FastAPI 集成、分布式锁
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 18 | `examples/09_signals_and_monitoring/01_task_signals.py` | task_prerun/postrun/failure 信号 | 任务生命周期钩子 |
-| 19 | `examples/09_signals_and_monitoring/02_flower_and_events.py` | Flower 监控 + 自定义事件 | 生产可观测性 |
-| 20 | `examples/10_fastapi_integration/01_fastapi_celery.py` | FastAPI + Celery 触发/轮询 | Web 框架集成 |
-| 21 | `examples/10_fastapi_integration/02_distributed_lock.py` | 单 Redis 分布式锁基础篇 | 先理解锁原理和竞争 |
-| 22 | `examples/10_fastapi_integration/03_watchdog_lock_with_celery.py` | python-redis-lock 企业篇 | 理解长任务自动续期 |
+| 23 | `examples/10_signals_and_monitoring/01_task_signals.py` | task_prerun/postrun/failure 信号 | 任务生命周期钩子 |
+| 24 | `examples/10_signals_and_monitoring/02_flower_and_events.py` | Flower 监控 + 自定义事件 | 生产可观测性 |
+| 25 | `examples/11_fastapi_integration/01_fastapi_celery.py` | FastAPI + Celery 触发/轮询 | Web 框架集成 |
+| 26 | `examples/11_fastapi_integration/02_distributed_lock.py` | 固定 TTL 锁的短任务/长任务对比 | 先理解为什么长任务会失锁 |
+| 27 | `examples/11_fastapi_integration/03_watchdog_lock_with_celery.py` | 无看门狗 vs 有看门狗 | 理解看门狗续期真正解决的问题 |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 
-## 阶段五：企业模板
+## 阶段六：企业模板
 
 > 目标：直接复用到生产项目
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 23 | `templates/celery_config.py` | 生产级配置对象 |
-| 24 | `templates/celery_app.py` | App 工厂 + 异步包装 |
-| 25 | `templates/error_handling.py` | 异常层级树 |
-| 26 | `templates/task_base.py` | 基础任务类 |
-| 27 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
-| 28 | `templates/fastapi_celery.py` | FastAPI 集成 |
+| 28 | `templates/celery_config.py` | 生产级配置对象 |
+| 29 | `templates/celery_app.py` | App 工厂 + 异步包装 |
+| 30 | `templates/error_handling.py` | 异常层级树 |
+| 31 | `templates/task_base.py` | 基础任务类 |
+| 32 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
+| 33 | `templates/fastapi_celery.py` | FastAPI 集成 |
 
 ## 建议学习方式
 

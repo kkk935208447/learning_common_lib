@@ -7,13 +7,13 @@
 关键 API: beat_schedule, crontab(), timedelta(), celery beat
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
-  - 从上级目录: cd examples/07_periodic_tasks
+  - 从上级目录: cd examples/08_periodic_tasks
 运行方式:
-  Worker: celery -A examples.07_periodic_tasks.01_celery_beat worker -l info
+  Worker: celery -A examples.08_periodic_tasks.01_celery_beat worker -l info
     (启动 worker 执行定时任务)
-  Beat: celery -A examples.07_periodic_tasks.01_celery_beat beat -l info
+  Beat: celery -A examples.08_periodic_tasks.01_celery_beat beat -l info
     (启动 beat 调度器，按配置发送定时任务)
-  Client: python examples/07_periodic_tasks/01_celery_beat.py
+  Client: python examples/08_periodic_tasks/01_celery_beat.py
     (查看调度配置，不发送任务)
 预期现象:
   - Beat 进程按 crontab/timedelta 配置定时发送任务到队列
@@ -38,7 +38,7 @@ from celery.schedules import crontab
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.07_periodic_tasks.01_celery_beat",
+    "examples.08_periodic_tasks.01_celery_beat",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
@@ -78,19 +78,19 @@ def sunrise_task() -> str:
 app.conf.beat_schedule = {
     # timedelta 调度 — 固定间隔
     "cleanup-every-30s": {
-        "task": "examples.07_periodic_tasks.01_celery_beat.cleanup_expired_sessions",
+        "task": "examples.08_periodic_tasks.01_celery_beat.cleanup_expired_sessions",
         "schedule": timedelta(seconds=30),
     },
 
     # crontab 调度 — 类 cron 表达式
     # crontab(minute, hour, day_of_week, day_of_month, month_of_year)
     "daily-report-9am": {
-        "task": "examples.07_periodic_tasks.01_celery_beat.generate_daily_report",
+        "task": "examples.08_periodic_tasks.01_celery_beat.generate_daily_report",
         "schedule": crontab(minute=0, hour=9),  # 每天 9:00
         "args": ("sales",),
     },
     "weekly-digest-monday": {
-        "task": "examples.07_periodic_tasks.01_celery_beat.send_weekly_digest",
+        "task": "examples.08_periodic_tasks.01_celery_beat.send_weekly_digest",
         "schedule": crontab(
             minute=0,
             hour=10,
@@ -99,7 +99,7 @@ app.conf.beat_schedule = {
         "kwargs": {"day": "Monday"},
     },
     "monthly-inventory-1st": {
-        "task": "examples.07_periodic_tasks.01_celery_beat.sync_inventory",
+        "task": "examples.08_periodic_tasks.01_celery_beat.sync_inventory",
         "schedule": crontab(
             minute=0,
             hour=2,
@@ -107,7 +107,7 @@ app.conf.beat_schedule = {
         ),
     },
     "quarterly-audit": {
-        "task": "examples.07_periodic_tasks.01_celery_beat.generate_daily_report",
+        "task": "examples.08_periodic_tasks.01_celery_beat.generate_daily_report",
         "schedule": crontab(
             minute=0,
             hour=6,
@@ -119,7 +119,7 @@ app.conf.beat_schedule = {
 
     # solar 调度 — 基于日出日落 (需要 ephem 库和经纬度)
     # "sunrise-task-shanghai": {
-    #     "task": "examples.07_periodic_tasks.01_celery_beat.sunrise_task",
+    #     "task": "examples.08_periodic_tasks.01_celery_beat.sunrise_task",
     #     "schedule": solar("sunrise", 31.23, 121.47),  # 上海日出时刻
     # },
 }

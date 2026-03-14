@@ -4,8 +4,8 @@
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行方式:
-  Worker: celery -A examples.07_periodic_tasks.02_dynamic_schedule worker -l info
-  Client: python examples/07_periodic_tasks/02_dynamic_schedule.py
+  Worker: celery -A examples.08_periodic_tasks.02_dynamic_schedule worker -l info
+  Client: python examples/08_periodic_tasks/02_dynamic_schedule.py
 预期现象: 展示调度表的增删改过程，演示动态调度概念
 生产提醒: 动态调度推荐使用 django-celery-beat 的 DatabaseScheduler 持久化
 """
@@ -20,7 +20,7 @@ from celery.schedules import crontab
 
 # ── 1. 创建 Celery 应用 ──
 app = Celery(
-    "examples.07_periodic_tasks.02_dynamic_schedule",
+    "examples.08_periodic_tasks.02_dynamic_schedule",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
@@ -47,7 +47,7 @@ def send_report(report_type: str = "daily") -> str:
 # ── 3. 初始调度表 ──
 app.conf.beat_schedule = {
     "health-check-30s": {
-        "task": "examples.07_periodic_tasks.02_dynamic_schedule.health_check",
+        "task": "examples.08_periodic_tasks.02_dynamic_schedule.health_check",
         "schedule": timedelta(seconds=30),
         "args": ("api",),
     },
@@ -110,13 +110,13 @@ async def main() -> None:
     print("\n── 步骤 2: 添加调度条目 ──")
     add_schedule(
         "sync-data-every-60s",
-        "examples.07_periodic_tasks.02_dynamic_schedule.sync_data",
+        "examples.08_periodic_tasks.02_dynamic_schedule.sync_data",
         timedelta(seconds=60),
         args=("mysql",),
     )
     add_schedule(
         "daily-report-9am",
-        "examples.07_periodic_tasks.02_dynamic_schedule.send_report",
+        "examples.08_periodic_tasks.02_dynamic_schedule.send_report",
         crontab(minute=0, hour=9),
         args=("daily",),
     )

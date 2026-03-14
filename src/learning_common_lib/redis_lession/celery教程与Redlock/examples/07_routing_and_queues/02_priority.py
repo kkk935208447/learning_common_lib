@@ -6,9 +6,9 @@ Python 版本: 3.11+
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行命令:
   终端 1 (启动 Worker):
-    celery -A examples.06_routing_and_queues.02_priority worker -l info -P solo
+    celery -A examples.07_routing_and_queues.02_priority worker -l info -P solo
   终端 2 (运行示例):
-    uv run python examples/06_routing_and_queues/02_priority.py
+    uv run python examples/07_routing_and_queues/02_priority.py
 预期现象: 打印不同优先级任务的调度信息，说明优先级机制
 生产提醒: Redis 优先级支持有限(仅模拟)，RabbitMQ 原生支持 0-255 优先级
 """
@@ -21,7 +21,7 @@ from celery import Celery
 
 # ── 1. 创建 Celery 应用并配置优先级 ──
 app = Celery(
-    "examples.06_routing_and_queues.02_priority",
+    "examples.07_routing_and_queues.02_priority",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )

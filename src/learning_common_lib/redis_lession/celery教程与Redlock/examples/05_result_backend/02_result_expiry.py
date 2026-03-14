@@ -4,8 +4,8 @@
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
 运行方式:
-  Worker: celery -A examples.04_result_backend.02_result_expiry worker -l info
-  Client: python examples/04_result_backend/02_result_expiry.py
+  Worker: celery -A examples.05_result_backend.02_result_expiry worker -l info
+  Client: python examples/05_result_backend/02_result_expiry.py
 预期现象: 展示结果过期配置、扩展元数据、手动清理效果
 生产提醒: 务必设置 result_expires，否则 Redis/DB 会无限膨胀
 """
@@ -21,7 +21,7 @@ from celery.result import AsyncResult
 
 # ── 1. 创建应用 (秒数方式设置过期) ──
 app = Celery(
-    "examples.04_result_backend.02_result_expiry",
+    "examples.05_result_backend.02_result_expiry",
     broker="redis://:123456@localhost:6379/0",
     backend="redis://:123456@localhost:6379/1",
 )
