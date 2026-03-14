@@ -72,36 +72,36 @@ async def compute_task(task_num: int, value: int) -> dict:
 async def main() -> None:
     """演示：并行发送 5 个任务，asyncio.gather 收集结果。"""
     await broker.startup()
+    try:
+        start_time = time.perf_counter()
 
-    start_time = time.perf_counter()
+        # ── 3a. 并行发送 5 个任务 ──
+        print("🚀 并行发送 5 个计算任务...")
+        handles = [await compute_task.kiq(task_num=i, value=i * 10) for i in range(1, 6)]
+        for h in handles:
+            print(f"   已发送 task_id={h.task_id}")
+        print()
 
-    # ── 3a. 并行发送 5 个任务 ──
-    print("🚀 并行发送 5 个计算任务...")
-    handles = [await compute_task.kiq(task_num=i, value=i * 10) for i in range(1, 6)]
-    for h in handles:
-        print(f"   已发送 task_id={h.task_id}")
-    print()
+        # ── 3b. asyncio.gather 并行等待所有结果 ──
+        print("⏳ 等待所有任务完成...")
+        results = await asyncio.gather(
+            *[h.wait_result(timeout=30) for h in handles]
+        )
 
-    # ── 3b. asyncio.gather 并行等待所有结果 ──
-    print("⏳ 等待所有任务完成...")
-    results = await asyncio.gather(
-        *[h.wait_result(timeout=30) for h in handles]
-    )
+        # ── 3c. 打印结果 ──
+        print()
+        for i, res in enumerate(results, 1):
+            print(f"📊 任务 #{i}: 返回值={res.return_value}, 耗时={res.execution_time:.3f}s")
 
-    # ── 3c. 打印结果 ──
-    print()
-    for i, res in enumerate(results, 1):
-        print(f"📊 任务 #{i}: 返回值={res.return_value}, 耗时={res.execution_time:.3f}s")
-
-    elapsed = time.perf_counter() - start_time
-    print(f"\n⏱️  总耗时: {elapsed:.3f}s（并行执行，远小于串行 5×0.5s=2.5s）")
-    print()
-    print("💡 对比 Celery:")
-    print("   Celery  → group(task.s(i) for i in range(5))().get()")
-    print("   TaskIQ  → asyncio.gather(*[h.wait_result() for h in handles])")
-    print("   TaskIQ 原生 async，无需 group/chord 等复杂原语")
-
-    await broker.shutdown()
+        elapsed = time.perf_counter() - start_time
+        print(f"\n⏱️  总耗时: {elapsed:.3f}s（并行执行，远小于串行 5×0.5s=2.5s）")
+        print()
+        print("💡 对比 Celery:")
+        print("   Celery  → group(task.s(i) for i in range(5))().get()")
+        print("   TaskIQ  → asyncio.gather(*[h.wait_result() for h in handles])")
+        print("   TaskIQ 原生 async，无需 group/chord 等复杂原语")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

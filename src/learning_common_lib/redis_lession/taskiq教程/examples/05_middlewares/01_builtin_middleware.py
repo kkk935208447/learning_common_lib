@@ -12,7 +12,7 @@ TaskIQ 内置中间件基类与 6 个钩子方法 — 理解中间件生命周�
 关键 API:
     - TaskiqMiddleware                — 中间件基类，继承后重写钩子方法
     - pre_send(message)               — 任务发送前（client 侧）
-    - post_send(message, result)      — 任务发送后（client 侧）
+    - post_send(message)              — 任务发送后（client 侧）
     - pre_execute(message)            — 任务执行前（worker 侧）
     - post_execute(message, result)   — 任务执行后（worker 侧）
     - on_error(message, result, error)— 任务异常时（worker 侧）
@@ -64,9 +64,7 @@ class SimpleLogMiddleware(TaskiqMiddleware):
         print(f"🔵 [pre_send] 即将发送任务: {message.task_name}")
         return message
 
-    async def post_send(
-        self, message: TaskiqMessage, result: TaskiqResult
-    ) -> None:
+    async def post_send(self, message: TaskiqMessage) -> None:
         """任务发送后（client 侧）。无需返回值。"""
         print(f"🟢 [post_send] 任务已发送: {message.task_name}")
 
@@ -128,21 +126,23 @@ async def say_hello(name: str) -> str:
 async def main() -> None:
     """发送任务，观察 client 侧钩子（pre_send / post_send）的触发。"""
     await broker.startup()
+    try:
+        print("🚀 发送任务: say_hello('TaskIQ')")
+        print("=" * 50)
 
-    print("🚀 发送任务: say_hello('TaskIQ')")
-    print("=" * 50)
+        handle = await say_hello.kiq("TaskIQ")
+        result = await handle.wait_result(timeout=10)
 
-    handle = await say_hello.kiq("TaskIQ")
-
-    print("=" * 50)
-    print(f"✅ 任务已发送! task_id={handle.task_id}")
-    print()
-    print("💡 钩子执行顺序说明:")
-    print("   Client 侧: pre_send → [发送到队列] → post_send")
-    print("   Worker 侧: pre_execute → [执行任务] → post_execute → post_save")
-    print("   异常情况:   pre_execute → [执行任务] → on_error → post_save")
-
-    await broker.shutdown()
+        print("=" * 50)
+        print(f"✅ 任务已发送! task_id={handle.task_id}")
+        print(f"✅ 任务结果   = {result.return_value}")
+        print()
+        print("💡 钩子执行顺序说明:")
+        print("   Client 侧: pre_send → [发送到队列] → post_send")
+        print("   Worker 侧: pre_execute → [执行任务] → post_execute → post_save")
+        print("   异常情况:   pre_execute → [执行任务] → on_error → post_save")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

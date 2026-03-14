@@ -29,6 +29,7 @@ TaskIQ 是 Python 原生 async-first 的任务队列框架，相比 Celery 的�
 - 内置依赖注入（类比 FastAPI 的 Depends）
 - 中间件链（pre_send → post_send → pre_execute → post_execute → on_error → post_save）
 - 更简洁的 API（kiq/kicker 替代 delay/apply_async）
+- `async def` 任务走事件循环，`sync def` 默认走 threadpool，比在 Celery 里补 aio pool 更直接
 
 ## 适合谁
 
@@ -128,7 +129,9 @@ uv run python smoke/run_all_examples.py
 
 参数说明：
 - `examples.XX_topic.YY_file:broker`：指定 broker 对象所在的模块路径
-- Worker 默认使用 asyncio 事件循环（原生 async，无需额外配置）
+- `async def` 任务走事件循环；`sync def` 默认走 threadpool
+- CPU 密集型任务建议考虑 `--use-process-pool` 与 `--max-process-pool-processes`
+- 个别示例会使用非默认入口，如 `:list_broker`、`:default_broker`
 
 ## 章节概览
 

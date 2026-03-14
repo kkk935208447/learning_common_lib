@@ -36,13 +36,13 @@ backend = RedisAsyncResultBackend(
 
 1. **LoggingMiddleware** — 最外层，记录所有请求
 2. **RetryMiddleware** — 在日志之后，错误处理之前
-3. **TimeoutMiddleware** — 最内层，超时控制
+3. **SlowTaskWarningMiddleware** — 最内层，记录慢任务告警
 
 ```python
 broker = broker.with_middlewares(
     LoggingMiddleware(),   # 第一个执行
     RetryMiddleware(),     # 第二个执行
-    TimeoutMiddleware(),   # 第三个执行
+    SlowTaskWarningMiddleware(),  # 第三个执行
 )
 ```
 
@@ -78,7 +78,7 @@ async def get_heavy_model():
 if is_retryable(error):
     # 重试：指数退避
     await asyncio.sleep(delay)
-    await broker.kick(message)
+    await broker.kick(broker.formatter.dumps(message))
 else:
     # 致命：记录日志，不重试
     logger.error(f"致命错误: {error}")
@@ -106,7 +106,7 @@ async def important_task(data: dict) -> dict:
 
 - 调度器（scheduler）和 worker 是独立进程，分别启动
 - 使用 `RedisScheduleSource` 持久化调度配置
-- 动态调度优先用 `source.add_schedule()` API，避免硬编码
+- 动态调度优先用 `task.schedule_by_cron()` / `schedule_by_interval()` / `schedule_by_time()`
 
 ```bash
 # 终端 1: 启动 worker
@@ -134,14 +134,17 @@ async def lifespan(app: FastAPI):
 
 - 生产环境使用多 worker 实例，通过队列隔离不同优先级
 - 监控 worker 健康状态，异常退出时自动重启（systemd / supervisor）
-- 设置合理的并发数，避免 worker 过载
+- 设置合理的 worker / async task / threadpool / process pool 参数，避免过载
 
 ```bash
-# 高优先级 worker
-taskiq worker myapp:broker --tasks-pattern "high_priority"
+# async IO 为主
+taskiq worker myapp.high_priority:broker --workers 4 --max-async-tasks 200
 
-# 批处理 worker
-taskiq worker myapp:broker --tasks-pattern "batch"
+# sync def 为主
+taskiq worker myapp.sync_tasks:broker --max-threadpool-threads 16
+
+# CPU 密集型 sync def
+taskiq worker myapp.cpu_tasks:broker --use-process-pool --max-process-pool-processes 4
 ```
 
 ## 10. 客户端侧 broker.startup()
@@ -158,6 +161,8 @@ async def main():
     finally:
         await broker.shutdown()  # 清理
 ```
+
+在团队已经熟悉这套显式生命周期后，再收敛到 `broker_session(...)` 也可以。
 
 ## 11. 序列化注意
 
@@ -188,3 +193,9 @@ async def process_payment(payment_id: str) -> dict:
         return {"status": "already_processed"}
     # 处理支付...
 ```
+
+## 13. async def / sync def 的执行边界
+
+- `async def` 任务跑在事件循环里，内部不能混入 `time.sleep()`、同步 HTTP、同步 DB 查询
+- `sync def` 任务默认进 threadpool，不会阻塞事件循环，但会占住线程
+- CPU 密集型同步任务优先考虑 process pool，而不是无上限增加 threadpool

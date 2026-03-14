@@ -48,6 +48,13 @@ import asyncio
 
 from taskiq import TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+try:
+    from ...templates.taskiq_app import broker_session
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -181,34 +188,35 @@ async def batch_cache_warmup(
 
 async def main() -> None:
     """演示：Client 侧 startup/shutdown + 发送任务。"""
-    # Client 侧 startup（建立 Broker 连接）
-    print("🔵 [CLIENT] broker.startup()...")
-    await broker.startup()
-    print()
+    print("🔵 [CLIENT] 使用 broker_session(...) 管理客户端生命周期")
+    async with broker_session(broker):
+        print()
 
-    # 发送任务
-    print("🚀 发送任务: get_user_profile(1001)")
-    h1 = await get_user_profile.kiq(user_id=1001)
-    print(f"   task_id = {h1.task_id}")
-    print()
+        # 发送任务
+        print("🚀 发送任务: get_user_profile(1001)")
+        h1 = await get_user_profile.kiq(user_id=1001)
+        r1 = await h1.wait_result(timeout=10)
+        print(f"   task_id = {h1.task_id}")
+        print(f"   result  = {r1.return_value}")
+        print()
 
-    print("🚀 发送任务: batch_cache_warmup(['product:1', 'product:2', 'product:3'])")
-    h2 = await batch_cache_warmup.kiq(keys=["product:1", "product:2", "product:3"])
-    print(f"   task_id = {h2.task_id}")
-    print()
+        print("🚀 发送任务: batch_cache_warmup(['product:1', 'product:2', 'product:3'])")
+        h2 = await batch_cache_warmup.kiq(keys=["product:1", "product:2", "product:3"])
+        r2 = await h2.wait_result(timeout=10)
+        print(f"   task_id = {h2.task_id}")
+        print(f"   result  = {r2.return_value}")
+        print()
 
-    print("💡 关键点:")
-    print("   - @broker.on_event 是声明式事件注册，可注册多个处理器")
-    print("   - 多个 WORKER_STARTUP 处理器按注册顺序依次执行")
-    print("   - TaskiqState 类似 FastAPI 的 app.state，可挂载任意属性")
-    print("   - 任务中通过 TaskiqDepends() 注入 TaskiqState 访问共享资源")
-    print("   - 对比 Celery: Celery 用 @worker_init.connect 信号 + 全局变量")
-    print("   - TaskIQ 的 state 机制更优雅，避免全局变量污染")
+        print("💡 关键点:")
+        print("   - @broker.on_event 是声明式事件注册，可注册多个处理器")
+        print("   - 多个 WORKER_STARTUP 处理器按注册顺序依次执行")
+        print("   - TaskiqState 类似 FastAPI 的 app.state，可挂载任意属性")
+        print("   - 任务中通过 TaskiqDepends() 注入 TaskiqState 访问共享资源")
+        print("   - 对比 Celery: Celery 用 @worker_init.connect 信号 + 全局变量")
+        print("   - TaskIQ 的 state 机制更优雅，避免全局变量污染")
 
-    # Client 侧 shutdown
     print()
     print("🔵 [CLIENT] broker.shutdown()...")
-    await broker.shutdown()
 
 
 if __name__ == "__main__":

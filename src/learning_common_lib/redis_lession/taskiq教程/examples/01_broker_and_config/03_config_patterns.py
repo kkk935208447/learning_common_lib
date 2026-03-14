@@ -46,7 +46,10 @@ from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 # ── 1. 模式一：环境变量覆盖 ──
 # 开发环境使用默认值，生产环境通过环境变量注入
 BROKER_URL = os.getenv("TASKIQ_BROKER_URL", "redis://default:123456@localhost:6379/0")
-RESULT_BACKEND_URL = os.getenv("TASKIQ_RESULT_URL", "redis://default:123456@localhost:6379/1")
+RESULT_BACKEND_URL = os.getenv(
+    "TASKIQ_RESULT_BACKEND_URL",
+    "redis://default:123456@localhost:6379/1",
+)
 RESULT_EX_TIME = int(os.getenv("TASKIQ_RESULT_EX_TIME", "3600"))
 
 

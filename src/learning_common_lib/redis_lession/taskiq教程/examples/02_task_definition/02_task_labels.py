@@ -114,50 +114,50 @@ async def process_order(order_id: str, items: list[str]) -> dict:
 async def main() -> None:
     """演示：发送带 labels 的任务，展示 labels 配置。"""
     await broker.startup()
-
-    print("🚀 TaskIQ Labels 系统演示")
-    print("=" * 60)
-    print()
-
-    # 展示每个任务的 labels
-    tasks = [
-        ("send_notification", send_notification),
-        ("process_payment", process_payment),
-        ("send_email", send_email),
-        ("generate_report", generate_report),
-        ("process_order", process_order),
-    ]
-
-    for name, task in tasks:
-        print(f"📋 {name}")
-        print(f"   task_name = {task.task_name}")
-        print(f"   labels    = {task.labels}")
+    try:
+        print("🚀 TaskIQ Labels 系统演示")
+        print("=" * 60)
         print()
 
-    # 发送任务并获取结果
-    print("── 发送任务 ──")
-    print()
+        # 展示每个任务的 labels
+        tasks = [
+            ("send_notification", send_notification),
+            ("process_payment", process_payment),
+            ("send_email", send_email),
+            ("generate_report", generate_report),
+            ("process_order", process_order),
+        ]
 
-    handle = await send_notification.kiq(user_id=42, message="你好!")
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ send_notification → {result.return_value}")
+        for name, task in tasks:
+            print(f"📋 {name}")
+            print(f"   task_name = {task.task_name}")
+            print(f"   labels    = {task.labels}")
+            print()
 
-    handle = await process_payment.kiq(order_id="ORD-001", amount=99.9)
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ process_payment  → {result.return_value}")
+        # 发送任务并获取结果
+        print("── 发送任务 ──")
+        print()
 
-    handle = await process_order.kiq(order_id="ORD-002", items=["手机", "耳机"])
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ process_order    → {result.return_value}")
-    print()
+        handle = await send_notification.kiq(user_id=42, message="你好!")
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ send_notification → {result.return_value}")
 
-    print("💡 提示:")
-    print("   - labels 本身不会改变任务行为，需要配合中间件才能生效")
-    print("   - 中间件通过 message.labels['queue'] 读取路由信息")
-    print("   - 中间件通过 message.labels['priority'] 实现优先级调度")
-    print("   - 详见 05_middlewares 目录的中间件示例")
+        handle = await process_payment.kiq(order_id="ORD-001", amount=99.9)
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ process_payment  → {result.return_value}")
 
-    await broker.shutdown()
+        handle = await process_order.kiq(order_id="ORD-002", items=["手机", "耳机"])
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ process_order    → {result.return_value}")
+        print()
+
+        print("💡 提示:")
+        print("   - labels 本身不会改变任务行为，需要配合中间件才能生效")
+        print("   - 中间件通过 message.labels['queue'] 读取路由信息")
+        print("   - 中间件通过 message.labels['priority'] 实现优先级调度")
+        print("   - 详见 05_middlewares 目录的中间件示例")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

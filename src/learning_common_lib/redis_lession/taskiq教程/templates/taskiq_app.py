@@ -1,16 +1,20 @@
 """
-解决什么问题: 提供 TaskIQ Broker 工厂函数和单例管理，统一 broker + result_backend + middlewares 组装
-输入输出约定: create_taskiq_broker() 返回配置好的 AsyncBroker；get_broker() 返回模块级单例；init_broker() 幂等初始化
+解决什么问题: 提供 TaskIQ Broker 工厂函数、单例管理，以及中后期教程/模板层可复用的 startup/shutdown 上下文管理器
+输入输出约定: create_taskiq_broker() 返回配置好的 Broker；get_broker() 返回模块级单例；broker_session() 用 async with 管理一个或多个 Broker 生命周期
 失败策略: get_broker() 在未初始化时抛出 RuntimeError
-不适用场景: 需要多个独立 Broker 的场景应直接使用 create_taskiq_broker()，不依赖单例
+不适用场景: 需要复杂多 broker 依赖图时，建议业务侧显式管理生命周期
 
 工厂 + 单例模式:
   create_taskiq_broker(config)  →  新建 Broker
   get_broker()                  →  获取模块级单例
   init_broker(config)           →  初始化单例（只调用一次）
+  broker_session(*brokers)      →  中后期教程与模板层上下文管理器
 """
 
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 try:
     from .taskiq_config import TaskiqConfig
@@ -87,6 +91,44 @@ def get_broker() -> ListQueueBroker:
     return _broker
 
 
+@asynccontextmanager
+async def broker_session(*brokers: Any) -> AsyncIterator[Any]:
+    """用 async with 管理一个或多个 Broker 的 startup/shutdown。
+
+    这是中后期教程和模板层推荐写法，避免裸调用 startup()/shutdown() 后漏掉清理逻辑。
+
+    用法:
+        async with broker_session(broker):
+            await task.kiq(...)
+
+        async with broker_session(default_broker, high_priority_broker):
+            ...
+    """
+    if not brokers:
+        raise ValueError("broker_session() 至少需要一个 broker")
+    tmp = set()
+    unique_brokers = []
+    for i in brokers:
+        if i not in tmp:
+            tmp.add(i)
+            unique_brokers.append(i)
+        else:
+            raise ValueError("broker_session() 不允许重复的 broker")
+
+    # 开启与关闭
+    for broker in unique_brokers:
+        await broker.startup()
+
+    try:
+        if len(unique_brokers) == 1:
+            yield unique_brokers[0]
+        else:
+            yield tuple(unique_brokers)
+    finally:
+        for broker in reversed(unique_brokers):
+            await broker.shutdown()
+
+
 # ---------------------------------------------------------------------------
 # Demo
 # ---------------------------------------------------------------------------
@@ -112,6 +154,10 @@ def _demo() -> None:
     # 3. 工厂实例与单例实例是不同对象
     print("=== 工厂 vs 单例 ===")
     print(f"  broker_a is broker_s1  = {broker_a is broker_s1}")
+    print()
+    print("=== 客户端侧上下文管理器 ===")
+    print("  async with broker_session(broker_a):")
+    print("      await my_task.kiq(...)")
     print()
     print("✅ taskiq_app 模块验证通过")
 

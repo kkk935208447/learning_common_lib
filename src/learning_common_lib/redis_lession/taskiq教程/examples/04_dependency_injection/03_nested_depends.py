@@ -118,28 +118,28 @@ async def query_orders(
 async def main() -> None:
     """演示：嵌套依赖链与 generator 依赖生命周期。"""
     await broker.startup()
+    try:
+        print("🚀 发送查询任务（Worker 端将自动解析依赖链）...")
+        print("   依赖链: get_db_url → get_db_session → query_orders")
+        print()
 
-    print("🚀 发送查询任务（Worker 端将自动解析依赖链）...")
-    print("   依赖链: get_db_url → get_db_session → query_orders")
-    print()
+        handle = await query_orders.kiq(customer_id=42)
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ 任务返回值: {result.return_value}")
+        print()
 
-    handle = await query_orders.kiq(customer_id=42)
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ 任务返回值: {result.return_value}")
-    print()
-
-    print("💡 依赖生命周期（Worker 端执行顺序）:")
-    print("   1. get_db_url()          → 返回数据库 URL")
-    print("   2. get_db_session()      → setup: 创建会话（yield 前）")
-    print("   3. query_orders()        → 执行任务逻辑")
-    print("   4. get_db_session()      → cleanup: 关闭会话（yield 后）")
-    print()
-    print("💡 关键点:")
-    print("   - async generator 依赖自动管理资源生命周期（类比 contextmanager）")
-    print("   - 嵌套依赖由 TaskIQ 自动按拓扑顺序解析")
-    print("   - 同一次任务中，相同依赖只调用一次（结果缓存）")
-
-    await broker.shutdown()
+        print("💡 依赖生命周期（Worker 端执行顺序）:")
+        print("   1. get_db_url()          → 返回数据库 URL")
+        print("   2. get_db_session()      → setup: 创建会话（yield 前）")
+        print("   3. query_orders()        → 执行任务逻辑")
+        print("   4. get_db_session()      → cleanup: 关闭会话（yield 后）")
+        print()
+        print("💡 关键点:")
+        print("   - async generator 依赖自动管理资源生命周期（类比 contextmanager）")
+        print("   - 嵌套依赖由 TaskIQ 自动按拓扑顺序解析")
+        print("   - 同一次任务中，相同依赖只调用一次（结果缓存）")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

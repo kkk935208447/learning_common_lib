@@ -47,7 +47,9 @@ from taskiq_redis import ListQueueBroker
 
 # ── 1. 创建 Broker ──
 # ListQueueBroker 使用 Redis List 作为消息队列，多个 Worker 竞争消费（类似 Celery）
-broker = ListQueueBroker(url="redis://default:123456@localhost:6379/0")
+broker = ListQueueBroker(
+    url="redis://default:123456@localhost:6379/0",
+)
 
 # ── 2. 定义任务 ──
 # @broker.task 将异步函数注册为 TaskIQ 任务
@@ -68,27 +70,25 @@ async def add(x: int, y: int) -> int:
 
 async def main() -> None:
     """演示：发送任务到 Broker。"""
-    # 启动 broker（客户端模式下需要 startup 以建立 Redis 连接）
     await broker.startup()
+    try:
+        print("🚀 发送任务: add(3, 7)")
 
-    print("🚀 发送任务: add(3, 7)")
+        # kiq() = Kick Into Queue，异步发送任务
+        # 类比 Celery 的 delay() / apply_async()
+        handle = await add.kiq(3, 7)
 
-    # kiq() = Kick Into Queue，异步发送任务
-    # 类比 Celery 的 delay() / apply_async()
-    handle = await add.kiq(3, 7)
+        print("✅ 任务已发送!")
+        print(f"   task_id  = {handle.task_id}")
+        print(f"   handle   = {handle!r}")
+        print()
 
-    print(f"✅ 任务已发送!")
-    print(f"   task_id  = {handle.task_id}")
-    print(f"   handle   = {handle!r}")
-    print()
-
-    # ⚠️ 注意：没有配置 result_backend，无法 wait_result()
-    # 如果尝试 await handle.wait_result()，会抛出异常
-    print("💡 提示: 当前未配置 result_backend，无法获取任务返回值")
-    print("   请参考 02_result_backend.py 了解如何配置 result_backend")
-
-    # 关闭 broker 连接
-    await broker.shutdown()
+        # ⚠️ 注意：没有配置 result_backend，无法 wait_result()
+        # 如果尝试 await handle.wait_result()，会抛出异常
+        print("💡 提示: 当前未配置 result_backend，无法获取任务返回值")
+        print("   请参考 02_result_backend.py 了解如何配置 result_backend")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

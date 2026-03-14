@@ -37,9 +37,17 @@ async def good_task():
     await asyncio.sleep(10)
     async with httpx.AsyncClient() as client:
         await client.get("https://api.example.com")
+
+# ✅ 另一种边界：sync def 默认走 threadpool
+@broker.task
+def sync_task():
+    time.sleep(10)  # 不阻塞事件循环，但会占住一个 threadpool 线程
 ```
 
-**对比 Celery**: Celery prefork worker 每个进程独立，同步阻塞只影响当前进程。TaskIQ 是单线程事件循环，一个阻塞影响所有任务。
+**边界说明**:
+- `async def` 中的同步阻塞会卡住事件循环
+- `sync def` 默认走 threadpool，不会卡事件循环，但不适合 CPU 密集型大任务
+- CPU 密集型同步任务建议改用 process pool
 
 ## 3. 依赖注入循环引用
 
@@ -174,7 +182,8 @@ async def on_error(self, message, result, error):
     max_retries = message.labels.get("max_retries", 3)
     if retry_count < max_retries:
         message.labels["_retry_count"] = retry_count + 1
-        await self.broker.kick(message)
+        serialized = self.broker.formatter.dumps(message)
+        await self.broker.kick(serialized)
     else:
         logger.error(f"重试耗尽: {error}")
 ```
@@ -212,6 +221,8 @@ result = await handle.wait_result()  # 可能永远等待
 # ✅ 正确：设置超时
 result = await handle.wait_result(timeout=30)
 ```
+
+`wait_result()` 本身是异步等待，不是同步阻塞调用；真正的问题是“不设 timeout 会永远挂着”。
 
 ## 12. 在任务中直接 import 重量级模块
 

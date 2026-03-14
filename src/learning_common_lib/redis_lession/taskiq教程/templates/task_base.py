@@ -1,24 +1,23 @@
 """
 解决什么问题: 提供任务装饰器工厂和通用任务包装器，统一日志格式、异常捕获、重试决策
-输入输出约定: create_task() 装饰器工厂返回带标准 labels 的任务；safe_execute() 包装器统一异常处理
-失败策略: safe_execute 捕获异常后通过 is_retryable() 分类，可重试异常 requeue，不可重试异常 reject
+输入输出约定: create_task() 装饰器工厂返回带标准 labels 的任务；safe_execute() 包装器统一异常日志与异常归类
+失败策略: safe_execute 只负责记录日志并向上抛出异常；真正的重试/拒绝由中间件或业务层决定
 不适用场景: 简单任务无需包装，直接用 @broker.task 即可
 """
 
 from __future__ import annotations
 
-import functools
 import logging
 import time
 from typing import Any, Callable, TypeVar
 
 try:
-    from .error_handling import TaskError, TaskFatalError, TaskRetryableError, is_retryable
+    from .error_handling import TaskError, TaskFatalError, TaskRetryableError
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from templates.error_handling import TaskError, TaskFatalError, TaskRetryableError, is_retryable  # type: ignore[no-redef]
+    from templates.error_handling import TaskError, TaskFatalError, TaskRetryableError  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ def create_task(
     queue: str = "default",
     max_retries: int = 3,
     retry_delay: float = 1.0,
-    timeout: int = 300,
+    warn_after_s: float = 300.0,
 ) -> Callable:
     """任务装饰器工厂，在 @broker.task 基础上注入标准 labels。
 
@@ -45,13 +44,13 @@ def create_task(
         queue: 队列名称，默认 "default"
         max_retries: 最大重试次数，默认 3
         retry_delay: 重试间隔（秒），默认 1.0
-        timeout: 任务超时时间（秒），默认 300
+        warn_after_s: 慢任务告警阈值（秒），默认 300.0
 
     返回:
         装饰器，将被装饰函数注册为带标准 labels 的 TaskIQ 任务
 
     用法:
-        @create_task(broker, queue="email", max_retries=5)
+        @create_task(broker, queue="email", max_retries=5, warn_after_s=60)
         async def send_email(to: str, subject: str, body: str) -> dict:
             ...
     """
@@ -60,15 +59,12 @@ def create_task(
         "queue": queue,
         "max_retries": str(max_retries),
         "retry_delay": str(retry_delay),
-        "timeout": str(timeout),
+        "warn_after_s": str(warn_after_s),
     }
 
     def decorator(func: Callable) -> Any:
         """将函数注册为 TaskIQ 任务，并附加标准 labels。"""
-        task = broker.task(
-            task_name=func.__name__,
-            **{k: v for k, v in labels.items()},
-        )(func)
+        task = broker.task(task_name=func.__name__, **labels)(func)
         # 保留原始 labels 供中间件读取
         task._task_labels = labels
         return task
@@ -90,7 +86,7 @@ async def safe_execute(func: Callable[..., Any], *args: Any, **kwargs: Any) -> A
       3. 记录任务完成日志和耗时
       4. 异常分类处理:
          - TaskFatalError → 记录错误日志，直接 re-raise（不可重试）
-         - TaskRetryableError → 记录警告日志，re-raise（由中间件决定重试）
+         - TaskRetryableError → 记录警告日志，re-raise（交给中间件决定是否重试）
          - Exception → 包装为 TaskError，记录错误日志后 re-raise
 
     参数:
@@ -152,7 +148,7 @@ def _demo() -> None:
     print("    from templates.taskiq_app import init_broker")
     print("    broker = init_broker()")
     print()
-    print("    @create_task(broker, queue='email', max_retries=5, timeout=60)")
+    print("    @create_task(broker, queue='email', max_retries=5, warn_after_s=60)")
     print("    async def send_email(to: str, subject: str) -> dict:")
     print("        return {'status': 'sent', 'to': to}")
     print()

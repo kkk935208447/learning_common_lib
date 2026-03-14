@@ -12,7 +12,7 @@ TaskIQ RedisAsyncResultBackend 配置与结果获取。
 关键 API:
     - RedisAsyncResultBackend  — 基于 Redis 的异步结果后端
     - broker.with_result_backend() — 为 Broker 绑定结果后端（返回新 Broker）
-    - handle.wait_result()     — 阻塞等待任务执行结果
+    - handle.wait_result()     — 异步等待任务执行结果
     - TaskiqResult             — 结果对象，包含 return_value / is_err / error / execution_time
 
 目录导航:
@@ -47,7 +47,9 @@ from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 
 # ── 1. 创建 Broker + ResultBackend ──
 # Broker 负责消息传递（db=0），ResultBackend 负责结果存储（db=1）
-_broker = ListQueueBroker(url="redis://default:123456@localhost:6379/0")
+_broker = ListQueueBroker(
+    url="redis://default:123456@localhost:6379/0",
+)
 
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
@@ -78,32 +80,32 @@ async def add(x: int, y: int) -> int:
 async def main() -> None:
     """演示：发送任务并通过 wait_result() 获取结果。"""
     await broker.startup()
+    try:
+        print("🚀 发送任务: add(3, 7)")
+        handle = await add.kiq(3, 7)
+        print(f"   task_id = {handle.task_id}")
+        print()
 
-    print("🚀 发送任务: add(3, 7)")
-    handle = await add.kiq(3, 7)
-    print(f"   task_id = {handle.task_id}")
-    print()
+        # wait_result() 是异步轮询等待结果
+        # timeout 单位为秒，超时抛出 TaskiqResultTimeoutError
+        print("⏳ 异步等待任务结果...")
+        result = await handle.wait_result(timeout=10)
 
-    # wait_result() 阻塞等待 Worker 执行完成并返回结果
-    # timeout 单位为秒，超时抛出 asyncio.TimeoutError
-    print("⏳ 等待任务结果...")
-    result = await handle.wait_result(timeout=10)
+        # ── 4. 解析 TaskiqResult 对象 ──
+        print()
+        print("📋 TaskiqResult 详情:")
+        print(f"   return_value    = {result.return_value}")    # 任务返回值
+        print(f"   is_err          = {result.is_err}")          # 是否执行出错
+        print(f"   error           = {result.error}")           # 错误信息（无错误时为 None）
+        print(f"   execution_time  = {result.execution_time:.4f}s")  # 执行耗时
+        print()
 
-    # ── 4. 解析 TaskiqResult 对象 ──
-    print()
-    print("📋 TaskiqResult 详情:")
-    print(f"   return_value    = {result.return_value}")    # 任务返回值
-    print(f"   is_err          = {result.is_err}")          # 是否执行出错
-    print(f"   error           = {result.error}")           # 错误信息（无错误时为 None）
-    print(f"   execution_time  = {result.execution_time:.4f}s")  # 执行耗时
-    print()
-
-    if not result.is_err:
-        print(f"✅ 任务执行成功! 3 + 7 = {result.return_value}")
-    else:
-        print(f"❌ 任务执行失败: {result.error}")
-
-    await broker.shutdown()
+        if not result.is_err:
+            print(f"✅ 任务执行成功! 3 + 7 = {result.return_value}")
+        else:
+            print(f"❌ 任务执行失败: {result.error}")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

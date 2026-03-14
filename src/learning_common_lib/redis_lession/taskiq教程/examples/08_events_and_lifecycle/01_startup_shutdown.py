@@ -47,6 +47,13 @@ import asyncio
 
 from taskiq import TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+try:
+    from ...templates.taskiq_app import broker_session
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -156,34 +163,34 @@ async def update_cache(
 
 async def main() -> None:
     """演示：Client 侧的 startup/shutdown 和任务发送。"""
-    # Client 侧也需要调用 startup()（建立 Redis 连接）
-    print("🔵 [CLIENT] 调用 broker.startup()...")
-    await broker.startup()
-    print("🔵 [CLIENT] Broker 已启动")
-    print()
+    print("🔵 [CLIENT] 使用 broker_session(...) 管理客户端生命周期")
+    async with broker_session(broker):
+        print("🔵 [CLIENT] Broker 已启动")
+        print()
 
-    # 发送任务
-    print("🚀 发送任务: query_user(1001)")
-    h1 = await query_user.kiq(user_id=1001)
-    print(f"   task_id = {h1.task_id}")
-    print()
+        # 发送任务
+        print("🚀 发送任务: query_user(1001)")
+        h1 = await query_user.kiq(user_id=1001)
+        r1 = await h1.wait_result(timeout=10)
+        print(f"   task_id = {h1.task_id}")
+        print(f"   result  = {r1.return_value}")
+        print()
 
-    print("🚀 发送任务: update_cache('session:1001', 'active')")
-    h2 = await update_cache.kiq(key="session:1001", value="active")
-    print(f"   task_id = {h2.task_id}")
-    print()
+        print("🚀 发送任务: update_cache('session:1001', 'active')")
+        h2 = await update_cache.kiq(key="session:1001", value="active")
+        r2 = await h2.wait_result(timeout=10)
+        print(f"   task_id = {h2.task_id}")
+        print(f"   result  = {r2.return_value}")
+        print()
 
-    print("💡 关键点:")
-    print("   - WORKER_STARTUP: Worker 进程启动时触发，适合初始化连接池等资源")
-    print("   - WORKER_SHUTDOWN: Worker 进程关闭时触发，适合清理资源")
-    print("   - TaskiqState: Worker 进程级共享状态，startup 中挂载，任务中使用")
-    print("   - Client 侧: 需手动调用 broker.startup() / broker.shutdown()")
-    print("   - 对比 Celery: Celery 用 worker_init/worker_shutdown 信号")
+        print("💡 关键点:")
+        print("   - WORKER_STARTUP: Worker 进程启动时触发，适合初始化连接池等资源")
+        print("   - WORKER_SHUTDOWN: Worker 进程关闭时触发，适合清理资源")
+        print("   - TaskiqState: Worker 进程级共享状态，startup 中挂载，任务中使用")
+        print("   - Client 侧: 推荐用 async with broker_session(...) 管理连接")
+        print("   - 对比 Celery: Celery 用 worker_init/worker_shutdown 信号")
 
-    # Client 侧关闭
     print()
-    print("🔵 [CLIENT] 调用 broker.shutdown()...")
-    await broker.shutdown()
     print("🔵 [CLIENT] Broker 已关闭")
 
 

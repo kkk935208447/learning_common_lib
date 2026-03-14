@@ -44,6 +44,13 @@ from __future__ import annotations
 import asyncio
 
 from taskiq_redis import ListQueueBroker, PubSubBroker, RedisAsyncResultBackend
+try:
+    from ...templates.taskiq_app import broker_session
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
 # ── 1. 创建两种 Broker ──
 
@@ -90,51 +97,48 @@ async def broadcast_cache_invalidation(cache_key: str) -> None:
 
 async def main() -> None:
     """演示：PubSubBroker 广播 vs ListQueueBroker 竞争消费。"""
-    await list_broker.startup()
+    async with broker_session(list_broker):
+        # ── 4a. ListQueueBroker — 竞争消费 ──
+        print("=" * 60)
+        print("📋 [ListQueueBroker] 竞争消费模式")
+        print("=" * 60)
+        print("   底层: Redis LPUSH / BRPOP")
+        print("   行为: 多个 worker 中只有一个会消费到消息")
+        print("   适用: 任务队列、工作负载分发")
+        print()
 
-    # ── 4a. ListQueueBroker — 竞争消费 ──
-    print("=" * 60)
-    print("📋 [ListQueueBroker] 竞争消费模式")
-    print("=" * 60)
-    print("   底层: Redis LPUSH / BRPOP")
-    print("   行为: 多个 worker 中只有一个会消费到消息")
-    print("   适用: 任务队列、工作负载分发")
-    print()
+        handle = await process_order.kiq(order_id=5001)
+        print(f"🚀 已发送任务到 ListQueueBroker: task_id={handle.task_id}")
 
-    handle = await process_order.kiq(order_id=5001)
-    print(f"🚀 已发送任务到 ListQueueBroker: task_id={handle.task_id}")
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ 任务返回值: {result.return_value}")
+        print()
 
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ 任务返回值: {result.return_value}")
-    print()
+        # ── 4b. PubSubBroker — 广播模式 ──
+        print("=" * 60)
+        print("📡 [PubSubBroker] 广播模式")
+        print("=" * 60)
+        print("   底层: Redis PUBLISH / SUBSCRIBE")
+        print("   行为: 所有订阅的 worker 都会收到消息")
+        print("   适用: 事件通知、缓存失效广播")
+        print("   限制: 不支持 result_backend（无法确定哪个 worker 的结果）")
+        print()
+        print("💡 PubSubBroker 广播示例（需要先启动 pubsub worker）:")
+        print("   taskiq worker examples.09_broker_patterns.01_pubsub_broker:pubsub_broker")
+        print()
 
-    # ── 4b. PubSubBroker — 广播模式 ──
-    print("=" * 60)
-    print("📡 [PubSubBroker] 广播模式")
-    print("=" * 60)
-    print("   底层: Redis PUBLISH / SUBSCRIBE")
-    print("   行为: 所有订阅的 worker 都会收到消息")
-    print("   适用: 事件通知、缓存失效广播")
-    print("   限制: 不支持 result_backend（无法确定哪个 worker 的结果）")
-    print()
-    print("💡 PubSubBroker 广播示例（需要先启动 pubsub worker）:")
-    print("   taskiq worker examples.09_broker_patterns.01_pubsub_broker:pubsub_broker")
-    print()
-
-    # ── 4c. 对比总结 ──
-    print("=" * 60)
-    print("📊 两种 Broker 模式对比")
-    print("=" * 60)
-    print(f"{'特性':<20} {'ListQueueBroker':<20} {'PubSubBroker':<20}")
-    print("-" * 60)
-    print(f"{'底层机制':<20} {'Redis List':<20} {'Redis Pub/Sub':<20}")
-    print(f"{'消费模式':<20} {'竞争消费(1对1)':<20} {'广播(1对多)':<20}")
-    print(f"{'result_backend':<20} {'✅ 支持':<20} {'❌ 不支持':<20}")
-    print(f"{'消息持久化':<20} {'✅ 持久化':<20} {'❌ 即发即失':<20}")
-    print(f"{'适用场景':<20} {'任务队列':<20} {'事件通知/广播':<20}")
-    print(f"{'类比':<20} {'Celery worker':<20} {'Redis Pub/Sub':<20}")
-
-    await list_broker.shutdown()
+        # ── 4c. 对比总结 ──
+        print("=" * 60)
+        print("📊 两种 Broker 模式对比")
+        print("=" * 60)
+        print(f"{'特性':<20} {'ListQueueBroker':<20} {'PubSubBroker':<20}")
+        print("-" * 60)
+        print(f"{'底层机制':<20} {'Redis List':<20} {'Redis Pub/Sub':<20}")
+        print(f"{'消费模式':<20} {'竞争消费(1对1)':<20} {'广播(1对多)':<20}")
+        print(f"{'result_backend':<20} {'✅ 支持':<20} {'❌ 不支持':<20}")
+        print(f"{'消息持久化':<20} {'✅ 持久化':<20} {'❌ 即发即失':<20}")
+        print(f"{'适用场景':<20} {'任务队列':<20} {'事件通知/广播':<20}")
+        print(f"{'类比':<20} {'Celery worker':<20} {'Redis Pub/Sub':<20}")
 
 
 if __name__ == "__main__":

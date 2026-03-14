@@ -104,22 +104,22 @@ async def process_with_deps(
 async def main() -> None:
     """演示：依赖注入基础用法。"""
     await broker.startup()
+    try:
+        print("🚀 发送任务（Worker 端将自动注入依赖）...")
+        # 客户端只传业务参数，依赖参数由 Worker 端自动注入
+        handle = await process_with_deps.kiq(order_id=3001)
+        print(f"   task_id = {handle.task_id}")
+        print()
 
-    print("🚀 发送任务（Worker 端将自动注入依赖）...")
-    # 客户端只传业务参数，依赖参数由 Worker 端自动注入
-    handle = await process_with_deps.kiq(order_id=3001)
-    print(f"   task_id = {handle.task_id}")
-    print()
-
-    result = await handle.wait_result(timeout=10)
-    print(f"✅ 任务返回值: {result.return_value}")
-    print()
-    print("💡 关键点:")
-    print("   - config 和 redis_info 由 Worker 端自动注入，客户端无需传递")
-    print("   - 类比 FastAPI 的 Depends()，TaskIQ 用 TaskiqDepends() 声明依赖")
-    print("   - Celery 没有依赖注入机制，通常需要在任务函数内手动初始化资源")
-
-    await broker.shutdown()
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ 任务返回值: {result.return_value}")
+        print()
+        print("💡 关键点:")
+        print("   - config 和 redis_info 由 Worker 端自动注入，客户端无需传递")
+        print("   - 类比 FastAPI 的 Depends()，TaskIQ 用 TaskiqDepends() 声明依赖")
+        print("   - Celery 没有依赖注入机制，通常需要在任务函数内手动初始化资源")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

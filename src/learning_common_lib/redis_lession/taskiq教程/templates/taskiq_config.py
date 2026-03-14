@@ -1,13 +1,12 @@
 """
-解决什么问题: 提供 async-first 的生产级 TaskIQ 配置对象，统一 broker、结果后端、序列化与并发约定
+解决什么问题: 提供 async-first 的生产级 TaskIQ 配置对象，统一 broker 与结果后端约定
 输入输出约定: TaskiqConfig dataclass 实例即配置项，通过 create_broker() / create_result_backend() 工厂方法创建组件
-失败策略: 配置本身不会失败；运行时由 TaskIQ 框架根据配置执行对应的重试/超时策略
-不适用场景: 多环境差异化配置建议继承 TaskiqConfig 覆盖字段，或用环境变量注入
+失败策略: 配置本身不会失败；运行时由 TaskIQ 框架根据 broker/result_backend 配置执行
+不适用场景: worker 进程数、threadpool/process pool 这类运行参数应放到 taskiq worker CLI，而不是 Broker 配置对象里
 
 配置分组:
   Broker 连接: broker_url
   结果后端: result_backend_url, result_ex_time
-  并发与序列化: concurrency, serializer
 """
 
 from __future__ import annotations
@@ -49,14 +48,6 @@ class TaskiqConfig:
         default_factory=lambda: int(os.getenv("TASKIQ_RESULT_EX_TIME", "3600")),
     )
 
-    # --- 并发 ---
-    concurrency: int = field(
-        default_factory=lambda: int(os.getenv("TASKIQ_CONCURRENCY", "10")),
-    )
-
-    # --- 序列化 ---
-    serializer: str = "json"
-
     # ------------------------------------------------------------------
     # 工厂方法
     # ------------------------------------------------------------------
@@ -86,8 +77,6 @@ def _demo() -> None:
     print(f"  broker_url          = {cfg.broker_url!r}")
     print(f"  result_backend_url  = {cfg.result_backend_url!r}")
     print(f"  result_ex_time      = {cfg.result_ex_time!r}")
-    print(f"  concurrency         = {cfg.concurrency!r}")
-    print(f"  serializer          = {cfg.serializer!r}")
     print()
     print("✅ 配置加载完成，可通过 cfg.create_broker() / cfg.create_result_backend() 使用")
 

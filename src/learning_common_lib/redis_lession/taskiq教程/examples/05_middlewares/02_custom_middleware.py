@@ -122,30 +122,34 @@ async def slow_add(x: int, y: int) -> int:
 async def main() -> None:
     """发送任务，观察 request_id 注入和耗时统计。"""
     await broker.startup()
+    try:
+        print("🚀 发送任务: slow_add(10, 20)")
+        print("=" * 50)
 
-    print("🚀 发送任务: slow_add(10, 20)")
-    print("=" * 50)
+        # 方式 1: 自动生成 request_id
+        handle = await slow_add.kiq(10, 20)
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ 任务已发送! task_id={handle.task_id}")
+        print(f"✅ 任务结果   = {result.return_value}")
+        print()
 
-    # 方式 1: 自动生成 request_id
-    handle = await slow_add.kiq(10, 20)
-    print(f"✅ 任务已发送! task_id={handle.task_id}")
-    print()
+        # 方式 2: 手动指定 request_id（适合从上游服务传递）
+        print("🚀 发送任务: slow_add(30, 40) — 手动指定 request_id")
+        handle2 = await slow_add.kicker().with_labels(
+            request_id="my-custom-req-001",
+        ).kiq(30, 40)
+        result2 = await handle2.wait_result(timeout=10)
+        print(f"✅ 任务已发送! task_id={handle2.task_id}")
+        print(f"✅ 任务结果   = {result2.return_value}")
+        print()
 
-    # 方式 2: 手动指定 request_id（适合从上游服务传递）
-    print("🚀 发送任务: slow_add(30, 40) — 手动指定 request_id")
-    handle2 = await slow_add.kicker().with_labels(
-        request_id="my-custom-req-001",
-    ).kiq(30, 40)
-    print(f"✅ 任务已发送! task_id={handle2.task_id}")
-    print()
-
-    print("💡 中间件执行顺序:")
-    print("   注册顺序: RequestIdMiddleware → TimingMiddleware")
-    print("   pre_send:    RequestId.pre_send → Timing.pre_send(未定义,跳过)")
-    print("   pre_execute: RequestId.pre_execute → Timing.pre_execute")
-    print("   post_execute: RequestId.post_execute(未定义) → Timing.post_execute")
-
-    await broker.shutdown()
+        print("💡 中间件执行顺序:")
+        print("   注册顺序: RequestIdMiddleware → TimingMiddleware")
+        print("   pre_send:    RequestId.pre_send → Timing.pre_send(未定义,跳过)")
+        print("   pre_execute: RequestId.pre_execute → Timing.pre_execute")
+        print("   post_execute: RequestId.post_execute(未定义) → Timing.post_execute")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

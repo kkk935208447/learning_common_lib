@@ -49,7 +49,9 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from taskiq.exceptions import ResultBackendError
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq_redis.exceptions import ResultIsMissingError
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -132,11 +134,17 @@ async def get_task_result(task_id: str) -> dict:
             "status": "completed",
             "result": result.return_value,
         }
-    except Exception as exc:
+    except ResultIsMissingError:
         return {
             "task_id": task_id,
             "status": "pending",
-            "message": f"任务尚未完成或不存在: {exc}",
+            "message": "任务结果尚未写入，可能仍在执行，或 task_id 不存在",
+        }
+    except ResultBackendError as exc:
+        return {
+            "task_id": task_id,
+            "status": "backend_error",
+            "message": f"结果后端查询失败: {exc}",
         }
 
 

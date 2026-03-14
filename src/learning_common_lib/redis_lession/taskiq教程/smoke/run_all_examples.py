@@ -10,18 +10,21 @@ TaskIQ 教程 smoke 测试
 
 前置条件：
     1. taskiq-redis 已安装（uv sync）
-    2. Redis 已启动（密码 123456）
-    3. 本脚本会清空教程专用 Redis DB 0/1，避免不同示例互相污染
+    2. Redis 已启动（密码 123456），docker启动的，不存在 redis cli
+    3. 本脚本会清空教程专用 Redis DB 0/1/2，避免不同示例互相污染
 
 运行方式（从 src/learning_common_lib/redis_lession/taskiq教程 目录）：
     uv run python smoke/run_all_examples.py
 """
 
 import os
+import selectors
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+from hashlib import sha1
 from pathlib import Path
 
 import redis as redis_lib
@@ -34,6 +37,7 @@ SKIP_FILES = {
 # 不需要 worker 的文件（纯配置演示或纯说明）
 NO_WORKER_NEEDED = {
     "03_config_patterns.py",      # 纯配置演示
+    "01_redis_schedule_source.py",  # 动态调度元数据演示
     "02_cron_and_interval.py",    # 纯调度配置演示
 }
 
@@ -45,10 +49,20 @@ FASTAPI_FILES = {
 
 EXAMPLE_TIMEOUT = 30
 WORKER_STARTUP_WAIT = 3
+WORKER_READY_TIMEOUT = 10
+
+WORKER_ENTRYPOINTS = {
+    "examples/09_broker_patterns/01_pubsub_broker.py": ["list_broker"],
+    "examples/09_broker_patterns/02_multiple_queues.py": [
+        "default_broker",
+        "high_priority_broker",
+        "batch_broker",
+    ],
+}
 
 def reset_redis() -> None:
     """清空教程专用 Redis DB 0/1。"""
-    for db in (0, 1):
+    for db in (0, 1, 2, 3):
         client = redis_lib.Redis(
             host="localhost", port=6379, password="123456",
             db=db, socket_connect_timeout=3,
@@ -86,45 +100,186 @@ def get_module_path(file_path: Path, base: Path) -> str:
     return str(rel).replace("/", ".").replace("\\", ".").removesuffix(".py")
 
 
-def start_worker(module_path: str, base: Path) -> subprocess.Popen | None:
-    """启动 taskiq worker 子进程。"""
+def build_smoke_queue_name(rel_path: str, broker_name: str) -> str:
+    """为 smoke 运行生成独立 queue_name，避免不同示例互相抢队列。"""
+    normalized = rel_path.replace("\\", "/").removesuffix(".py").replace("/", ":")
+    return f"smoke:{normalized}:{broker_name}"
+
+
+def ensure_wrapper_module(
+    module_path: str,
+    rel_path: str,
+    broker_names: list[str],
+    wrapper_dir: Path,
+) -> str:
+    """生成临时 wrapper module，用于在 smoke 里注入独立 queue_name。"""
+    wrapper_name = f"_smoke_{sha1(rel_path.encode('utf-8')).hexdigest()[:12]}"
+    wrapper_file = wrapper_dir / f"{wrapper_name}.py"
+
+    assignments: list[str] = []
+    for broker_name in broker_names:
+        queue_name = build_smoke_queue_name(rel_path, broker_name)
+        assignments.extend(
+            [
+                f"{broker_name} = getattr(_orig, {broker_name!r})",
+                f"if hasattr({broker_name}, 'queue_name'):",
+                f"    {broker_name}.queue_name = {queue_name!r}",
+                f"setattr(_orig, {broker_name!r}, {broker_name})",
+            ]
+        )
+
+    wrapper_source = "\n".join(
+        [
+            "from __future__ import annotations",
+            "import importlib as _importlib",
+            f"_orig = _importlib.import_module({module_path!r})",
+            *assignments,
+            "main = getattr(_orig, 'main', None)",
+            "app = getattr(_orig, 'app', None)",
+            "scheduler = getattr(_orig, 'scheduler', None)",
+        ]
+    )
+    wrapper_file.write_text(wrapper_source, encoding="utf-8")
+    return wrapper_name
+
+
+def wait_for_worker_ready(proc: subprocess.Popen, timeout: int) -> tuple[bool, str]:
+    """等待 worker 输出 ready 日志。"""
+    if proc.stdout is None:
+        return False, "worker stdout 不可用"
+
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    lines: list[str] = []
+    deadline = time.monotonic() + timeout
+
+    try:
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+
+            for key, _ in selector.select(timeout=0.5):
+                line = key.fileobj.readline()
+                if not line:
+                    continue
+                lines.append(line.rstrip())
+                if "Listening started." in line:
+                    return True, "\n".join(lines)
+    finally:
+        selector.close()
+
+    return False, "\n".join(lines)
+
+
+def start_worker(
+    module_path: str,
+    broker_name: str,
+    base: Path,
+    wrapper_dir: Path | None = None,
+) -> tuple[subprocess.Popen | None, str]:
+    """启动 taskiq worker 子进程并等待 ready。"""
     cmd = [
         sys.executable, "-m", "taskiq",
-        "worker", f"{module_path}:broker",
+        "worker", f"{module_path}:{broker_name}",
+        "--workers", "1",
     ]
     env = os.environ.copy()
+    if wrapper_dir is not None:
+        env["PYTHONPATH"] = (
+            f"{wrapper_dir}{os.pathsep}{env['PYTHONPATH']}"
+            if "PYTHONPATH" in env and env["PYTHONPATH"]
+            else str(wrapper_dir)
+        )
+        cmd.extend(["--app-dir", str(wrapper_dir)])
     try:
         proc = subprocess.Popen(
             cmd, cwd=str(base), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, start_new_session=True,
         )
-        time.sleep(WORKER_STARTUP_WAIT)
-        return proc
+        ready, output = wait_for_worker_ready(proc, timeout=WORKER_READY_TIMEOUT)
+        if ready:
+            return proc, output
+        stop_worker(proc)
+        if output:
+            return None, output
+        return None, f"worker 在 {WORKER_READY_TIMEOUT}s 内未就绪"
     except Exception as exc:
-        print(f"    ⚠️ Worker 启动失败: {exc}", flush=True)
-        return None
+        return None, str(exc)
 
 def stop_worker(proc: subprocess.Popen) -> None:
     """停止 worker 子进程。"""
     if proc is None:
         return
     try:
-        os.kill(proc.pid, signal.SIGTERM)
+        pgid = os.getpgid(proc.pid)
+    except Exception:
+        pgid = None
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGTERM)
         proc.wait(timeout=5)
     except Exception:
+        pass
+    finally:
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except Exception:
+                pass
         try:
-            proc.kill()
             proc.wait(timeout=3)
         except Exception:
             pass
 
 
-def run_example(file_path: Path, base: Path) -> tuple[bool, str]:
+def cleanup_taskiq_example_workers(base: Path) -> None:
+    """兜底清理可能残留的 tutorial worker 进程。"""
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", "taskiq worker examples."],
+            cwd=str(base),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def run_example(
+    file_path: Path,
+    base: Path,
+    wrapper_module: str | None = None,
+    wrapper_dir: Path | None = None,
+) -> tuple[bool, str]:
     """运行单个 example 脚本，返回 (成功, 输出/错误信息)。"""
-    cmd = [sys.executable, str(file_path)]
+    env = os.environ.copy()
+    if wrapper_module is None:
+        relative_path = str(file_path.relative_to(base))
+        cmd = [sys.executable, relative_path]
+    else:
+        if wrapper_dir is None:
+            raise ValueError("wrapper_module 存在时，wrapper_dir 不能为空")
+        env["PYTHONPATH"] = (
+            f"{wrapper_dir}{os.pathsep}{env['PYTHONPATH']}"
+            if "PYTHONPATH" in env and env["PYTHONPATH"]
+            else str(wrapper_dir)
+        )
+        code = (
+            "import asyncio, importlib, inspect\n"
+            f"mod = importlib.import_module({wrapper_module!r})\n"
+            "main = getattr(mod, 'main', None)\n"
+            "if main is None:\n"
+            "    raise SystemExit('main() not found')\n"
+            "result = main()\n"
+            "if inspect.isawaitable(result):\n"
+            "    asyncio.run(result)\n"
+        )
+        cmd = [sys.executable, "-c", code]
     try:
         result = subprocess.run(
-            cmd, cwd=str(base), capture_output=True, text=True,
+            cmd, cwd=str(base), env=env, capture_output=True, text=True,
             timeout=EXAMPLE_TIMEOUT,
         )
         if result.returncode == 0:
@@ -136,10 +291,15 @@ def run_example(file_path: Path, base: Path) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def run_one(file_path: Path, base: Path) -> tuple[str, bool, str]:
+def run_one(
+    file_path: Path,
+    base: Path,
+    wrapper_dir: Path,
+) -> tuple[str, bool, str]:
     """运行单个示例（含 worker 管理）。"""
     rel_path = str(file_path.relative_to(base))
     module_path = get_module_path(file_path, base)
+    rel_path_posix = rel_path.replace("\\", "/")
 
     if file_path.name in SKIP_FILES:
         return rel_path, True, "SKIPPED"
@@ -151,18 +311,41 @@ def run_one(file_path: Path, base: Path) -> tuple[str, bool, str]:
     if is_fastapi:
         needs_worker = False
 
-    worker_proc = None
+    worker_procs: list[subprocess.Popen] = []
+    wrapper_module: str | None = None
     if needs_worker:
-        worker_proc = start_worker(module_path, base)
-        if worker_proc is None:
-            return rel_path, False, "Worker 启动失败"
+        cleanup_taskiq_example_workers(base)
+        broker_names = WORKER_ENTRYPOINTS.get(rel_path_posix, ["broker"])
+        wrapper_module = ensure_wrapper_module(
+            module_path=module_path,
+            rel_path=rel_path_posix,
+            broker_names=broker_names,
+            wrapper_dir=wrapper_dir,
+        )
+        for broker_name in broker_names:
+            worker_proc, worker_output = start_worker(
+                wrapper_module,
+                broker_name,
+                base,
+                wrapper_dir=wrapper_dir,
+            )
+            if worker_proc is None:
+                return rel_path, False, f"Worker 启动失败: {broker_name}\n{worker_output}"
+            worker_procs.append(worker_proc)
+        time.sleep(WORKER_STARTUP_WAIT)
 
     try:
-        ok, output = run_example(file_path, base)
+        ok, output = run_example(
+            file_path,
+            base,
+            wrapper_module=wrapper_module,
+            wrapper_dir=wrapper_dir,
+        )
         return rel_path, ok, output
     finally:
-        if worker_proc:
+        for worker_proc in reversed(worker_procs):
             stop_worker(worker_proc)
+        cleanup_taskiq_example_workers(base)
         # 每个示例后清理 Redis，避免互相污染
         try:
             reset_redis()
@@ -172,6 +355,7 @@ def run_one(file_path: Path, base: Path) -> tuple[str, bool, str]:
 def main() -> None:
     """运行所有示例，报告结果。"""
     base = Path(__file__).resolve().parent.parent
+    wrapper_dir = Path(tempfile.mkdtemp(prefix="taskiq_smoke_wrappers_"))
 
     if not check_redis():
         print("❌ Redis 不可用，请确保 Redis 已启动（密码 123456）", flush=True)
@@ -193,7 +377,7 @@ def main() -> None:
     for path in all_files:
         rel_path = str(path.relative_to(base))
         print(f"RUN   {rel_path}", flush=True)
-        name, ok, msg = run_one(path, base)
+        name, ok, msg = run_one(path, base, wrapper_dir)
 
         if msg == "SKIPPED":
             print(f"  SKIP  {name}", flush=True)

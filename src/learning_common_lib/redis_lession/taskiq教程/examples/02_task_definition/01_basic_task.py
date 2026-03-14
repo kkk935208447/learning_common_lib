@@ -55,9 +55,9 @@ broker = ListQueueBroker(
     )
 )
 
-# ── 2. 任务定义：显式 task_name ──
-# ⚠️ 始终显式指定 task_name，避免不同 cwd 导致 worker/client 任务名不一致
-# 不指定时自动生成格式: "模块路径:函数名"，依赖 cwd，容易出问题
+# ── 2. 任务定义：默认 task_name（自动生成） ──
+# 自动生成的 task_name 格式: "模块路径:函数名"
+# 例如: "examples.02_task_definition.01_basic_task:add"
 
 
 @broker.task
@@ -98,39 +98,39 @@ async def build_greeting(name: str, age: int, vip: bool = False) -> dict[str, st
 async def main() -> None:
     """演示：发送三种任务定义模式的任务并获取结果。"""
     await broker.startup()
+    try:
+        print("🚀 发送三个任务...")
+        print()
 
-    print("🚀 发送三个任务...")
-    print()
+        # 任务 1：默认 task_name
+        handle_add = await add.kiq(3, 7)
+        result_add = await handle_add.wait_result(timeout=10)
+        print(f"✅ add(3, 7)")
+        print(f"   task_name    = {add.task_name}")
+        print(f"   return_value = {result_add.return_value}")
+        print()
 
-    # 任务 1：默认 task_name
-    handle_add = await add.kiq(3, 7)
-    result_add = await handle_add.wait_result(timeout=10)
-    print(f"✅ add(3, 7)")
-    print(f"   task_name    = {add.task_name}")
-    print(f"   return_value = {result_add.return_value}")
-    print()
+        # 任务 2：显式 task_name
+        handle_mul = await multiply.kiq(4, 5)
+        result_mul = await handle_mul.wait_result(timeout=10)
+        print(f"✅ multiply(4, 5)")
+        print(f"   task_name    = {multiply.task_name}")
+        print(f"   return_value = {result_mul.return_value}")
+        print()
 
-    # 任务 2：显式 task_name
-    handle_mul = await multiply.kiq(4, 5)
-    result_mul = await handle_mul.wait_result(timeout=10)
-    print(f"✅ multiply(4, 5)")
-    print(f"   task_name    = {multiply.task_name}")
-    print(f"   return_value = {result_mul.return_value}")
-    print()
+        # 任务 3：完整类型注解 + 关键字参数
+        handle_greet = await build_greeting.kiq(name="小明", age=28, vip=True)
+        result_greet = await handle_greet.wait_result(timeout=10)
+        print(f"✅ build_greeting(name='小明', age=28, vip=True)")
+        print(f"   task_name    = {build_greeting.task_name}")
+        print(f"   return_value = {result_greet.return_value}")
+        print()
 
-    # 任务 3：完整类型注解 + 关键字参数
-    handle_greet = await build_greeting.kiq(name="小明", age=28, vip=True)
-    result_greet = await handle_greet.wait_result(timeout=10)
-    print(f"✅ build_greeting(name='小明', age=28, vip=True)")
-    print(f"   task_name    = {build_greeting.task_name}")
-    print(f"   return_value = {result_greet.return_value}")
-    print()
-
-    print("💡 对比 Celery:")
-    print("   - Celery 需要 bind=True + self 参数访问任务上下文")
-    print("   - TaskIQ 用依赖注入替代 self，更 Pythonic")
-
-    await broker.shutdown()
+        print("💡 对比 Celery:")
+        print("   - Celery 需要 bind=True + self 参数访问任务上下文")
+        print("   - TaskIQ 用依赖注入替代 self，更 Pythonic")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

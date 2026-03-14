@@ -74,37 +74,36 @@ async def process_order(order_id: int, amount: float) -> dict:
 async def main() -> None:
     """演示：kiq() 快捷调用 vs kicker() 高级调用。"""
     await broker.startup()
+    try:
+        # ── 3a. kiq() 快捷调用 ──
+        # kiq() 等价于 kicker().kiq()，最简方式发送任务
+        print("🚀 [方式一] kiq() 快捷调用")
+        handle_simple = await process_order.kiq(order_id=1001, amount=99.9)
+        print(f"   task_id = {handle_simple.task_id}")
 
-    # ── 3a. kiq() 快捷调用 ──
-    # kiq() 等价于 kicker().kiq()，最简方式发送任务
-    print("🚀 [方式一] kiq() 快捷调用")
-    handle_simple = await process_order.kiq(order_id=1001, amount=99.9)
-    print(f"   task_id = {handle_simple.task_id}")
+        result_simple = await handle_simple.wait_result(timeout=10)
+        print(f"   返回值  = {result_simple.return_value}")
+        print()
 
-    result_simple = await handle_simple.wait_result(timeout=10)
-    print(f"   返回值  = {result_simple.return_value}")
-    print()
+        # ── 3b. kicker() 高级调用 ──
+        print("🚀 [方式二] kicker() 高级调用")
+        handle_advanced = await (
+            process_order.kicker()
+            .with_labels(priority="high", source="api-gateway")
+            .with_task_id("custom-123")
+            .kiq(order_id=2002, amount=199.9)
+        )
+        print(f"   task_id = {handle_advanced.task_id}")
 
-    # ── 3b. kicker() 高级调用 ──
-    # kicker() 返回 AsyncKicker，支持链式配置 labels / task_id / queue
-    print("🚀 [方式二] kicker() 高级调用")
-    handle_advanced = await (
-        process_order.kicker()
-        .with_labels(priority="high", source="api-gateway")
-        .with_task_id("custom-123")
-        .kiq(order_id=2002, amount=199.9)
-    )
-    print(f"   task_id = {handle_advanced.task_id}")
+        result_advanced = await handle_advanced.wait_result(timeout=10)
+        print(f"   返回值  = {result_advanced.return_value}")
+        print()
 
-    result_advanced = await handle_advanced.wait_result(timeout=10)
-    print(f"   返回值  = {result_advanced.return_value}")
-    print()
-
-    print("💡 对比总结:")
-    print("   kiq()    → 快捷发送，适合大多数场景（类比 Celery delay()）")
-    print("   kicker() → 高级发送，可链式配置元数据（类比 Celery apply_async()）")
-
-    await broker.shutdown()
+        print("💡 对比总结:")
+        print("   kiq()    → 快捷发送，适合大多数场景（类比 Celery delay()）")
+        print("   kicker() → 高级发送，可链式配置元数据（类比 Celery apply_async()）")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

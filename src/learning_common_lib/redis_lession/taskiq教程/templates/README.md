@@ -9,23 +9,29 @@
 | 模块 | 职责 |
 |------|------|
 | `taskiq_config.py` | 配置 dataclass，环境变量覆盖，broker/backend 工厂方法 |
-| `taskiq_app.py` | Broker 工厂函数 + 单例管理（create / init / get） |
+| `taskiq_app.py` | Broker 工厂函数 + 单例管理 + `broker_session()` |
 | `error_handling.py` | 异常层级树（TaskRetryableError / TaskFatalError），is_retryable() |
 | `task_base.py` | 任务装饰器工厂 create_task()，通用包装器 safe_execute() |
-| `middleware_stack.py` | LoggingMiddleware / RetryMiddleware / TimeoutMiddleware |
+| `middleware_stack.py` | LoggingMiddleware / RetryMiddleware / SlowTaskWarningMiddleware |
 | `fastapi_taskiq.py` | FastAPI lifespan、get_broker Depends、send_task 辅助 |
 | `__init__.py` | 公开 API 导出，FastAPI 可选依赖处理 |
 
 ## 快速开始
 
 ```python
-from templates import TaskiqConfig, create_taskiq_broker, create_default_middlewares
+from templates import (
+    TaskiqConfig,
+    broker_session,
+    create_default_middlewares,
+    create_taskiq_broker,
+)
 
 # 1. 创建配置（自动读取环境变量）
 config = TaskiqConfig()
 
-# 2. 创建 broker（含 result_backend + 中间件）
+# 2. 创建 broker（默认只组装 result_backend）
 broker = create_taskiq_broker(config)
+broker = broker.with_middlewares(*create_default_middlewares())
 
 # 3. 定义任务
 @broker.task
@@ -34,11 +40,10 @@ async def process_order(order_id: int) -> dict:
 
 # 4. 发送任务
 async def main():
-    await broker.startup()
-    handle = await process_order.kiq(order_id=123)
-    result = await handle.wait_result(timeout=30)
-    print(result.return_value)
-    await broker.shutdown()
+    async with broker_session(broker):
+        handle = await process_order.kiq(order_id=123)
+        result = await handle.wait_result(timeout=30)
+        print(result.return_value)
 ```
 
 ## 环境变量
@@ -48,7 +53,10 @@ async def main():
 | `TASKIQ_BROKER_URL` | `redis://default:123456@localhost:6379/0` | Broker 连接 |
 | `TASKIQ_RESULT_BACKEND_URL` | `redis://default:123456@localhost:6379/1` | Result Backend 连接 |
 | `TASKIQ_RESULT_EX_TIME` | `3600` | 结果过期时间（秒） |
-| `TASKIQ_CONCURRENCY` | `10` | Worker 并发数 |
+
+Worker 并发、threadpool、大型 CPU 任务建议通过 `taskiq worker` CLI 参数控制，而不是塞进 Broker 配置对象。
+
+`broker_session(...)` 更适合作为模板层和中后期教程里的收敛写法；前期教程仍然建议先理解显式 `startup()` / `shutdown()`。
 
 ## 每个模板都可独立运行
 

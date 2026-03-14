@@ -11,7 +11,8 @@ TaskIQ 指数退避重试中间件 — 在 on_error 中实现自动重试。
 
 关键 API:
     - TaskiqMiddleware.on_error         — 任务异常时触发的钩子
-    - broker.kick(message)              — 重新发送消息到队列
+    - broker.formatter.dumps(message)   — 先序列化成 BrokerMessage
+    - broker.kick(...)                  — 重新发送消息到队列
     - message.labels                    — 存储重试计数和配置
 
 目录导航:
@@ -36,7 +37,7 @@ TaskIQ 指数退避重试中间件 — 在 on_error 中实现自动重试。
 
 技术要点:
     - on_error 钩子在任务抛出异常时触发
-    - broker.kick(message) 重新发送消息到队列
+    - broker.kick(broker.formatter.dumps(message)) 重新发送消息到队列
     - 退避公式: delay = base * 2^retry_count + random(0, 1)
     - labels 中的值必须是字符串类型
 """
@@ -46,7 +47,7 @@ from __future__ import annotations
 import asyncio
 import random
 
-from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
+from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 
 # ── 1. 可重试异常定义 ──
@@ -110,7 +111,8 @@ class RetryMiddleware(TaskiqMiddleware):
         await asyncio.sleep(backoff)
 
         # 重新发送消息到队列
-        await self.broker.kick(message)
+        serialized_message = self.broker.formatter.dumps(message)
+        await self.broker.kick(serialized_message)
 
 
 # ── 3. 创建 Broker + 注册重试中间件 ──
@@ -124,25 +126,27 @@ broker = ListQueueBroker(
 )
 
 # ── 4. 模拟不稳定任务 ──
-# 模块级计数器，模拟前 2 次失败、第 3 次成功的场景
-_call_count: int = 0
+# 通过 message.labels["_retry_count"] 推导当前尝试次数，避免多进程下的全局计数失真
 
 
 @broker.task
-async def unstable_task(item: str) -> str:
+async def unstable_task(
+    item: str,
+    context: Context = TaskiqDepends(),
+) -> str:
     """
     不稳定任务 — 前 2 次抛出 TemporaryNetworkError，第 3 次成功。
 
     用于演示重试中间件的退避重试行为。
     """
-    global _call_count  # noqa: PLW0603
-    _call_count += 1
+    retry_count = int(context.message.labels.get("_retry_count", "0"))
+    attempt = retry_count + 1
 
-    print(f"📦 Worker 执行 unstable_task({item!r})，第 {_call_count} 次调用")
+    print(f"📦 Worker 执行 unstable_task({item!r})，第 {attempt} 次调用")
 
-    if _call_count <= 2:
+    if attempt <= 2:
         raise TemporaryNetworkError(
-            f"模拟网络超时（第 {_call_count} 次）"
+            f"模拟网络超时（第 {attempt} 次）"
         )
 
     result = f"处理完成: {item}"
@@ -156,26 +160,28 @@ async def unstable_task(item: str) -> str:
 async def main() -> None:
     """发送不稳定任务，观察重试中间件的退避重试行为。"""
     await broker.startup()
+    try:
+        print("🚀 发送不稳定任务: unstable_task('重要数据')")
+        print("=" * 50)
 
-    print("🚀 发送不稳定任务: unstable_task('重要数据')")
-    print("=" * 50)
+        # 通过 labels 配置重试参数
+        handle = await unstable_task.kicker().with_labels(
+            max_retries="3",
+            retry_delay="0.5",
+        ).kiq("重要数据")
 
-    # 通过 labels 配置重试参数
-    handle = await unstable_task.kicker().with_labels(
-        max_retries="3",
-        retry_delay="0.5",
-    ).kiq("重要数据")
-
-    print(f"✅ 任务已发送! task_id={handle.task_id}")
-    print()
-    print("💡 重试行为说明:")
-    print("   第 1 次执行: 失败 → 退避 0.5 * 2^0 + jitter ≈ 0.5~1.5s → 重试")
-    print("   第 2 次执行: 失败 → 退避 0.5 * 2^1 + jitter ≈ 1.0~2.0s → 重试")
-    print("   第 3 次执行: 成功 ✅")
-    print()
-    print("💡 退避公式: delay = base_delay * 2^retry_count + random(0, 1)")
-
-    await broker.shutdown()
+        result = await handle.wait_result(timeout=20)
+        print(f"✅ 任务已发送! task_id={handle.task_id}")
+        print(f"✅ 最终结果   = {result.return_value}")
+        print()
+        print("💡 重试行为说明:")
+        print("   第 1 次执行: 失败 → 退避 0.5 * 2^0 + jitter ≈ 0.5~1.5s → 重试")
+        print("   第 2 次执行: 失败 → 退避 0.5 * 2^1 + jitter ≈ 1.0~2.0s → 重试")
+        print("   第 3 次执行: 成功 ✅")
+        print()
+        print("💡 退避公式: delay = base_delay * 2^retry_count + random(0, 1)")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

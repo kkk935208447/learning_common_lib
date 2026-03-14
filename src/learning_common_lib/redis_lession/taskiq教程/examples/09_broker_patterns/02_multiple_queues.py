@@ -1,18 +1,18 @@
 """
-TaskIQ 多队列路由 — 通过 labels 的 queue 字段路由任务到不同队列。
+TaskIQ 多队列路由 — 通过多个 broker.queue_name 隔离不同优先级任务。
 
 目标:
-    演示通过 labels 的 queue 字段路由任务到不同队列
+    演示 TaskIQ Redis broker 的真实多队列模型
 
 关键概念:
-    - 通过 @broker.task(queue="high") 指定任务默认队列
-    - 通过 kicker().with_labels(queue="urgent").kiq() 动态路由
-    - 多 worker 进程监听不同队列
+    - taskiq_redis 真正用于路由的是 queue_name
+    - 不同队列通常对应不同 broker 对象，而不是一个 broker 靠 CLI 参数切换
+    - 不同 worker 分别监听各自 broker.queue_name，实现优先级和资源隔离
 
 关键 API:
-    - @broker.task(queue="...")                    — 指定任务默认队列
-    - task.kicker().with_labels(queue="...").kiq() — 动态路由到指定队列
-    - taskiq worker ... -fsd "queue_name"          — worker 监听指定队列
+    - ListQueueBroker(queue_name="...")    — 指定 Redis 队列名
+    - @broker.task                         — 在对应 broker 上注册任务
+    - broker_session(...)                  — 同时管理多个 broker 的客户端连接
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/redis_lession/taskiq教程
@@ -20,25 +20,28 @@ TaskIQ 多队列路由 — 通过 labels 的 queue 字段路由任务到不同�
 
 运行方式:
     Worker 1:
-        taskiq worker examples.09_broker_patterns.02_multiple_queues:broker -fsd "default"
+        taskiq worker examples.09_broker_patterns.02_multiple_queues:default_broker
     Worker 2:
-        taskiq worker examples.09_broker_patterns.02_multiple_queues:broker -fsd "high_priority"
+        taskiq worker examples.09_broker_patterns.02_multiple_queues:high_priority_broker
+    Worker 3:
+        taskiq worker examples.09_broker_patterns.02_multiple_queues:batch_broker
     Client:
         python examples/09_broker_patterns/02_multiple_queues.py
 
 预期现象:
-    - default_task 被 Worker 1 消费（default 队列）
-    - high_priority_task 被 Worker 2 消费（high_priority 队列）
-    - 动态路由的任务根据指定队列被对应 worker 消费
+    - default_task 被 default_broker 对应 worker 消费
+    - high_priority_task 被 high_priority_broker 对应 worker 消费
+    - batch_task 被 batch_broker 对应 worker 消费
 
 生产提醒:
-    - 不同优先级的任务路由到不同队列，配合不同数量的 worker 实现资源隔离
-    - 批处理任务建议路由到独立队列，避免阻塞高优先级任务
+    - 多队列隔离的核心是“不同队列名 + 不同 worker 部署策略”
+    - 高优先级队列可单独扩容 worker 数量
+    - CPU/批处理类任务建议独立到单独队列，避免拖慢高优先级路径
 
 技术要点:
-    - 对比 Celery 的 -Q 参数：TaskIQ 通过 labels 中的 queue 字段路由
-    - 不同优先级的任务可以路由到不同队列
-    - 多 worker 实例可以监听不同队列实现资源隔离
+    - TaskIQ 没有 Celery 那样的 `-Q` 队列切换参数
+    - `--tasks-pattern` / `-fsd` 是任务发现参数，不是队列路由参数
+    - 如果要临时改队列，目标 worker 也必须认识该 task_name
 """
 
 from __future__ import annotations
@@ -46,109 +49,119 @@ from __future__ import annotations
 import asyncio
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+try:
+    from ...templates.taskiq_app import broker_session
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
-# ── 1. 创建 Broker + Result Backend ──
-result_backend = RedisAsyncResultBackend(
-    redis_url="redis://default:123456@localhost:6379/1",
-)
-broker = ListQueueBroker(
-    url="redis://default:123456@localhost:6379/0",
-).with_result_backend(result_backend)
+BROKER_URL = "redis://default:123456@localhost:6379/0"
+RESULT_BACKEND_URL = "redis://default:123456@localhost:6379/1"
 
 
-# ── 2. 定义不同队列的任务 ──
+def create_queue_broker(queue_name: str) -> ListQueueBroker:
+    """为单个 queue_name 创建专用 broker。"""
+    backend = RedisAsyncResultBackend(
+        redis_url=RESULT_BACKEND_URL,
+        result_ex_time=3600,
+    )
+    return ListQueueBroker(
+        url=BROKER_URL,
+        queue_name=queue_name,
+    ).with_result_backend(backend)
 
 
-@broker.task
+# ── 1. 为不同队列创建不同 broker ──
+default_broker = create_queue_broker("default")
+high_priority_broker = create_queue_broker("high_priority")
+batch_broker = create_queue_broker("batch")
+
+
+# ── 2. 在各自的 broker 上注册任务 ──
+
+
+@default_broker.task
 async def default_task(message: str) -> dict:
-    """默认队列任务 — 不指定 queue，走 default 队列。"""
+    """默认队列任务。"""
     print(f"📦 [default] 处理消息: {message}")
-    return {"queue": "default", "message": message, "status": "done"}
+    return {"queue_name": "default", "message": message, "status": "done"}
 
 
-@broker.task(queue="high_priority")
+@high_priority_broker.task
 async def high_priority_task(order_id: int) -> dict:
-    """高优先级任务 — 路由到 high_priority 队列。"""
+    """高优先级任务。"""
     print(f"🔥 [high_priority] 紧急处理订单: order_id={order_id}")
-    return {"queue": "high_priority", "order_id": order_id, "status": "done"}
+    return {"queue_name": "high_priority", "order_id": order_id, "status": "done"}
 
 
-@broker.task(queue="batch")
+@batch_broker.task
 async def batch_task(batch_id: str, count: int) -> dict:
-    """批处理任务 — 路由到 batch 队列，避免阻塞高优先级任务。"""
+    """批处理任务。"""
     print(f"📊 [batch] 批量处理: batch_id={batch_id}, count={count}")
-    return {"queue": "batch", "batch_id": batch_id, "count": count, "status": "done"}
+    return {"queue_name": "batch", "batch_id": batch_id, "count": count, "status": "done"}
 
 
 # ── 3. 客户端发送任务 ──
 
 
 async def main() -> None:
-    """演示：多队列路由 — 静态声明 + 动态路由。"""
-    await broker.startup()
+    """演示：多队列隔离的真实用法。"""
+    async with broker_session(default_broker, high_priority_broker, batch_broker):
+        print("=" * 60)
+        print("📋 发送任务到不同 queue_name")
+        print("=" * 60)
+        print()
 
-    # ── 3a. 发送到默认队列 ──
-    print("=" * 60)
-    print("📋 发送任务到不同队列")
-    print("=" * 60)
-    print()
+        print("🚀 [1] 发送到 default 队列")
+        h1 = await default_task.kiq(message="普通消息处理")
+        r1 = await h1.wait_result(timeout=10)
+        print(f"   task_id = {h1.task_id}")
+        print(f"   result  = {r1.return_value}")
+        print()
 
-    print("🚀 [1] 发送到 default 队列（未指定 queue）")
-    h1 = await default_task.kiq(message="普通消息处理")
-    print(f"   task_id = {h1.task_id}")
-    print()
+        print("🚀 [2] 发送到 high_priority 队列")
+        h2 = await high_priority_task.kiq(order_id=9001)
+        r2 = await h2.wait_result(timeout=10)
+        print(f"   task_id = {h2.task_id}")
+        print(f"   result  = {r2.return_value}")
+        print()
 
-    # ── 3b. 发送到 high_priority 队列 ──
-    print("🚀 [2] 发送到 high_priority 队列（装饰器声明）")
-    h2 = await high_priority_task.kiq(order_id=9001)
-    print(f"   task_id = {h2.task_id}")
-    print()
+        print("🚀 [3] 发送到 batch 队列")
+        h3 = await batch_task.kiq(batch_id="B-2024-001", count=500)
+        r3 = await h3.wait_result(timeout=10)
+        print(f"   task_id = {h3.task_id}")
+        print(f"   result  = {r3.return_value}")
+        print()
 
-    # ── 3c. 发送到 batch 队列 ──
-    print("🚀 [3] 发送到 batch 队列（装饰器声明）")
-    h3 = await batch_task.kiq(batch_id="B-2024-001", count=500)
-    print(f"   task_id = {h3.task_id}")
-    print()
+        print("=" * 60)
+        print("🖥️ 多 Worker 启动命令")
+        print("=" * 60)
+        print()
+        print("  # Worker 1 — 监听 default 队列")
+        print("  taskiq worker examples.09_broker_patterns.02_multiple_queues:default_broker")
+        print()
+        print("  # Worker 2 — 监听 high_priority 队列")
+        print("  taskiq worker examples.09_broker_patterns.02_multiple_queues:high_priority_broker")
+        print()
+        print("  # Worker 3 — 监听 batch 队列")
+        print("  taskiq worker examples.09_broker_patterns.02_multiple_queues:batch_broker")
+        print()
 
-    # ── 3d. 动态路由 — kicker 覆盖队列 ──
-    print("🚀 [4] 动态路由 — 将 default_task 临时路由到 high_priority 队列")
-    h4 = await (
-        default_task.kicker()
-        .with_labels(queue="high_priority")
-        .kiq(message="紧急消息，动态提升优先级")
-    )
-    print(f"   task_id = {h4.task_id}")
-    print()
-
-    # ── 3e. Worker 启动命令 ──
-    print("=" * 60)
-    print("🖥️ 多 Worker 启动命令（每个 worker 监听不同队列）")
-    print("=" * 60)
-    print()
-    print("  # Worker 1 — 监听 default 队列")
-    print('  taskiq worker examples.09_broker_patterns.02_multiple_queues:broker -fsd "default"')
-    print()
-    print("  # Worker 2 — 监听 high_priority 队列（可部署更多实例）")
-    print('  taskiq worker examples.09_broker_patterns.02_multiple_queues:broker -fsd "high_priority"')
-    print()
-    print("  # Worker 3 — 监听 batch 队列（低优先级，少量实例）")
-    print('  taskiq worker examples.09_broker_patterns.02_multiple_queues:broker -fsd "batch"')
-    print()
-
-    # ── 3f. 队列隔离优势 ──
-    print("=" * 60)
-    print("💡 队列隔离的优势")
-    print("=" * 60)
-    print("  1. 资源隔离: 批处理不会阻塞高优先级任务")
-    print("  2. 弹性伸缩: 高优先级队列可部署更多 worker")
-    print("  3. 故障隔离: 某个队列的 worker 挂掉不影响其他队列")
-    print("  4. 动态路由: kicker().with_labels(queue=...) 可临时调整优先级")
-    print()
-    print("💡 对比 Celery:")
-    print("  Celery:  celery -A app worker -Q high_priority")
-    print("  TaskIQ:  taskiq worker module:broker -fsd \"high_priority\"")
-
-    await broker.shutdown()
+        print("💡 队列隔离的优势:")
+        print("  1. 资源隔离: 批处理不会阻塞高优先级任务")
+        print("  2. 弹性伸缩: 高优先级队列可部署更多 worker")
+        print("  3. 故障隔离: 某个队列的 worker 挂掉不影响其他队列")
+        print("  4. 可观测性更清晰: 每个队列有独立吞吐和积压指标")
+        print()
+        print("💡 动态路由说明:")
+        print("  - TaskIQ Redis 路由读取的是 queue_name")
+        print("  - 只有目标 worker 也注册了相同 task_name 时，临时改 queue_name 才能成功消费")
+        print()
+        print("💡 对比 Celery:")
+        print("  Celery:  celery -A app worker -Q high_priority")
+        print("  TaskIQ:  为不同 queue_name 创建不同 broker，并分别启动 worker")
 
 
 if __name__ == "__main__":

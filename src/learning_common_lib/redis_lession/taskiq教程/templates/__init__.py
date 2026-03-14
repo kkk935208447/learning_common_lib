@@ -16,11 +16,11 @@ from .error_handling import (
 from .middleware_stack import (
     LoggingMiddleware,
     RetryMiddleware,
-    TimeoutMiddleware,
+    SlowTaskWarningMiddleware,
     create_default_middlewares,
 )
 from .task_base import create_task, safe_execute
-from .taskiq_app import create_taskiq_broker, get_broker, init_broker
+from .taskiq_app import broker_session, create_taskiq_broker, get_broker, init_broker
 from .taskiq_config import TaskiqConfig
 
 try:
@@ -41,6 +41,7 @@ __all__ = [
     "create_taskiq_broker",
     "init_broker",
     "get_broker",
+    "broker_session",
     "TaskError",
     "TaskRetryableError",
     "TaskFatalError",
@@ -52,7 +53,7 @@ __all__ = [
     "safe_execute",
     "LoggingMiddleware",
     "RetryMiddleware",
-    "TimeoutMiddleware",
+    "SlowTaskWarningMiddleware",
     "create_default_middlewares",
 ]
 

@@ -170,33 +170,33 @@ async def validate_data(data: dict) -> dict:
 async def main() -> None:
     """演示：发送不同场景的任务，观察智能重试行为。"""
     await broker.startup()
+    try:
+        # 场景 1: 可重试异常（网络超时）
+        print("🚀 场景 1 — 调用外部 API（可能触发可重试异常）")
+        h1 = await fetch_external_api.kiq(url="https://api.example.com/data")
+        print(f"   task_id = {h1.task_id}")
+        print()
 
-    # 场景 1: 可重试异常（网络超时）
-    print("🚀 场景 1 — 调用外部 API（可能触发可重试异常）")
-    h1 = await fetch_external_api.kiq(url="https://api.example.com/data")
-    print(f"   task_id = {h1.task_id}")
-    print()
+        # 场景 2: 可重试异常（支付网关繁忙）
+        print("🚀 场景 2 — 处理支付（可能触发可重试异常）")
+        h2 = await process_payment.kiq(order_id=2001, amount=199.99)
+        print(f"   task_id = {h2.task_id}")
+        print()
 
-    # 场景 2: 可重试异常（支付网关繁忙）
-    print("🚀 场景 2 — 处理支付（可能触发可重试异常）")
-    h2 = await process_payment.kiq(order_id=2001, amount=199.99)
-    print(f"   task_id = {h2.task_id}")
-    print()
+        # 场景 3: 致命异常（数据格式错误）
+        print("🚀 场景 3 — 校验数据（触发致命异常，不重试）")
+        h3 = await validate_data.kiq(data={"age": 25})
+        print(f"   task_id = {h3.task_id}")
+        print()
 
-    # 场景 3: 致命异常（数据格式错误）
-    print("🚀 场景 3 — 校验数据（触发致命异常，不重试）")
-    h3 = await validate_data.kiq(data={"age": 25})
-    print(f"   task_id = {h3.task_id}")
-    print()
-
-    print("💡 关键点:")
-    print("   - labels 中的 max_retries/retry_delay 由 SmartRetryMiddleware 读取")
-    print("   - 退避公式: delay = base_delay * 2^count + random(0, 1)")
-    print("   - RetryableError → 指数退避重试; FatalError → 直接失败")
-    print("   - 对比 Celery: Celery 用 self.retry(exc=e, countdown=delay)")
-    print("   - TaskIQ 通过中间件实现，更灵活，可自定义重试策略")
-
-    await broker.shutdown()
+        print("💡 关键点:")
+        print("   - labels 中的 max_retries/retry_delay 由 SmartRetryMiddleware 读取")
+        print("   - 退避公式: delay = base_delay * 2^count + random(0, 1)")
+        print("   - RetryableError → 指数退避重试; FatalError → 直接失败")
+        print("   - 对比 Celery: Celery 用 self.retry(exc=e, countdown=delay)")
+        print("   - TaskIQ 通过中间件实现，更灵活，可自定义重试策略")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

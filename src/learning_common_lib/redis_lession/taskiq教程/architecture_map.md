@@ -66,7 +66,9 @@ Producer                    Broker                     Worker
    │                          │  ─────────────────────►  │
    │                          │                          │  3. [pre_execute 中间件]
    │                          │                          │  4. 解析依赖注入
-   │                          │                          │  5. 执行 async 任务函数
+   │                          │                          │  5. 执行任务函数
+   │                          │                          │     async def → 事件循环
+   │                          │                          │     sync def  → 默认 threadpool
    │                          │                          │  6. [post_execute 中间件]
    │                          │                          │  7. [post_save 中间件]
    │                          │                          │
@@ -90,9 +92,14 @@ Producer                    Broker                     Worker
 | 结果获取 | AsyncResult.get()（阻塞） | await handle.wait_result()（异步） |
 | 并行等待 | group() + GroupResult | asyncio.gather() |
 | 定时任务 | Celery Beat（独立进程） | TaskiqScheduler + ScheduleSource |
-| Worker 池 | prefork / gevent / custom | asyncio（原生） |
+| Worker 执行模型 | prefork / gevent / custom | async def 走事件循环；sync def 默认进 threadpool |
 | 任务元数据 | task.request | labels + Context |
 | 消息确认 | acks_late 配置 | context.reject() / requeue() |
+
+补充说明:
+- TaskIQ 是 async-first，不等于“所有任务都天然异步并行”
+- `async def` 里混入同步 IO 仍会阻塞事件循环
+- CPU 密集型同步任务更适合 process pool，而不是无限堆线程
 
 ## 概念到文件映射表
 

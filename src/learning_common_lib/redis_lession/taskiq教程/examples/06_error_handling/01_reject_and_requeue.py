@@ -101,35 +101,35 @@ async def process_order(
 async def main() -> None:
     """演示：发送不同场景的订单任务，观察 reject/requeue 行为。"""
     await broker.startup()
+    try:
+        # 场景 1: 正常订单
+        print("🚀 场景 1 — 发送正常订单")
+        handle_ok = await process_order.kiq(order_data={"order_id": 1001, "amount": 99.9})
+        print(f"   task_id = {handle_ok.task_id}")
+        print()
 
-    # 场景 1: 正常订单
-    print("🚀 场景 1 — 发送正常订单")
-    handle_ok = await process_order.kiq(order_data={"order_id": 1001, "amount": 99.9})
-    print(f"   task_id = {handle_ok.task_id}")
-    print()
+        # 场景 2: 无效订单（order_id 缺失）→ Worker 端会 reject
+        print("🚀 场景 2 — 发送无效订单（缺少 order_id）")
+        handle_bad = await process_order.kiq(order_data={"amount": 50.0})
+        print(f"   task_id = {handle_bad.task_id}")
+        print()
 
-    # 场景 2: 无效订单（order_id 缺失）→ Worker 端会 reject
-    print("🚀 场景 2 — 发送无效订单（缺少 order_id）")
-    handle_bad = await process_order.kiq(order_data={"amount": 50.0})
-    print(f"   task_id = {handle_bad.task_id}")
-    print()
+        # 场景 3: 需要 GPU 资源的订单 → Worker 端可能 requeue
+        print("🚀 场景 3 — 发送需要 GPU 的订单")
+        handle_gpu = await process_order.kiq(
+            order_data={"order_id": 1002, "require_gpu": True}
+        )
+        print(f"   task_id = {handle_gpu.task_id}")
+        print()
 
-    # 场景 3: 需要 GPU 资源的订单 → Worker 端可能 requeue
-    print("🚀 场景 3 — 发送需要 GPU 的订单")
-    handle_gpu = await process_order.kiq(
-        order_data={"order_id": 1002, "require_gpu": True}
-    )
-    print(f"   task_id = {handle_gpu.task_id}")
-    print()
-
-    print("💡 关键点:")
-    print("   - reject/requeue 在 Worker 端执行，Client 端只负责发送")
-    print("   - reject(): 消息被丢弃，不再重试（适用于不可恢复错误）")
-    print("   - requeue(): 消息重新入队，等待下次消费（适用于临时故障）")
-    print("   - Context 通过 TaskiqDepends() 自动注入，无需手动传参")
-    print("   - 对比 Celery: Celery 使用 self.retry() 重试，没有 reject/requeue 语义")
-
-    await broker.shutdown()
+        print("💡 关键点:")
+        print("   - reject/requeue 在 Worker 端执行，Client 端只负责发送")
+        print("   - reject(): 消息被丢弃，不再重试（适用于不可恢复错误）")
+        print("   - requeue(): 消息重新入队，等待下次消费（适用于临时故障）")
+        print("   - Context 通过 TaskiqDepends() 自动注入，无需手动传参")
+        print("   - 对比 Celery: Celery 使用 self.retry() 重试，没有 reject/requeue 语义")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":

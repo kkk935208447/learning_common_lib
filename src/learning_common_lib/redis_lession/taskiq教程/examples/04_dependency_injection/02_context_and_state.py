@@ -126,31 +126,31 @@ async def task_with_state(
 async def main() -> None:
     """演示：Context 和 TaskiqState 的使用。"""
     await broker.startup()
+    try:
+        # ── 5a. 发送带 labels 的任务，演示 Context ──
+        print("🚀 [演示一] Context — 访问消息元数据")
+        handle_ctx = await (
+            task_with_context.kicker()
+            .with_labels(priority="high", region="us-east-1")
+            .kiq(order_id=4001)
+        )
+        result_ctx = await handle_ctx.wait_result(timeout=10)
+        print(f"✅ 返回值: {result_ctx.return_value}")
+        print()
 
-    # ── 5a. 发送带 labels 的任务，演示 Context ──
-    print("🚀 [演示一] Context — 访问消息元数据")
-    handle_ctx = await (
-        task_with_context.kicker()
-        .with_labels(priority="high", region="us-east-1")
-        .kiq(order_id=4001)
-    )
-    result_ctx = await handle_ctx.wait_result(timeout=10)
-    print(f"✅ 返回值: {result_ctx.return_value}")
-    print()
+        # ── 5b. 发送任务，演示 TaskiqState ──
+        print("🚀 [演示二] TaskiqState — 访问 worker 共享状态")
+        handle_state = await task_with_state.kiq(query="SELECT * FROM orders")
+        result_state = await handle_state.wait_result(timeout=10)
+        print(f"✅ 返回值: {result_state.return_value}")
+        print()
 
-    # ── 5b. 发送任务，演示 TaskiqState ──
-    print("🚀 [演示二] TaskiqState — 访问 worker 共享状态")
-    handle_state = await task_with_state.kiq(query="SELECT * FROM orders")
-    result_state = await handle_state.wait_result(timeout=10)
-    print(f"✅ 返回值: {result_state.return_value}")
-    print()
-
-    print("💡 关键点:")
-    print("   - Context 提供任务运行时元数据（task_id、labels 等）")
-    print("   - TaskiqState 提供 worker 级共享状态（连接池、配置等）")
-    print("   - startup/shutdown 事件管理共享资源的生命周期")
-
-    await broker.shutdown()
+        print("💡 关键点:")
+        print("   - Context 提供任务运行时元数据（task_id、labels 等）")
+        print("   - TaskiqState 提供 worker 级共享状态（连接池、配置等）")
+        print("   - startup/shutdown 事件管理共享资源的生命周期")
+    finally:
+        await broker.shutdown()
 
 
 if __name__ == "__main__":
