@@ -18,7 +18,21 @@ def reset_tutorial_redis() -> None:
         finally:
             client.close()
 reset_tutorial_redis()
-````
+```
+
+## 查看和清理后台孤立的worker
+
+```bash
+# 查看 taskiq 所有 worker
+ps -ef | grep taskiq
+# 查看 celery 所有 worker
+ps -ef | grep celery
+
+# 删除 taskiq 所有 worker
+pkill -9 -f taskiq
+# 删除 celery 所有 worker
+pkill -9 -f celery
+```
 
 
 ## 定位
@@ -61,14 +75,6 @@ python -c "import redis; print(redis.Redis(host='localhost', port=6379, password
 
 # 2. 安装依赖
 uv add "celery[redis]" "celery-aio-pool>=0.1.0rc8" "gevent>=25.5.1" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
-```
-
-## 终端查看后台开启的 celery 进程
-```bash
-ps -ef | grep celery
-# ps aux | grep celery
-# 删除所有的 celery,  -9 表示强制删除
-pkill -9 -f celery 
 ```
 
 
