@@ -42,6 +42,7 @@ TaskIQ Broker 模式对比 — PubSubBroker 广播 vs ListQueueBroker 竞争消�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, PubSubBroker, RedisAsyncResultBackend
 try:
@@ -52,6 +53,15 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
+LIST_QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME_LIST_BROKER",
+    "taskiq:examples:09_broker_patterns:01_pubsub_broker:list",
+)
+PUBSUB_QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME_PUBSUB_BROKER",
+    "taskiq:examples:09_broker_patterns:01_pubsub_broker:pubsub",
+)
+
 # ── 1. 创建两种 Broker ──
 
 # ListQueueBroker — 基于 Redis List，竞争消费模式
@@ -61,19 +71,21 @@ result_backend = RedisAsyncResultBackend(
 )
 list_broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=LIST_QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 # PubSubBroker — 基于 Redis Pub/Sub，广播模式
 # 所有订阅的 worker 都会收到消息，不支持 result_backend
 pubsub_broker = PubSubBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=PUBSUB_QUEUE_NAME,
 )
 
 
 # ── 2. 在 ListQueueBroker 上定义任务 ──
 
 
-@list_broker.task
+@list_broker.task(task_name="examples.09_broker_patterns.01_pubsub_broker.process_order")
 async def process_order(order_id: int) -> dict:
     """处理订单 — 竞争消费，只有一个 worker 处理。"""
     print(f"📦 [List] Worker 处理订单: order_id={order_id}")
@@ -85,7 +97,7 @@ async def process_order(order_id: int) -> dict:
 # ── 3. 在 PubSubBroker 上定义任务 ──
 
 
-@pubsub_broker.task
+@pubsub_broker.task(task_name="examples.09_broker_patterns.01_pubsub_broker.broadcast_cache_invalidation")
 async def broadcast_cache_invalidation(cache_key: str) -> None:
     """广播缓存失效通知 — 所有 worker 都会收到。"""
     print(f"📢 [PubSub] 收到缓存失效广播: cache_key={cache_key}")

@@ -44,6 +44,7 @@ TaskIQ 生命周期事件 — Worker 和 Client 的 startup/shutdown。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
@@ -55,12 +56,18 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:08_events_and_lifecycle:01_startup_shutdown",
+)
+
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 
@@ -123,7 +130,7 @@ async def on_shutdown(state: TaskiqState) -> None:
 # ── 4. 定义任务（访问 state 中的共享资源） ──
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.01_startup_shutdown.query_user")
 async def query_user(
     user_id: int,
     state: TaskiqState = TaskiqDepends(),
@@ -146,7 +153,7 @@ async def query_user(
     }
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.01_startup_shutdown.update_cache")
 async def update_cache(
     key: str,
     value: str,

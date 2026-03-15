@@ -40,12 +40,19 @@ TaskIQ labels 系统 — 任务元数据标签。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:02_task_definition:02_task_labels",
+)
 
 # ── 1. 创建 Broker + ResultBackend ──
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(
     RedisAsyncResultBackend(
         redis_url="redis://default:123456@localhost:6379/1",
@@ -57,14 +64,20 @@ broker = ListQueueBroker(
 # queue label 常用于将任务路由到不同的 Worker 队列
 
 
-@broker.task(queue="default")
+@broker.task(
+    task_name="examples.02_task_definition.02_task_labels.send_notification",
+    queue="default",
+)
 async def send_notification(user_id: int, message: str) -> dict:
     """发送通知（默认队列）。"""
     print(f"📦 [default 队列] 发送通知给用户 {user_id}: {message}")
     return {"user_id": user_id, "status": "sent"}
 
 
-@broker.task(queue="high")
+@broker.task(
+    task_name="examples.02_task_definition.02_task_labels.process_payment",
+    queue="high",
+)
 async def process_payment(order_id: str, amount: float) -> dict:
     """处理支付（高优先级队列）。"""
     print(f"📦 [high 队列] 处理支付: order={order_id}, amount={amount}")
@@ -75,14 +88,22 @@ async def process_payment(order_id: str, amount: float) -> dict:
 # priority label 可被自定义中间件读取，实现优先级调度
 
 
-@broker.task(queue="default", priority="10")
+@broker.task(
+    task_name="examples.02_task_definition.02_task_labels.send_email",
+    queue="default",
+    priority="10",
+)
 async def send_email(to: str, subject: str) -> dict:
     """发送邮件（优先级 10，较高）。"""
     print(f"📦 [priority=10] 发送邮件: to={to}, subject={subject}")
     return {"to": to, "subject": subject, "status": "sent"}
 
 
-@broker.task(queue="default", priority="1")
+@broker.task(
+    task_name="examples.02_task_definition.02_task_labels.generate_report",
+    queue="default",
+    priority="1",
+)
 async def generate_report(report_type: str) -> dict:
     """生成报表（优先级 1，较低）。"""
     print(f"📦 [priority=1] 生成报表: type={report_type}")

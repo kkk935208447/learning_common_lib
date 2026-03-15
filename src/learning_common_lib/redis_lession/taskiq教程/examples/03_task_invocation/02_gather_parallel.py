@@ -40,9 +40,15 @@ TaskIQ 并行任务执行与结果收集 — asyncio.gather 并行等待。
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:03_task_invocation:02_gather_parallel",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -50,13 +56,14 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 
 # ── 2. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.03_task_invocation.02_gather_parallel.compute_task")
 async def compute_task(task_num: int, value: int) -> dict:
     """模拟计算任务 — 短暂 sleep 后返回结果。"""
     print(f"📦 Worker 执行计算任务 #{task_num}, value={value}")

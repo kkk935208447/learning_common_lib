@@ -9,12 +9,23 @@
 ```python
 # ✅ 推荐：任务队列用 ListQueueBroker
 from taskiq_redis import ListQueueBroker
-broker = ListQueueBroker(url="redis://default:123456@localhost:6379/0")
+broker = ListQueueBroker(
+    url="redis://default:123456@localhost:6379/0",
+    queue_name="my-service:default",
+)
 
 # ✅ 广播场景用 PubSubBroker
 from taskiq_redis import PubSubBroker
-pubsub = PubSubBroker(url="redis://default:123456@localhost:6379/0")
+pubsub = PubSubBroker(
+    url="redis://default:123456@localhost:6379/0",
+    queue_name="my-service:broadcast",
+)
 ```
+
+- 不要长期依赖 TaskIQ 默认队列名 `taskiq`
+- 同一组同构 worker 可以共享一个 `queue_name` 做横向扩容
+- 不同服务、不同教程案例、不同职责的 worker 应显式使用不同 `queue_name`
+- `task_name` 只决定 worker 拿到消息后如何分发，不负责 broker 层的消费隔离
 
 ## 2. Result Backend 配置
 

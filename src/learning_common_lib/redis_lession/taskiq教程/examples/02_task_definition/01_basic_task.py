@@ -42,12 +42,19 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:02_task_definition:01_basic_task",
+)
 
 # ── 1. 创建 Broker + ResultBackend ──
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(
     RedisAsyncResultBackend(
         redis_url="redis://default:123456@localhost:6379/1",
@@ -60,7 +67,9 @@ broker = ListQueueBroker(
 # 例如: "examples.02_task_definition.01_basic_task:add"
 
 
-@broker.task
+# taskiq 与celery不同，celery task_name有一套完整自动拼接逻辑，而taskiq的自动拼接容易出错。
+# TaskIQ 中 task_name 必须在当前 broker 的任务注册表中保持唯一，且 producer / worker 两侧必须完全一致。对于会被直接运行的教程文件，建议显式指定稳定的 task_name，避免脚本作为 __main__ 运行时，默认 task_name 推导受启动方式影响。
+@broker.task(task_name="examples.02_task_definition.01_basic_task.add")
 async def add(x: int, y: int) -> int:
     """两数相加（显式 task_name）。"""
     print(f"📦 [add] 收到: x={x}, y={y}")

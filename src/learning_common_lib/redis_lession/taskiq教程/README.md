@@ -5,7 +5,7 @@
 import redis as redis_lib
 def reset_tutorial_redis() -> None:
     """清空教程专用 Redis DB，避免示例之间互相污染。"""
-    for db in (0, 1):
+    for db in (0, 1, 2, 3):
         client = redis_lib.Redis(
             host="localhost",
             port=6379,
@@ -19,6 +19,20 @@ def reset_tutorial_redis() -> None:
             client.close()
 reset_tutorial_redis()
 ```
+
+## 查看和清理后台孤立的worker
+```bash
+# 查看 taskiq 所有 worker
+ps -ef | grep taskiq
+# 查看 celery 所有 worker
+ps -ef | grep celery
+
+# 删除 taskiq 所有 worker
+pkill -9 -f taskiq
+# 删除 celery 所有 worker
+pkill -9 -f celery
+```
+
 
 ## 定位
 
@@ -37,6 +51,15 @@ TaskIQ 是 Python 原生 async-first 的任务队列框架，相比 Celery 的�
 - 需要在项目中引入 async-first 后台任务队列
 - 希望快速搭建生产级 TaskIQ 骨架
 - 从 Celery 迁移到 TaskIQ 的开发者
+
+## 三层职责
+
+- `examples/`
+  每个文件都是独立教学案例，优先讲清一个概念，强调运行中间态和前后对照。
+- `templates/`
+  企业级可复用骨架，目标是高并发、稳定性和较低认知负担，不追求“把所有概念塞在一个模块里”。
+- `smoke/`
+  自动化验收层，统一验证 `examples/` 与 `templates/` 是否都还能独立运行。
 
 ## 环境要求
 
@@ -76,7 +99,7 @@ taskiq教程/
 ├── pitfalls.md              ← 常见陷阱
 ├── roadmap.md               ← 学习路线
 ├── smoke/
-│   └── run_all_examples.py  ← 一键验证所有示例
+│   └── run_all_examples.py  ← 一键验证 examples + templates
 ├── examples/
 │   ├── 01_broker_and_config/   ← Broker 实例与配置
 │   ├── 02_task_definition/     ← 任务定义
@@ -94,9 +117,9 @@ taskiq教程/
 │   ├── taskiq_config.py     ← 生产级配置
 │   ├── taskiq_app.py        ← Broker 工厂 + 单例管理
 │   ├── error_handling.py    ← 异常层级树
-│   ├── task_base.py         ← 任务装饰器工厂
+│   ├── task_base.py         ← 任务装饰器工厂 + sync/async 安全包装
 │   ├── middleware_stack.py  ← 生产级中间件栈
-│   └── fastapi_taskiq.py   ← FastAPI 集成
+│   └── fastapi_taskiq.py    ← FastAPI 集成
 └── 简单的测试/              ← 早期测试代码（保留）
 ```
 
@@ -114,8 +137,11 @@ taskiq worker examples.01_broker_and_config.01_taskiq_hello:broker
 # 终端 2: 运行示例
 uv run python examples/01_broker_and_config/01_taskiq_hello.py
 
-# 一键验证全部示例（自动启动/停止 worker）
+# 一键验证 examples + templates（自动启动/停止 worker）
 uv run python smoke/run_all_examples.py
+
+# 单独运行任意模板的 _demo()
+uv run python -m templates.task_base
 ```
 
 ## Worker 启动方式
@@ -132,6 +158,24 @@ uv run python smoke/run_all_examples.py
 - `async def` 任务走事件循环；`sync def` 默认走 threadpool
 - CPU 密集型任务建议考虑 `--use-process-pool` 与 `--max-process-pool-processes`
 - 个别示例会使用非默认入口，如 `:list_broker`、`:default_broker`
+
+## Smoke 验证策略
+
+- `examples/` 默认运行 `main()`；需要 worker 的案例由 smoke 自动启动对应 worker
+- `templates/` 默认运行各模块 `_demo()`，不启动 worker
+- smoke 会为需要 worker 的示例注入独立 `queue_name`，避免和你手工启动的教程 worker 抢同一个队列
+- 单个 worker 完全可以在同一个队列里处理多个不同 `task_name`
+- 多个 worker 也可以共享同一个队列，但前提是它们本来就是同一组消费者：注册的任务集合一致，或者至少都认识这批任务
+- TaskIQ 的 `ListQueueBroker` 是先竞争消费、再按 `task_name` 找函数；真正危险的是“任务注册集合不一致的 worker”共享同一个队列
+- 单 broker 示例统一支持 `TASKIQ_QUEUE_NAME`；多 broker 示例支持 `TASKIQ_QUEUE_NAME_<BROKER_NAME>`
+- 每个文件运行前后都会清理 Redis DB 0/1/2/3，尽量减少示例之间的状态污染
+
+这个问题不是 smoke 独有问题，而是 TaskIQ + Redis ListQueueBroker 的工作方式决定的：
+
+- Redis 先把消息从队列里弹出
+- worker 再在本地按 `task_name` 查任务注册表
+- 如果抢到消息的 worker 没注册这个任务，消息会被直接丢弃，而不是自动回队列
+- 所以“同一组同构 worker 共享一个队列”是正常模式；“不同服务或不同示例共享一个队列”才是风险点
 
 ## 章节概览
 

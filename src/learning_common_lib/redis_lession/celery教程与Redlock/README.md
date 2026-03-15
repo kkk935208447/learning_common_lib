@@ -18,7 +18,21 @@ def reset_tutorial_redis() -> None:
         finally:
             client.close()
 reset_tutorial_redis()
-````
+```
+
+## 查看和清理后台孤立的worker
+
+```bash
+# 查看 taskiq 所有 worker
+ps -ef | grep taskiq
+# 查看 celery 所有 worker
+ps -ef | grep celery
+
+# 删除 taskiq 所有 worker
+pkill -9 -f taskiq
+# 删除 celery 所有 worker
+pkill -9 -f celery
+```
 
 
 ## 定位
@@ -61,14 +75,6 @@ python -c "import redis; print(redis.Redis(host='localhost', port=6379, password
 
 # 2. 安装依赖
 uv add "celery[redis]" "celery-aio-pool>=0.1.0rc8" "gevent>=25.5.1" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
-```
-
-## 终端查看后台开启的 celery 进程
-```bash
-ps -ef | grep celery
-# ps aux | grep celery
-# 删除所有的 celery,  -9 表示强制删除
-pkill -9 -f celery 
 ```
 
 
@@ -138,6 +144,14 @@ uv run python smoke/run_all_examples.py
 - `-P prefork|solo|gevent|custom`: 指定 worker 并发模型
 - `-c N`: 设置并发数，greenlet/aio pool 示例通常需要显式配置
 - `-Q queue1,queue2`: 指定消费的队列（第 7 章路由示例需要）
+
+默认队列提醒：
+
+- Celery 默认队列通常是 `celery`
+- 单个 worker 完全可以在同一个队列里处理多个不同任务；多个 worker 共享同一个队列做横向扩容也是正常模式
+- 真正危险的是多个 worker 监听同一个默认队列，但它们导入的任务集合或 `task_routes` 配置不一致
+- 这时常见表现不是“完全没问题”，而是 `Received unregistered task`、任务积压、错误路由、结果超时
+- 生产环境不要长期依赖默认 `celery` 队列；尽量显式设置 `task_default_queue`，并配合 `task_routes` 和 worker `-Q` 做职责隔离
 
 第 4 章 async worker 示例额外需要：
 - `-P prefork`: 作为传统同步 worker 基线

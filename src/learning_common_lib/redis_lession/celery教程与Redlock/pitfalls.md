@@ -136,11 +136,48 @@ app.conf.timezone = "Asia/Shanghai"
 
 ## 6. 队列陷阱
 
+### 多个 worker 长期共享默认队列 `celery`
+```python
+# ❌ 错误心智：任何不相干的 worker 都能安全共享默认队列
+app = Celery("demo")
+# 未显式设置 task_default_queue 时，默认通常是 celery
+```
+
+```bash
+# ❌ 两个不同职责的 worker 都监听默认队列 celery
+celery -A service_a worker -l info
+celery -A service_b worker -l info
+```
+
+**问题**:
+- 单个 worker 在一个队列里处理多个任务，或多个同构 worker 共享一个队列做扩容，这本来就是正常模式
+- 谁先从队列里取到消息，取决于 broker 层竞争消费，不取决于业务上的“这条任务本来该给谁”
+- 如果 worker 监听了同一个队列，但任务导入不完整、模块不一致、注册表不一致，就会出现 `Received unregistered task`
+- 即使没有立即报错，也会把职责完全不同的流量混到一起，导致扩容、限流、排障都变差
+
+**正确做法**:
+```python
+# ✅ 显式默认队列
+app.conf.task_default_queue = "orders_default"
+
+# ✅ 再配合 task_routes 做逻辑分流
+app.conf.task_routes = {
+    "orders.tasks.send_email": {"queue": "email_queue"},
+    "orders.tasks.generate_report": {"queue": "report_queue"},
+}
+```
+
+```bash
+# ✅ worker 只监听自己该处理的队列
+celery -A myproj.celery_app:app worker -Q orders_default,email_queue
+celery -A myproj.celery_app:app worker -Q report_queue
+```
+
 ### 任务发到了没人消费的队列
 ```python
 # ❌ 配置了路由但没启动对应 worker
 app.conf.task_routes = {"email.*": {"queue": "email"}}
-# 只启动了 celery -A myproj.celery_app:app worker（默认只消费 default 队列）
+# 只启动了 celery -A myproj.celery_app:app worker（默认只消费默认队列 `celery` 或你自定义的 task_default_queue）
 
 # ✅ 启动时指定队列
 # celery -A myproj.celery_app:app worker -Q default,email

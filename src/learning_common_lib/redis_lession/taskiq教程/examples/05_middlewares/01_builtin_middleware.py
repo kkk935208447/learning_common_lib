@@ -49,9 +49,15 @@ TaskIQ 内置中间件基类与 6 个钩子方法 — 理解中间件生命周�
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:05_middlewares:01_builtin_middleware",
+)
 
 # ── 1. 自定义日志中间件 — 重写全部 6 个钩子 ──
 
@@ -59,26 +65,37 @@ from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 class SimpleLogMiddleware(TaskiqMiddleware):
     """简单日志中间件 — 在每个钩子中打印触发信息，帮助理解生命周期。"""
 
+    @staticmethod
+    def _next_hook_step(message: TaskiqMessage, hook_name: str) -> str:
+        """给每个钩子打序号，便于观察真实执行顺序。"""
+        current = int(message.labels.get("_hook_step", "0")) + 1
+        message.labels["_hook_step"] = str(current)
+        return f"{current}. {hook_name}"
+
     async def pre_send(self, message: TaskiqMessage) -> TaskiqMessage:
         """任务发送前（client 侧）。必须返回 message，可在此修改消息。"""
-        print(f"🔵 [pre_send] 即将发送任务: {message.task_name}")
+        step = self._next_hook_step(message, "pre_send")
+        print(f"🔵 [{step}] 即将发送任务: {message.task_name}")
         return message
 
     async def post_send(self, message: TaskiqMessage) -> None:
         """任务发送后（client 侧）。无需返回值。"""
-        print(f"🟢 [post_send] 任务已发送: {message.task_name}")
+        step = self._next_hook_step(message, "post_send")
+        print(f"🟢 [{step}] 任务已发送: {message.task_name}")
 
     async def pre_execute(self, message: TaskiqMessage) -> TaskiqMessage:
         """任务执行前（worker 侧）。必须返回 message，可在此修改消息。"""
-        print(f"🟡 [pre_execute] Worker 即将执行: {message.task_name}")
+        step = self._next_hook_step(message, "pre_execute")
+        print(f"🟡 [{step}] Worker 即将执行: {message.task_name}")
         return message
 
     async def post_execute(
         self, message: TaskiqMessage, result: TaskiqResult
     ) -> None:
         """任务执行后（worker 侧）。可读取执行结果。"""
+        step = self._next_hook_step(message, "post_execute")
         print(
-            f"🟣 [post_execute] 执行完成: {message.task_name}, "
+            f"🟣 [{step}] 执行完成: {message.task_name}, "
             f"is_err={result.is_err}"
         )
 
@@ -89,13 +106,15 @@ class SimpleLogMiddleware(TaskiqMiddleware):
         error: BaseException,
     ) -> None:
         """任务异常时（worker 侧）。仅在任务抛出异常时触发。"""
-        print(f"🔴 [on_error] 任务异常: {message.task_name}, error={error}")
+        step = self._next_hook_step(message, "on_error")
+        print(f"🔴 [{step}] 任务异常: {message.task_name}, error={error}")
 
     async def post_save(
         self, message: TaskiqMessage, result: TaskiqResult
     ) -> None:
         """结果保存后（worker 侧）。在 result_backend 保存结果之后触发。"""
-        print(f"⚪ [post_save] 结果已保存: {message.task_name}")
+        step = self._next_hook_step(message, "post_save")
+        print(f"⚪ [{step}] 结果已保存: {message.task_name}")
 
 
 # ── 2. 创建 Broker + Result Backend + 注册中间件 ──
@@ -105,6 +124,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend).with_middlewares(
     SimpleLogMiddleware(),
 )
@@ -113,7 +133,7 @@ broker = ListQueueBroker(
 # ── 3. 定义任务 ──
 
 
-@broker.task
+@broker.task(task_name="examples.05_middlewares.01_builtin_middleware.say_hello")
 async def say_hello(name: str) -> str:
     """简单问候任务 — 用于触发中间件钩子。"""
     print(f"📦 Worker 正在执行: say_hello({name!r})")
@@ -127,6 +147,10 @@ async def main() -> None:
     """发送任务，观察 client 侧钩子（pre_send / post_send）的触发。"""
     await broker.startup()
     try:
+        print("=" * 60)
+        print("阶段 1: client 侧先跑 pre_send / post_send")
+        print("阶段 2: worker 侧再跑 pre_execute / post_execute / post_save")
+        print("=" * 60)
         print("🚀 发送任务: say_hello('TaskIQ')")
         print("=" * 50)
 
@@ -137,10 +161,10 @@ async def main() -> None:
         print(f"✅ 任务已发送! task_id={handle.task_id}")
         print(f"✅ 任务结果   = {result.return_value}")
         print()
-        print("💡 钩子执行顺序说明:")
-        print("   Client 侧: pre_send → [发送到队列] → post_send")
-        print("   Worker 侧: pre_execute → [执行任务] → post_execute → post_save")
-        print("   异常情况:   pre_execute → [执行任务] → on_error → post_save")
+        print("钩子执行顺序说明:")
+        print("  Client 侧: pre_send -> [发送到队列] -> post_send")
+        print("  Worker 侧: pre_execute -> [执行任务] -> post_execute -> post_save")
+        print("  异常情况: pre_execute -> [执行任务] -> on_error -> post_save")
     finally:
         await broker.shutdown()
 

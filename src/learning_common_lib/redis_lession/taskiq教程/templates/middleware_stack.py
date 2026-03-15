@@ -31,6 +31,49 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _label_int(message: TaskiqMessage, key: str, default: int) -> int:
+    """安全读取 int labels，脏值时回退默认值。"""
+    value = message.labels.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "labels[%s]=%r 不是合法整数，回退默认值 %s | task_id=%s",
+            key,
+            value,
+            default,
+            message.task_id,
+        )
+        return default
+
+
+def _label_float(message: TaskiqMessage, key: str, default: float) -> float:
+    """安全读取 float labels，脏值时回退默认值。"""
+    value = message.labels.get(key)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "labels[%s]=%r 不是合法浮点数，回退默认值 %.3f | task_id=%s",
+            key,
+            value,
+            default,
+            message.task_id,
+        )
+        return default
+
+
+def _warn_after_seconds(message: TaskiqMessage) -> float:
+    """兼容读取 warn_after_s / timeout。"""
+    if "warn_after_s" in message.labels:
+        return _label_float(message, "warn_after_s", 300.0)
+    return _label_float(message, "timeout", 300.0)
+
+
 # ---------------------------------------------------------------------------
 # LoggingMiddleware — 结构化日志
 # ---------------------------------------------------------------------------
@@ -108,9 +151,9 @@ class RetryMiddleware(TaskiqMiddleware):
             )
             return
 
-        max_retries = int(message.labels.get("max_retries", "3"))
-        base_delay = float(message.labels.get("retry_delay", "1.0"))
-        retry_count = int(message.labels.get("_retry_count", "0"))
+        max_retries = _label_int(message, "max_retries", 3)
+        base_delay = _label_float(message, "retry_delay", 1.0)
+        retry_count = _label_int(message, "_retry_count", 0)
 
         if retry_count >= max_retries:
             logger.warning(
@@ -151,12 +194,7 @@ class SlowTaskWarningMiddleware(TaskiqMiddleware):
     async def pre_execute(self, message: TaskiqMessage) -> TaskiqMessage:
         """为慢任务告警记录独立起始时间。"""
         message.labels["_slow_task_started_at"] = str(time.monotonic())
-        warn_after_s = float(
-            message.labels.get(
-                "warn_after_s",
-                message.labels.get("timeout", "300"),
-            )
-        )
+        warn_after_s = _warn_after_seconds(message)
         logger.debug(
             "慢任务阈值 | task_id=%s | warn_after_s=%.1fs",
             message.task_id,
@@ -166,13 +204,8 @@ class SlowTaskWarningMiddleware(TaskiqMiddleware):
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult) -> None:
         """检查执行耗时是否超过阈值，超出则记录告警。"""
-        warn_after_s = float(
-            message.labels.get(
-                "warn_after_s",
-                message.labels.get("timeout", "300"),
-            )
-        )
-        start = float(message.labels.get("_slow_task_started_at", "0"))
+        warn_after_s = _warn_after_seconds(message)
+        start = _label_float(message, "_slow_task_started_at", 0.0)
         execution_time = time.monotonic() - start if start else 0.0
 
         if execution_time > warn_after_s:

@@ -45,6 +45,7 @@ TaskIQ 事件装饰器与 TaskiqState — @broker.on_event 结合共享状态。
 from __future__ import annotations
 
 import asyncio
+import os
 
 from taskiq import TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
@@ -56,12 +57,18 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from templates.taskiq_app import broker_session  # type: ignore[no-redef]
 
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:08_events_and_lifecycle:02_broker_events",
+)
+
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 
@@ -137,7 +144,7 @@ async def cleanup_resources(state: TaskiqState) -> None:
 # ── 4. 定义任务（通过 TaskiqState 访问共享资源） ──
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.02_broker_events.get_user_profile")
 async def get_user_profile(
     user_id: int,
     state: TaskiqState = TaskiqDepends(),
@@ -167,7 +174,7 @@ async def get_user_profile(
     }
 
 
-@broker.task
+@broker.task(task_name="examples.08_events_and_lifecycle.02_broker_events.batch_cache_warmup")
 async def batch_cache_warmup(
     keys: list[str],
     state: TaskiqState = TaskiqDepends(),

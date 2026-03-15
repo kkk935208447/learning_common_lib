@@ -44,11 +44,17 @@ FastAPI 和 TaskIQ 共享依赖 — 无需 taskiq-fastapi 包。
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from taskiq import TaskiqDepends
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:10_fastapi_integration:02_fastapi_depends_shared",
+)
 
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
@@ -56,6 +62,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend)
 
 
@@ -88,7 +95,7 @@ async def get_app_config() -> dict:
 # ── 3. TaskIQ 任务（使用 TaskiqDepends 注入共享依赖） ──
 
 
-@broker.task
+@broker.task(task_name="examples.10_fastapi_integration.02_fastapi_depends_shared.background_process")
 async def background_process(
     order_id: int,
     redis_pool: dict = TaskiqDepends(get_redis_pool),

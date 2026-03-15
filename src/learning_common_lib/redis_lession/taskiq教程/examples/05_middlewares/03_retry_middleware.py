@@ -45,10 +45,16 @@ TaskIQ 指数退避重试中间件 — 在 on_error 中实现自动重试。
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 
 from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+QUEUE_NAME = os.getenv(
+    "TASKIQ_QUEUE_NAME",
+    "taskiq:examples:05_middlewares:03_retry_middleware",
+)
 
 # ── 1. 可重试异常定义 ──
 
@@ -121,6 +127,7 @@ result_backend = RedisAsyncResultBackend(
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
+    queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend).with_middlewares(
     RetryMiddleware(),
 )
@@ -129,7 +136,7 @@ broker = ListQueueBroker(
 # 通过 message.labels["_retry_count"] 推导当前尝试次数，避免多进程下的全局计数失真
 
 
-@broker.task
+@broker.task(task_name="examples.05_middlewares.03_retry_middleware.unstable_task")
 async def unstable_task(
     item: str,
     context: Context = TaskiqDepends(),

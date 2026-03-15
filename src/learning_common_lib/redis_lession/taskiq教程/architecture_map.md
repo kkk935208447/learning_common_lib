@@ -101,6 +101,14 @@ Producer                    Broker                     Worker
 - `async def` 里混入同步 IO 仍会阻塞事件循环
 - CPU 密集型同步任务更适合 process pool，而不是无限堆线程
 
+## 教程目录分层
+
+| 目录 | 目标 | 运行约定 |
+|------|------|----------|
+| `examples/` | 教学案例层：每个文件独立、聚焦一个主题、强调运行中间态 | 主要运行 `main()`；部分文件需要单独启动 worker |
+| `templates/` | 企业骨架层：高并发、稳定性、薄封装、低嵌套 | 主要运行 `_demo()`；默认不启动 worker |
+| `smoke/` | 自动验收层：统一验证教程和模板都还能独立运行 | 自动启动/停止所需 worker，并为 smoke 注入独立 queue_name |
+
 ## 概念到文件映射表
 
 | 概念 | 教程文件 | 模板文件 |
@@ -129,3 +137,8 @@ Producer                    Broker                     Worker
 | FastAPI 集成 | `10_fastapi_integration/01_fastapi_taskiq.py` | `templates/fastapi_taskiq.py` |
 | 共享依赖 | `10_fastapi_integration/02_fastapi_depends_shared.py` | `templates/fastapi_taskiq.py` |
 | Broker 工厂 | — | `templates/taskiq_app.py` |
+
+补充:
+- `smoke/run_all_examples.py` 会同时验证 `examples/` 与 `templates/`
+- 需要 worker 的 example 会在 smoke 中注入独立 `queue_name`，避免不同案例互相抢队列
+- `TaskiqConfig.queue_name` 负责 broker 级消费隔离；`task_name` 只负责 worker 本地分发
