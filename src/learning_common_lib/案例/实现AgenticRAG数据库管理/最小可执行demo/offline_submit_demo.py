@@ -9,13 +9,13 @@ from uuid import uuid4
 try:
     from .bootstrap import build_object_storage
     from .db import create_tables, session_scope
-    from .enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, VisibilityStatus
+    from .enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, StorageStatus, VisibilityStatus
     from .repositories import DocumentRepository, VersionRepository
     from .services import DocumentCommandService
 except ImportError:
     from bootstrap import build_object_storage
     from db import create_tables, session_scope
-    from enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, VisibilityStatus
+    from enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, StorageStatus, VisibilityStatus
     from repositories import DocumentRepository, VersionRepository
     from services import DocumentCommandService
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 class VersionSnapshot:
     version_id: int
     version_no: int
+    storage_status: str
     parse_status: str
     index_status: str
     milvus_status: str
@@ -63,6 +64,7 @@ async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
                 VersionSnapshot(
                     version_id=version.id,
                     version_no=version.version_no,
+                    storage_status=version.storage_status.value,
                     parse_status=version.parse_status.value,
                     index_status=version.index_status.value,
                     milvus_status=version.milvus_status.value,
@@ -83,7 +85,8 @@ def is_upload_finished(snapshot: DocumentSnapshot) -> bool:
     if active is None:
         return False
     return (
-        active.parse_status == ParseStatus.SUCCESS.value
+        active.storage_status == StorageStatus.READY.value
+        and active.parse_status == ParseStatus.SUCCESS.value
         and active.index_status == IndexStatus.SUCCESS.value
         and active.visibility_status == VisibilityStatus.ACTIVE.value
     )

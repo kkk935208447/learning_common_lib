@@ -23,6 +23,16 @@ class ValidationError(DemoError):
         super().__init__(message, code="VALIDATION_ERROR")
 
 
+class UnsupportedMediaTypeError(DemoError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="UNSUPPORTED_MEDIA_TYPE")
+
+
+class FileTooLargeError(DemoError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="FILE_TOO_LARGE")
+
+
 class RetryableTaskError(DemoError):
     def __init__(self, message: str) -> None:
         super().__init__(message, code="RETRYABLE_TASK_ERROR")

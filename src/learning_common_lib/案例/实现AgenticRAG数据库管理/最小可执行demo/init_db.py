@@ -4,16 +4,17 @@ import asyncio
 
 try:
     from .config import get_settings
-    from .db import create_tables
+    from .db import create_tables, drop_tables
 except ImportError:
     from config import get_settings
-    from db import create_tables
+    from db import create_tables, drop_tables
 
 
 async def main() -> None:
     settings = get_settings()
+    await drop_tables()
     await create_tables()
-    print("数据库与表初始化完成")
+    print("数据库与表已重置并初始化完成")
     print(f"MySQL DSN: {settings.mysql_dsn}")
     print(f"Runtime Dir: {settings.runtime_dir}")
 

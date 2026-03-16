@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.mysql import JSON
+from sqlalchemy import BigInteger, JSON, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 try:
@@ -15,6 +14,7 @@ try:
         ParseStatus,
         ProjectionStatus,
         PublishStatus,
+        StorageStatus,
         VisibilityStatus,
     )
 except ImportError:
@@ -26,6 +26,7 @@ except ImportError:
         ParseStatus,
         ProjectionStatus,
         PublishStatus,
+        StorageStatus,
         VisibilityStatus,
     )
 
@@ -70,10 +71,16 @@ class DocumentVersion(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("document_id", "version_no", name="uq_rag_min_demo_doc_versions_doc_ver"),
         Index(
+            "idx_rag_min_demo_doc_versions_doc_file_hash",
+            "document_id",
+            "file_hash",
+        ),
+        Index(
             "idx_rag_min_demo_doc_versions_status",
             "parse_status",
             "index_status",
             "visibility_status",
+            "storage_status",
         ),
     )
 
@@ -89,6 +96,11 @@ class DocumentVersion(TimestampMixin, Base):
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False, default="application/octet-stream")
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_status: Mapped[StorageStatus] = mapped_column(
+        Enum(StorageStatus),
+        default=StorageStatus.PENDING_UPLOAD,
+        nullable=False,
+    )
     parse_status: Mapped[ParseStatus] = mapped_column(Enum(ParseStatus), default=ParseStatus.PENDING, nullable=False)
     index_status: Mapped[IndexStatus] = mapped_column(Enum(IndexStatus), default=IndexStatus.PENDING, nullable=False)
     milvus_status: Mapped[ProjectionStatus] = mapped_column(

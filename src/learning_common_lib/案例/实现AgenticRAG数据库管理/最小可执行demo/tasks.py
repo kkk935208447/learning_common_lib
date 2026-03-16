@@ -14,6 +14,7 @@ try:
     from .celery_app import celery_app
     from .config import get_settings
     from .db import task_session_scope
+    from .errors import DemoError, RetryableTaskError
     from .enums import TaskName
     from .services import CleanupService, IndexPipelineService, JanitorService, OutboxDispatcherService, ParsePipelineService
     from .task_queue import CeleryTaskQueueAdapter
@@ -28,6 +29,7 @@ except ImportError:
     from celery_app import celery_app
     from config import get_settings
     from db import task_session_scope
+    from errors import DemoError, RetryableTaskError
     from enums import TaskName
     from services import CleanupService, IndexPipelineService, JanitorService, OutboxDispatcherService, ParsePipelineService
     from task_queue import CeleryTaskQueueAdapter
@@ -45,18 +47,32 @@ def _retry_countdown(retries: int) -> int:
     return settings.task_retry_base_seconds * (2 ** retries)
 
 
-def _run_with_lock(lock_key: str | None, runner) -> dict[str, Any]:
+def _should_retry(exc: Exception) -> bool:
+    return isinstance(exc, RetryableTaskError) or not isinstance(exc, DemoError)
+
+
+def _run_locked(lock_key: str | None, runner) -> dict[str, Any]:
     if lock_key is None:
-        return runner()
+        return asyncio.run(runner())
     settings = get_settings()
     lock = build_lock_port()
     token = lock.try_lock(lock_key, settings.lock_ttl_seconds)
     if token is None:
         return {"status": "skipped", "reason": "lock_not_acquired", "lock_key": lock_key}
     try:
-        return runner()
+        return asyncio.run(runner())
     finally:
         lock.release(lock_key, token)
+
+
+def _execute_task(self: Any, *, lock_key: str | None, runner) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        return _run_locked(lock_key, runner)
+    except Exception as exc:
+        if _should_retry(exc) and self.request.retries < settings.task_max_retries:
+            raise self.retry(exc=exc, countdown=_retry_countdown(self.request.retries))
+        raise
 
 
 @celery_app.task(bind=True, name=TaskName.DISPATCH_OUTBOX.value)
@@ -95,28 +111,18 @@ def clean_outbox(self: Any) -> dict[str, Any]:
 @celery_app.task(bind=True, name=TaskName.PARSE_VERSION.value)
 def parse_version(self: Any, version_id: int) -> dict[str, Any]:
     ensure_tasks_registered()
-    settings = get_settings()
 
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             service = ParsePipelineService(session, build_object_storage())
             return await service.run(version_id)
 
-    try:
-        return _run_with_lock(
-            f"rag:parse:version:{version_id}",
-            lambda: asyncio.run(_run()),
-        )
-    except Exception as exc:
-        if self.request.retries < settings.task_max_retries:
-            raise self.retry(exc=exc, countdown=_retry_countdown(self.request.retries))
-        raise
+    return _execute_task(self, lock_key=f"rag:parse:version:{version_id}", runner=_run)
 
 
 @celery_app.task(bind=True, name=TaskName.INDEX_VERSION.value)
 def index_version(self: Any, version_id: int) -> dict[str, Any]:
     ensure_tasks_registered()
-    settings = get_settings()
 
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
@@ -128,21 +134,12 @@ def index_version(self: Any, version_id: int) -> dict[str, Any]:
             )
             return await service.run(version_id)
 
-    try:
-        return _run_with_lock(
-            f"rag:index:version:{version_id}",
-            lambda: asyncio.run(_run()),
-        )
-    except Exception as exc:
-        if self.request.retries < settings.task_max_retries:
-            raise self.retry(exc=exc, countdown=_retry_countdown(self.request.retries))
-        raise
+    return _execute_task(self, lock_key=f"rag:index:version:{version_id}", runner=_run)
 
 
 @celery_app.task(bind=True, name=TaskName.CLEAN_VERSION.value)
 def clean_version(self: Any, version_id: int) -> dict[str, Any]:
     ensure_tasks_registered()
-    settings = get_settings()
 
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
@@ -154,12 +151,7 @@ def clean_version(self: Any, version_id: int) -> dict[str, Any]:
             )
             return await service.run(version_id)
 
-    try:
-        return asyncio.run(_run())
-    except Exception as exc:
-        if self.request.retries < settings.task_max_retries:
-            raise self.retry(exc=exc, countdown=_retry_countdown(self.request.retries))
-        raise
+    return _execute_task(self, lock_key=None, runner=_run)
 
 
 @celery_app.task(bind=True, name=TaskName.JANITOR_SCAN.value)
@@ -171,4 +163,4 @@ def janitor_scan(self: Any) -> dict[str, Any]:
             service = JanitorService(session, build_vector_store(), build_search_store())
             return await service.run_once()
 
-    return _run_with_lock("rag:janitor:leader", lambda: asyncio.run(_run()))
+    return _run_locked("rag:janitor:leader", _run)

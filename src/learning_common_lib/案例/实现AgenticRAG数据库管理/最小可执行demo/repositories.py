@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from .enums import IndexStatus, ParseStatus, PublishStatus, VisibilityStatus
+    from .enums import IndexStatus, ParseStatus, PublishStatus, StorageStatus, VisibilityStatus
     from .models import Document, DocumentChunk, DocumentVersion, OutboxEvent
 except ImportError:
-    from enums import IndexStatus, ParseStatus, PublishStatus, VisibilityStatus
+    from enums import IndexStatus, ParseStatus, PublishStatus, StorageStatus, VisibilityStatus
     from models import Document, DocumentChunk, DocumentVersion, OutboxEvent
 
 
@@ -58,7 +58,8 @@ class VersionRepository(BaseRepository):
             .where(DocumentVersion.document_id == document_id)
             .where(DocumentVersion.visibility_status == VisibilityStatus.STAGED)
             .where(
-                (DocumentVersion.parse_status.in_((ParseStatus.PENDING, ParseStatus.RUNNING)))
+                (DocumentVersion.storage_status == StorageStatus.PENDING_UPLOAD)
+                | (DocumentVersion.parse_status.in_((ParseStatus.PENDING, ParseStatus.RUNNING)))
                 | (DocumentVersion.index_status.in_((IndexStatus.PENDING, IndexStatus.RUNNING)))
             )
             .order_by(DocumentVersion.version_no.desc())
@@ -81,6 +82,18 @@ class VersionRepository(BaseRepository):
             .limit(limit)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_by_parse_status(self, status: ParseStatus) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.parse_status == status)
+        return int((await self.session.scalar(stmt)) or 0)
+
+    async def count_by_index_status(self, status: IndexStatus) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.index_status == status)
+        return int((await self.session.scalar(stmt)) or 0)
+
+    async def count_active(self) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.visibility_status == VisibilityStatus.ACTIVE)
+        return int((await self.session.scalar(stmt)) or 0)
 
 
 class ChunkRepository(BaseRepository):
@@ -106,6 +119,21 @@ class OutboxRepository(BaseRepository):
             .limit(limit)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def list_pending(self, limit: int) -> list[OutboxEvent]:
+        stmt = (
+            select(OutboxEvent)
+            .where(OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED)))
+            .order_by(OutboxEvent.id.asc())
+            .limit(limit)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def count_pending(self) -> int:
+        stmt = select(func.count(OutboxEvent.id)).where(
+            OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED))
+        )
+        return int((await self.session.scalar(stmt)) or 0)
 
     async def cleanup_sent_older_than(self, days: int) -> int:
         cutoff = datetime.utcnow() - timedelta(days=days)

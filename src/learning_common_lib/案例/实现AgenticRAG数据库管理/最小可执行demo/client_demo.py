@@ -44,6 +44,12 @@ async def wait_for_condition(
     )
 
 
+async def print_admin_stats(client: httpx.AsyncClient) -> None:
+    response = await client.get("/admin/stats")
+    response.raise_for_status()
+    print(response.json()["data"])
+
+
 async def wait_for_api_ready(client: httpx.AsyncClient, timeout_seconds: int = 30) -> None:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while asyncio.get_running_loop().time() < deadline:
@@ -96,6 +102,16 @@ async def main() -> None:
         )
         print(document_payload)
 
+        version_id = document_payload["active_version_id"]
+
+        print_section("查看活动版本详情")
+        response = await client.get(f"/versions/{version_id}")
+        response.raise_for_status()
+        print(response.json()["data"])
+
+        print_section("查看管理统计")
+        await print_admin_stats(client)
+
         print_section("手动触发 Janitor")
         response = await client.post("/admin/janitor/run")
         response.raise_for_status()
@@ -114,6 +130,9 @@ async def main() -> None:
             expected_version_status="DELETED",
         )
         print(document_payload)
+
+        print_section("查看清理后的管理统计")
+        await print_admin_stats(client)
 
 
 if __name__ == "__main__":

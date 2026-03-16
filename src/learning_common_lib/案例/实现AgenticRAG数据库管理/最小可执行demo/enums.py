@@ -30,6 +30,14 @@ class ProjectionStatus(str, Enum):
     DELETED = "DELETED"
 
 
+class StorageStatus(str, Enum):
+    PENDING_UPLOAD = "PENDING_UPLOAD"
+    READY = "READY"
+    DELETE_PENDING = "DELETE_PENDING"
+    DELETED = "DELETED"
+    FAILED = "FAILED"
+
+
 class VisibilityStatus(str, Enum):
     STAGED = "STAGED"
     ACTIVE = "ACTIVE"

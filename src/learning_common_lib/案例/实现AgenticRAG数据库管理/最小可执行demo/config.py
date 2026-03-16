@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     celery_eager: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = 8091
+    auto_create_tables_on_startup: bool = False
 
     default_kb_code: str = "default"
 
@@ -43,6 +44,12 @@ class Settings(BaseSettings):
     parser_version: str = "min-demo-parser-v1"
     embedding_model: str = "deterministic-mock-v1"
     embedding_dim: int = 8
+    upload_max_bytes: int = 20 * 1024 * 1024
+    upload_allowed_mime_types: tuple[str, ...] = (
+        "text/plain",
+        "text/markdown",
+        "application/pdf",
+    )
 
     task_max_retries: int = 5
     task_retry_base_seconds: int = 60

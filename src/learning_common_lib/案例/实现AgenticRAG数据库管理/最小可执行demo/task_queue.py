@@ -28,8 +28,12 @@ class CeleryTaskQueueAdapter(BaseTaskQueue):
         queue_name: str,
         countdown: int | None = None,
     ) -> str | None:
-        from tasks import ensure_tasks_registered
-        from celery_app import celery_app
+        try:
+            from .tasks import ensure_tasks_registered
+            from .celery_app import celery_app
+        except ImportError:
+            from tasks import ensure_tasks_registered
+            from celery_app import celery_app
 
         ensure_tasks_registered()
         task = celery_app.tasks[task_name]

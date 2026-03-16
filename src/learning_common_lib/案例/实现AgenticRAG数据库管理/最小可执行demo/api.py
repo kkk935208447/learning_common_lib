@@ -4,26 +4,42 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from .bootstrap import build_object_storage, build_search_store, build_vector_store
+    from .bootstrap import build_object_storage, build_search_store, build_task_queue, build_vector_store
     from .config import get_settings
     from .db import create_tables, dispose_engine, get_db_session, session_scope
-    from .errors import ConflictError, DemoError, NotFoundError, ValidationError
-    from .repositories import DocumentRepository, VersionRepository
-    from .schemas import DocumentRead, UploadResult, VersionRead
-    from .services import DocumentCommandService, JanitorService, best_effort_dispatch_outbox
+    from .enums import IndexStatus, ParseStatus
+    from .errors import (
+        ConflictError,
+        DemoError,
+        FileTooLargeError,
+        NotFoundError,
+        UnsupportedMediaTypeError,
+        ValidationError,
+    )
+    from .repositories import DocumentRepository, OutboxRepository, VersionRepository
+    from .schemas import AdminStatsRead, DocumentRead, OutboxEventRead, UploadResult, VersionRead
+    from .services import DocumentCommandService, JanitorService, OutboxDispatcherService, best_effort_dispatch_outbox
 except ImportError:
-    from bootstrap import build_object_storage, build_search_store, build_vector_store
+    from bootstrap import build_object_storage, build_search_store, build_task_queue, build_vector_store
     from config import get_settings
     from db import create_tables, dispose_engine, get_db_session, session_scope
-    from errors import ConflictError, DemoError, NotFoundError, ValidationError
-    from repositories import DocumentRepository, VersionRepository
-    from schemas import DocumentRead, UploadResult, VersionRead
-    from services import DocumentCommandService, JanitorService, best_effort_dispatch_outbox
+    from enums import IndexStatus, ParseStatus
+    from errors import (
+        ConflictError,
+        DemoError,
+        FileTooLargeError,
+        NotFoundError,
+        UnsupportedMediaTypeError,
+        ValidationError,
+    )
+    from repositories import DocumentRepository, OutboxRepository, VersionRepository
+    from schemas import AdminStatsRead, DocumentRead, OutboxEventRead, UploadResult, VersionRead
+    from services import DocumentCommandService, JanitorService, OutboxDispatcherService, best_effort_dispatch_outbox
 
 
 def ok(data: Any = None, message: str = "success") -> dict[str, Any]:
@@ -50,9 +66,18 @@ async def load_document_detail(session: AsyncSession, document_id: int) -> Docum
     )
 
 
+async def load_version_detail(session: AsyncSession, version_id: int) -> VersionRead:
+    version_repo = VersionRepository(session)
+    version = await version_repo.get_by_id(version_id)
+    if version is None:
+        raise NotFoundError(f"version {version_id} 不存在")
+    return VersionRead.model_validate(version)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await create_tables()
+    if get_settings().auto_create_tables_on_startup:
+        await create_tables()
     try:
         yield
     finally:
@@ -69,6 +94,10 @@ async def handle_demo_error(_: Request, exc: DemoError):
         status_code = 404
     elif isinstance(exc, ConflictError):
         status_code = 409
+    elif isinstance(exc, UnsupportedMediaTypeError):
+        status_code = 415
+    elif isinstance(exc, FileTooLargeError):
+        status_code = 413
     elif isinstance(exc, ValidationError):
         status_code = 400
     return JSONResponse(
@@ -116,6 +145,15 @@ async def get_document(
     return ok(detail.model_dump())
 
 
+@app.get("/versions/{version_id}")
+async def get_version(
+    version_id: int,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    detail = await load_version_detail(session, version_id)
+    return ok(detail.model_dump())
+
+
 @app.delete("/documents/{document_id}")
 async def delete_document(
     document_id: int,
@@ -126,10 +164,53 @@ async def delete_document(
     return ok(message="删除请求已进入清理流水线")
 
 
+@app.post("/versions/{version_id}/rebuild")
+async def rebuild_version(
+    version_id: int,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    service = DocumentCommandService(session, build_object_storage())
+    await service.request_rebuild(version_id)
+    return ok(message="已写入 REBUILD_REQUESTED")
+
+
 @app.post("/admin/outbox/dispatch")
 async def dispatch_outbox() -> dict[str, Any]:
     await best_effort_dispatch_outbox()
     return ok(message="已触发 Outbox Dispatcher")
+
+
+@app.post("/ops/outbox/dispatch")
+async def dispatch_outbox_ops() -> dict[str, Any]:
+    await best_effort_dispatch_outbox()
+    return ok(message="已触发 Outbox Dispatcher")
+
+
+@app.get("/admin/outbox/pending")
+@app.get("/ops/outbox/pending")
+async def get_pending_outbox(
+    limit: int = Query(default=100, ge=1, le=500),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    dispatcher = OutboxDispatcherService(session, build_task_queue())
+    events = await dispatcher.list_pending_events(limit=limit)
+    payload = [OutboxEventRead.model_validate(event).model_dump() for event in events]
+    return ok(payload)
+
+
+@app.get("/admin/stats")
+async def get_admin_stats(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    outbox_repo = OutboxRepository(session)
+    version_repo = VersionRepository(session)
+    payload = AdminStatsRead(
+        outbox_pending_count=await outbox_repo.count_pending(),
+        parse_failed_count=await version_repo.count_by_parse_status(ParseStatus.FAILED),
+        index_failed_count=await version_repo.count_by_index_status(IndexStatus.FAILED),
+        active_version_count=await version_repo.count_active(),
+    )
+    return ok(payload.model_dump())
 
 
 @app.post("/admin/janitor/run")
