@@ -1,3 +1,5 @@
+"""Index pipeline that projects parsed chunks into vector and search stores."""
+
 from __future__ import annotations
 
 import logging
@@ -83,6 +85,7 @@ class IndexPipelineService:
         try:
             async with self.session.begin():
                 chunks = await chunk_repo.list_by_version(version_id)
+            # 投影写入放在事务外，避免把外部 IO 包进数据库锁窗口。
             vectors = await self.embedding_provider.embed([chunk.content for chunk in chunks])
             vector_records = [
                 {
@@ -103,6 +106,7 @@ class IndexPipelineService:
                 }
                 for chunk in chunks
             ]
+            # demo 里的双写顺序并不重要，关键是两边都成功后才允许切 active_version。
             await self.vector_store.upsert_chunks(version_id, vector_records)
             await self.search_store.upsert_chunks(version_id, search_docs)
 
@@ -131,6 +135,7 @@ class IndexPipelineService:
                 if old_active_version_id is not None and old_active_version_id != version.id:
                     old_version = await version_repo.get_by_id(old_active_version_id, for_update=True)
                     if old_version is not None and old_version.visibility_status != VisibilityStatus.DELETE_PENDING:
+                        # 只有新版本已经切活后，才异步回收旧版本，保证查询面先看到新版本。
                         old_version.visibility_status = VisibilityStatus.SUPERSEDED
                         if old_version.storage_status == StorageStatus.READY:
                             old_version.storage_status = StorageStatus.DELETE_PENDING
@@ -151,6 +156,7 @@ class IndexPipelineService:
             await best_effort_dispatch_outbox()
             return {"version_id": version_id, "status": "indexed", "chunk_count": len(chunks)}
         except Exception as exc:
+            # 一旦索引链路失败，先尽力删除已写入的投影，避免 Janitor 看到“半成功”状态。
             await self.vector_store.delete_by_version(version_id)
             await self.search_store.delete_by_version(version_id)
             async with self.session.begin():

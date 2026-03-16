@@ -1,3 +1,5 @@
+"""Thin repository helpers that keep repeated ORM queries out of services."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -22,6 +24,7 @@ class DocumentRepository(BaseRepository):
     async def get_by_id(self, document_id: int, *, for_update: bool = False) -> Document | None:
         stmt = select(Document).where(Document.id == document_id)
         if for_update:
+            # 需要修改文档主状态时，再由调用方显式申请行锁。
             stmt = stmt.with_for_update()
         return await self.session.scalar(stmt)
 
@@ -53,6 +56,7 @@ class VersionRepository(BaseRepository):
         return list((await self.session.scalars(stmt)).all())
 
     async def find_inflight_by_document(self, document_id: int) -> DocumentVersion | None:
+        # 只要版本仍停留在 STAGED 且上传/解析/索引任一阶段未完成，就算“在途版本”。
         stmt = (
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)

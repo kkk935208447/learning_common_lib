@@ -1,3 +1,5 @@
+"""SQLAlchemy ORM models for documents, versions, chunks, and Outbox events."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -36,6 +38,7 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
+    # 所有核心表统一带上 created_at / updated_at，方便演示状态推进时间线。
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
@@ -52,6 +55,7 @@ class TimestampMixin:
 class Document(TimestampMixin, Base):
     __tablename__ = "rag_min_demo_documents"
 
+    # Document 表只表达“逻辑文档身份”，不直接承载解析和索引流水线状态。
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     external_doc_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(256), default="", nullable=False)
@@ -69,12 +73,14 @@ class Document(TimestampMixin, Base):
 class DocumentVersion(TimestampMixin, Base):
     __tablename__ = "rag_min_demo_document_versions"
     __table_args__ = (
+        # 同一个逻辑文档内部，版本号必须单调唯一。
         UniqueConstraint("document_id", "version_no", name="uq_rag_min_demo_doc_versions_doc_ver"),
         Index(
             "idx_rag_min_demo_doc_versions_doc_file_hash",
             "document_id",
             "file_hash",
         ),
+        # 教学 demo 把常见状态查询聚合进一个复合索引，方便解释“版本状态就是主观测面”。
         Index(
             "idx_rag_min_demo_doc_versions_status",
             "parse_status",
@@ -149,6 +155,7 @@ class DocumentChunk(TimestampMixin, Base):
 class OutboxEvent(TimestampMixin, Base):
     __tablename__ = "rag_min_demo_outbox_events"
 
+    # Outbox 是“业务提交成功”与“异步派发成功”之间的缓冲层。
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     aggregate_type: Mapped[AggregateType] = mapped_column(Enum(AggregateType), nullable=False)
     aggregate_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

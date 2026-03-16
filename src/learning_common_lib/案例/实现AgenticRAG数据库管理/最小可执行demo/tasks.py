@@ -1,3 +1,5 @@
+"""Celery task implementations that adapt service methods to worker processes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +13,7 @@ try:
         build_search_store,
         build_vector_store,
     )
-    from .celery_app import celery_app
+    from .celery_runtime import celery_app
     from .config import get_settings
     from .db import task_session_scope
     from .errors import DemoError, RetryableTaskError
@@ -26,7 +28,7 @@ except ImportError:
         build_search_store,
         build_vector_store,
     )
-    from celery_app import celery_app
+    from celery_runtime import celery_app
     from config import get_settings
     from db import task_session_scope
     from errors import DemoError, RetryableTaskError
@@ -34,20 +36,14 @@ except ImportError:
     from services import CleanupService, IndexPipelineService, JanitorService, OutboxDispatcherService, ParsePipelineService
     from task_queue import CeleryTaskQueueAdapter
 
-_TASKS_REGISTERED = False
-
-
-def ensure_tasks_registered() -> None:
-    global _TASKS_REGISTERED
-    _TASKS_REGISTERED = True
-
-
 def _retry_countdown(retries: int) -> int:
     settings = get_settings()
+    # 指数退避用最简单的 2^n 形式，足够演示 Celery 重试节奏。
     return settings.task_retry_base_seconds * (2 ** retries)
 
 
 def _should_retry(exc: Exception) -> bool:
+    # 未知异常默认按“可能是临时故障”处理，教学上更能体现“宁可重复，不要静默丢任务”。
     return isinstance(exc, RetryableTaskError) or not isinstance(exc, DemoError)
 
 
@@ -68,6 +64,7 @@ def _run_locked(lock_key: str | None, runner) -> dict[str, Any]:
 def _execute_task(self: Any, *, lock_key: str | None, runner) -> dict[str, Any]:
     settings = get_settings()
     try:
+        # Parser / Index 之类的任务允许重复投递，但同一版本同一时刻只跑一个实例。
         return _run_locked(lock_key, runner)
     except Exception as exc:
         if _should_retry(exc) and self.request.retries < settings.task_max_retries:
@@ -77,10 +74,9 @@ def _execute_task(self: Any, *, lock_key: str | None, runner) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.DISPATCH_OUTBOX.value)
 def dispatch_outbox(self: Any) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         lock = build_lock_port()
+        # Dispatcher 额外加一个 leader lock，避免 Beat 和 API 手动触发同时扫同一批 Outbox。
         token = await asyncio.to_thread(lock.try_lock, "rag:outbox:dispatcher", get_settings().lock_ttl_seconds)
         if token is None:
             return {"sent": 0, "reason": "lock_not_acquired"}
@@ -97,8 +93,6 @@ def dispatch_outbox(self: Any) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.CLEAN_OUTBOX.value)
 def clean_outbox(self: Any) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             dispatcher = OutboxDispatcherService(session, CeleryTaskQueueAdapter())
@@ -110,8 +104,6 @@ def clean_outbox(self: Any) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.PARSE_VERSION.value)
 def parse_version(self: Any, version_id: int) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             service = ParsePipelineService(session, build_object_storage())
@@ -122,8 +114,6 @@ def parse_version(self: Any, version_id: int) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.INDEX_VERSION.value)
 def index_version(self: Any, version_id: int) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             service = IndexPipelineService(
@@ -139,8 +129,6 @@ def index_version(self: Any, version_id: int) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.CLEAN_VERSION.value)
 def clean_version(self: Any, version_id: int) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             service = CleanupService(
@@ -156,11 +144,10 @@ def clean_version(self: Any, version_id: int) -> dict[str, Any]:
 
 @celery_app.task(bind=True, name=TaskName.JANITOR_SCAN.value)
 def janitor_scan(self: Any) -> dict[str, Any]:
-    ensure_tasks_registered()
-
     async def _run() -> dict[str, Any]:
         async with task_session_scope() as session:
             service = JanitorService(session, build_vector_store(), build_search_store())
             return await service.run_once()
 
+    # Janitor 也是单领导者任务，避免多 worker 周期性重复扫描同一批 active 版本。
     return _run_locked("rag:janitor:leader", _run)

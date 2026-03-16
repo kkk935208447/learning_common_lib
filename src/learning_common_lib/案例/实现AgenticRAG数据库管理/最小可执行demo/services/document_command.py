@@ -1,3 +1,5 @@
+"""Document write-side service: upload, delete, and manual rebuild commands."""
+
 from __future__ import annotations
 
 import logging
@@ -101,6 +103,7 @@ class DocumentCommandService:
         document_id: int | None = None
         storage_key: str | None = None
 
+        # 事务 A：只负责锁文档、分配版本号和预留 storage_key，不在事务内写对象存储。
         async with self.session.begin():
             document = await doc_repo.get_by_external_key(normalized_key, for_update=True)
             if document is None:
@@ -122,6 +125,7 @@ class DocumentCommandService:
             if document.active_version_id is not None:
                 current_active = await version_repo.get_by_id(document.active_version_id)
             if current_active is not None and current_active.file_hash == file_hash:
+                # 只复用“当前已激活版本”，避免把历史 superseded 版本重新当作最新版本暴露出去。
                 reuse_outcome = UploadOutcome(
                     document_id=document.id,
                     version_id=current_active.id,
@@ -175,16 +179,19 @@ class DocumentCommandService:
         assert storage_key is not None
 
         try:
+            # 对象写入后立即回读校验，确保 storage_key 指向的是完整可读对象，而不是半成功写入。
             await self.object_storage.put(storage_key, content)
             stored_bytes = await self.object_storage.get(storage_key)
             if len(stored_bytes) != len(content) or sha256_bytes(stored_bytes) != file_hash:
                 raise RuntimeError("对象存储写入校验失败")
         except Exception as exc:
+            # 这里选择“先删对象，再把版本打成 FAILED”，避免留下 READY 之外的脏对象。
             await self.object_storage.delete(storage_key)
             await self._mark_version_upload_failed(version_id, str(exc))
             raise
 
         try:
+            # 事务 B：对象 ready 后再切换状态并写 PARSE_REQUESTED，避免产生脏事件。
             async with self.session.begin():
                 version = await version_repo.get_by_id(version_id, for_update=True)
                 if version is None:
@@ -204,6 +211,7 @@ class DocumentCommandService:
                     )
                 )
         except Exception as exc:
+            # 如果事务 B 失败，宁可把对象删掉并打成失败，也不保留“对象已存在但无事件”的悬空版本。
             await self.object_storage.delete(storage_key)
             await self._mark_version_upload_failed(version_id, str(exc))
             raise

@@ -1,3 +1,5 @@
+"""File-based vector store mock used to simulate Milvus-style projections."""
+
 from __future__ import annotations
 
 import asyncio
@@ -44,6 +46,7 @@ class FileVectorStore(BaseVectorStore):
             for record in records:
                 path = self._path(record["chunk_uid"])
                 tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+                # 先写临时文件再 replace，避免读取方看到半截 JSON。
                 tmp_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
                 tmp_path.replace(path)
 
@@ -61,6 +64,7 @@ class FileVectorStore(BaseVectorStore):
     async def count_by_version(self, version_id: int) -> int:
         def _count() -> int:
             count = 0
+            # 和 search_store 一样，直接扫描目录换取实现简单性。
             for path in self.root_dir.glob("*.json"):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if payload.get("version_id") == version_id:

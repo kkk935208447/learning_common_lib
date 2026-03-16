@@ -1,3 +1,5 @@
+"""HTTP smoke client that exercises the API after worker and API are up."""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +28,7 @@ async def wait_for_condition(
 ) -> dict[str, Any]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while asyncio.get_running_loop().time() < deadline:
+        # 这里直接轮询文档详情，而不是读 Celery 状态；教学上更贴近“业务最终态”。
         response = await client.get(f"/documents/{document_id}")
         response.raise_for_status()
         payload = response.json()["data"]
@@ -67,6 +70,7 @@ async def main() -> None:
     settings = get_settings()
     base_url = f"http://{settings.api_host}:{settings.api_port}"
     external_doc_key = f"employee-handbook-{uuid4().hex[:8]}"
+    # 文本内容保持稳定，方便对比不同运行方式下的状态输出。
     file_bytes = (
         "第一章：请假流程。\n"
         "员工请假需要提前在系统中提交申请。\n"
@@ -94,6 +98,7 @@ async def main() -> None:
         document_id = upload_payload["document_id"]
 
         print_section("等待异步解析与索引完成")
+        # 这里等到文档进入 ACTIVE，而不是只看单个 task 成功，能覆盖更多状态机问题。
         document_payload = await wait_for_condition(
             client,
             document_id,

@@ -1,3 +1,5 @@
+"""Offline smoke script that submits directly to MySQL and waits for worker completion."""
+
 from __future__ import annotations
 
 import asyncio
@@ -79,6 +81,7 @@ async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
 
 
 def is_upload_finished(snapshot: DocumentSnapshot) -> bool:
+    # 离线脚本只关心“业务结果是否已经可用”，而不是中间 task 有没有短暂重试。
     if snapshot.active_version_id is None:
         return False
     active = next((item for item in snapshot.versions if item.version_id == snapshot.active_version_id), None)
@@ -143,6 +146,7 @@ async def submit_delete(document_id: int) -> None:
 
 
 async def main() -> None:
+    # 离线模式不要求 API 存在，但仍依赖数据库和 Worker 正常工作。
     await create_tables()
 
     document_id, version_id = await submit_upload()

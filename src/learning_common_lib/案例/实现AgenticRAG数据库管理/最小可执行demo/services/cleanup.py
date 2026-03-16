@@ -1,3 +1,5 @@
+"""Cleanup pipeline that removes projections and source objects for old versions."""
+
 from __future__ import annotations
 
 import logging
@@ -47,6 +49,7 @@ class CleanupService:
                 raise NotFoundError(f"version {version_id} 不存在")
             storage_key = version.storage_key
 
+        # 外部投影和对象清理放在事务外，避免把文件系统/外部 IO 放进数据库锁窗口。
         await self.vector_store.delete_by_version(version_id)
         await self.search_store.delete_by_version(version_id)
         await self.object_storage.delete(storage_key)
@@ -68,6 +71,7 @@ class CleanupService:
 
             versions = await version_repo.list_by_document(document.id)
             if versions and all(v.visibility_status == VisibilityStatus.DELETED for v in versions):
+                # 只有所有版本都删完，逻辑文档本身才算真正进入 DELETED。
                 document.lifecycle_status = DocumentLifecycleStatus.DELETED
                 document.deleted_at = utcnow()
                 document.row_version += 1

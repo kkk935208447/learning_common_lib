@@ -1,3 +1,5 @@
+"""Janitor service that reconciles chunk counts and requests lightweight rebuilds."""
+
 from __future__ import annotations
 
 import logging
@@ -48,6 +50,7 @@ class JanitorService:
         active_versions = await version_repo.list_active_versions(limit)
         versions_to_rebuild: list[int] = []
         for version in active_versions:
+            # 这里只做 count 级对账：足够演示“发现投影异常 -> 发起重建”，但不是生产级 checksum 校验。
             mysql_count = await chunk_repo.count_by_version(version.id)
             vector_count = await self.vector_store.count_by_version(version.id)
             search_count = await self.search_store.count_by_version(version.id)
@@ -56,6 +59,7 @@ class JanitorService:
 
         await self.session.rollback()
         async with self.session.begin():
+            # Janitor 自己不直接重建，而是仍通过 Outbox 进入统一异步链路。
             for version_id in versions_to_rebuild:
                 rebuild_count += 1
                 self.session.add(

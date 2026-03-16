@@ -1,3 +1,5 @@
+"""File-based object storage mock used to simulate OSS-style source files."""
+
 from __future__ import annotations
 
 import asyncio
@@ -48,6 +50,7 @@ class FileObjectStorage(BaseObjectStorage):
         tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
 
         def _write() -> None:
+            # 对象写入采用原子替换，避免上传过程中留下半写入文件。
             tmp_path.write_bytes(content)
             tmp_path.replace(path)
 
@@ -55,6 +58,7 @@ class FileObjectStorage(BaseObjectStorage):
 
     async def get(self, storage_key: str) -> bytes:
         path = self._path(storage_key)
+        # 读取端保持最简单：对象不存在时直接让底层抛错，再由上层决定如何补偿。
         return await asyncio.to_thread(path.read_bytes)
 
     async def delete(self, storage_key: str) -> None:

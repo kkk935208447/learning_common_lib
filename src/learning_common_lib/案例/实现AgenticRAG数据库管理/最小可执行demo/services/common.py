@@ -1,3 +1,5 @@
+"""Shared helpers for upload validation, parsing, hashing, and Outbox payloads."""
+
 from __future__ import annotations
 
 import hashlib
@@ -32,6 +34,7 @@ def sha256_bytes(value: bytes) -> str:
 
 def build_parser_config_hash() -> str:
     settings = get_settings()
+    # parser 配置 hash 会写进 version，后续重跑时可以验证“解析参数是否发生了变化”。
     raw = json.dumps(
         {
             "chunk_size": settings.parser_chunk_size,
@@ -66,6 +69,7 @@ def validate_upload_request(
     if not normalized_key:
         raise ValidationError("external_doc_key 不能为空")
 
+    # 这里先做统一归一化，再做校验，避免上层每个入口自己重复处理文件名和 MIME。
     normalized_file_name = sanitize_file_name(file_name)
     normalized_mime_type = normalize_mime_type(mime_type)
     if normalized_mime_type not in settings.upload_allowed_mime_types:
@@ -79,6 +83,7 @@ def validate_upload_request(
 
 def build_storage_key(document_id: int, version_no: int, file_name: str) -> str:
     normalized_file_name = sanitize_file_name(file_name)
+    # demo 选择“按 document_id/version_no 命名”，而不是按 file_hash 共享对象。
     return f"raw/document_{document_id}/version_{version_no}/{normalized_file_name}"
 
 
@@ -93,6 +98,7 @@ def chunk_text(content: str) -> list[str]:
     if not stripped:
         return []
 
+    # 最简单的滑窗切片：足够教学演示 chunk overlap 的意义，不引入更复杂的分词器。
     step = chunk_size - overlap
     chunks: list[str] = []
     start = 0
@@ -145,6 +151,7 @@ def build_outbox_event(
     except ImportError:
         from models import OutboxEvent
 
+    # Outbox 事件默认就是 PENDING；是否真正发出由 dispatcher 再决定。
     return OutboxEvent(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
@@ -162,6 +169,7 @@ def should_dispatch_event(*, publish_status: PublishStatus, next_retry_at) -> bo
     if publish_status == PublishStatus.PENDING:
         return True
     if publish_status == PublishStatus.FAILED:
+        # 失败事件只有到达 next_retry_at 才允许再次派发，避免重试风暴。
         if next_retry_at is None:
             return True
         return next_retry_at <= utcnow()

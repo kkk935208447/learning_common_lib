@@ -39,6 +39,7 @@
 ├── beat_main.py
 ├── bootstrap.py
 ├── celery_app.py
+├── celery_runtime.py
 ├── client_demo.py
 ├── config.py
 ├── db.py
@@ -64,27 +65,54 @@
 │   └── parse_pipeline.py
 ├── storage.py
 ├── task_queue.py
+├── task_registry.py
 ├── tasks.py
 ├── vector_store.py
 └── worker_main.py
 ```
 
-重点文件：
+### 3.1 根目录 Python 文件作用
 
-1. `models.py`
-说明：4 张核心表的 ORM 定义。
+| 文件 | 作用 |
+| --- | --- |
+| `api.py` | FastAPI 入口，暴露上传、文档/版本查询、Outbox 管理、统计和 Janitor 手动触发接口。 |
+| `beat_main.py` | 脚本式启动 Celery Beat。 |
+| `bootstrap.py` | 组装对象存储、向量存储、搜索存储、锁和任务队列等运行时适配器。 |
+| `celery_app.py` | 提供 `celery -A celery_app:celery_app ...` 的标准 CLI 入口，并触发任务发现。 |
+| `celery_runtime.py` | 创建并配置共享 Celery app 实例，直接展示队列路由和 Beat 调度。 |
+| `client_demo.py` | HTTP 烟雾测试脚本，验证 API + Worker 的完整链路。 |
+| `config.py` | 定义 MySQL、Redis、上传限制、重试和调度参数。 |
+| `db.py` | 创建数据库引擎、Session 工厂，并区分 API 会话和 Celery 任务会话。 |
+| `demo_flow.py` | 单进程 eager 自测脚本，适合快速验证上传、重建、删除状态机。 |
+| `embedding.py` | 提供确定性 embedding mock，保证 demo 可重复回放。 |
+| `enums.py` | 定义文档生命周期、解析/索引状态等领域枚举。 |
+| `errors.py` | 定义 API 和任务层共享的领域异常。 |
+| `init_db.py` | 重置并初始化 demo 所需表结构。 |
+| `locks.py` | Redis 分布式锁适配器，用于 dispatcher leader 和任务排他执行。 |
+| `models.py` | 4 张核心表的 SQLAlchemy ORM 定义。 |
+| `offline_submit_demo.py` | 离线烟雾测试脚本，直接写 MySQL + Outbox，再等待 Worker 异步完成。 |
+| `repositories.py` | 封装常用 ORM 查询，避免服务层到处散落 SQLAlchemy 细节。 |
+| `schemas.py` | API 层的 Pydantic schema。 |
+| `search_store.py` | 文件型 ES mock。 |
+| `storage.py` | 文件型对象存储 mock。 |
+| `task_queue.py` | 任务队列抽象与 Celery/InMemory 两种实现。 |
+| `task_registry.py` | 负责 Celery 任务发现，兼容包模式和脚本模式。 |
+| `tasks.py` | Celery task 函数，负责把服务层逻辑挂接到 Worker。 |
+| `vector_store.py` | 文件型 Milvus mock。 |
+| `worker_main.py` | 脚本式启动 Celery Worker。 |
 
-2. `services/document_command.py`
-说明：上传、删除、手动重建入口；把业务事务和对象写入拆清楚。
+### 3.2 `services/` 包内 Python 文件作用
 
-3. `services/outbox_dispatcher.py`
-说明：Outbox 派发、best-effort 触发、本地 eager 执行入口。
-
-4. `services/parse_pipeline.py` / `services/index_pipeline.py`
-说明：解析和索引主流水线。
-
-5. `api.py`
-说明：管理类 API，包含文档、版本、Outbox、统计、Janitor 的最小运维入口。
+| 文件 | 作用 |
+| --- | --- |
+| `services/__init__.py` | 服务层惰性导出，兼顾包模式与脚本模式导入。 |
+| `services/cleanup.py` | Cleaner 主流程，负责清理对象、向量投影和搜索投影。 |
+| `services/common.py` | 服务层共享工具，包括 hash、切片、上传校验、Outbox 构造等。 |
+| `services/document_command.py` | 写侧主服务，负责上传、删除、手动重建请求。 |
+| `services/index_pipeline.py` | Index 主流程，负责 embedding、向量投影、搜索投影和活动版本切换。 |
+| `services/janitor.py` | Janitor 对账服务，按 count 检查 MySQL / 向量库 / 搜索库是否一致。 |
+| `services/outbox_dispatcher.py` | Outbox 派发器，以及 eager 模式下的本地任务执行入口。 |
+| `services/parse_pipeline.py` | Parse 主流程，负责读取对象源文件、解析文本并写入 chunks。 |
 
 ## 4. 核心数据模型
 
@@ -358,6 +386,22 @@ uv run python src/learning_common_lib/案例/实现AgenticRAG数据库管理/最
 2. API 默认不会自动建表，避免和 `init_db.py` 并行时产生 DDL 竞争。
 3. 我已经按这条路径验证过：Worker CLI、Beat CLI、API、`client_demo.py` 可以正常跑完整链路。
 4. `celerybeat-schedule*` 是 Celery Beat 生成的本地调度元数据，不是给人直接阅读的业务文件；它通常是 Berkeley DB / shelve 格式，编辑器打不开是正常现象，停止 Beat 后可以删除再重建。
+5. 验证结束后请主动停止 `worker -> beat -> api` 这几个进程，优先使用正常的 `Ctrl+C` / `SIGINT` 退出，不要让 Celery 子进程长时间悬挂。
+
+验证完成后的清理建议：
+
+```bash
+# 1. 先在对应终端里对 worker / beat / api 发送 Ctrl+C
+
+# 2. 如果怀疑还有残留进程，再人工检查
+pgrep -af 'celery -A celery_app:celery_app'
+pgrep -af '最小可执行demo/api.py'
+```
+
+说明：
+
+1. 教学 demo 更强调“看清启动链路”，因此这里不额外封装自动清理脚本。
+2. 只要养成验证后立即结束 CLI 进程的习惯，就不会把无关子进程长期留在后台。
 
 ### 9.3 脚本式启动
 

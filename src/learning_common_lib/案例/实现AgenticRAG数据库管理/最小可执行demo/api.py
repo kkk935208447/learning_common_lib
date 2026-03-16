@@ -1,3 +1,5 @@
+"""FastAPI entrypoint that exposes upload, status, and ops endpoints."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -77,6 +79,7 @@ async def load_version_detail(session: AsyncSession, version_id: int) -> Version
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if get_settings().auto_create_tables_on_startup:
+        # 默认关闭自动建表；这里只给需要“一键起 demo”的场景留一个后门。
         await create_tables()
     try:
         yield
@@ -90,6 +93,7 @@ app = FastAPI(title="Agentic RAG Min Demo", lifespan=lifespan)
 @app.exception_handler(DemoError)
 async def handle_demo_error(_: Request, exc: DemoError):
     status_code = 500
+    # 统一在这里把领域异常翻译成 HTTP 状态码，路由函数本身保持业务语义。
     if isinstance(exc, NotFoundError):
         status_code = 404
     elif isinstance(exc, ConflictError):
@@ -118,6 +122,7 @@ async def upload_document(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # demo 仍采用整文件读入，便于把校验、哈希和对象写入串成清晰主路径。
     content = await file.read()
     service = DocumentCommandService(session, build_object_storage())
     outcome = await service.upload_document(
@@ -193,6 +198,7 @@ async def get_pending_outbox(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     dispatcher = OutboxDispatcherService(session, build_task_queue())
+    # 这个接口面向运维观察，不参与主读路径。
     events = await dispatcher.list_pending_events(limit=limit)
     payload = [OutboxEventRead.model_validate(event).model_dump() for event in events]
     return ok(payload)
@@ -215,6 +221,7 @@ async def get_admin_stats(
 
 @app.post("/admin/janitor/run")
 async def run_janitor() -> dict[str, Any]:
+    # 手动触发接口主要用于教学演示和运维排查，不建议当作正常主链路。
     async with session_scope() as session:
         service = JanitorService(session, build_vector_store(), build_search_store())
         result = await service.run_once()

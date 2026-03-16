@@ -1,3 +1,5 @@
+"""Pydantic schemas for API responses and demo management endpoints."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,6 +28,7 @@ class VersionRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # 允许直接从 ORM 对象构造，减少 API 层手写字段搬运。
     model_config = {"from_attributes": True}
 
 
@@ -72,6 +75,7 @@ class AdminStatsRead(BaseModel):
 
 
 class OkResponse(BaseModel):
+    # 这里只是把统一响应结构显式写出来，当前 API 仍主要通过 `ok(...)` 帮助函数返回。
     code: str = "OK"
     message: str = "success"
     data: dict | list | None = None

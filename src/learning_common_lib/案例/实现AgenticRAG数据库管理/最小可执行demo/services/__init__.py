@@ -1,3 +1,5 @@
+"""Lazy exports for the service layer so script mode and package mode stay lightweight."""
+
 __all__ = [
     "CleanupService",
     "DocumentCommandService",
@@ -12,6 +14,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    # 惰性导入的目的是减少脚本模式下的导入耦合，而不是做运行期“魔法封装”。
     if name == "CleanupService":
         from .cleanup import CleanupService
 

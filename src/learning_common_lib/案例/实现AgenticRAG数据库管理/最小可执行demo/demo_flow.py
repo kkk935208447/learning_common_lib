@@ -1,9 +1,12 @@
+"""Single-process eager smoke test for upload, rebuild, and delete flows."""
+
 from __future__ import annotations
 
 import asyncio
 import os
 import shutil
 
+# eager 自测会在当前进程内同步执行 Celery 任务，便于快速回归状态机。
 os.environ.setdefault("MIN_RAG_CELERY_EAGER", "true")
 
 from sqlalchemy import select
@@ -80,6 +83,7 @@ async def print_outbox_state() -> None:
 
 async def main() -> None:
     reset_runtime_dir()
+    # 这个脚本本身就是“自包含回归”，因此会主动 reset 数据库和 runtime 目录。
     await drop_tables()
     await create_tables()
     print("=== 初始化完成，开始执行 eager 模式全链路 ===")

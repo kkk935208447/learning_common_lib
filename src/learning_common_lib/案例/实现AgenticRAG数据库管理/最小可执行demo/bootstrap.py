@@ -1,3 +1,5 @@
+"""Factory helpers that assemble demo adapters without a DI framework."""
+
 from __future__ import annotations
 
 try:
@@ -17,6 +19,7 @@ except ImportError:
 
 
 def build_object_storage() -> FileObjectStorage:
+    # demo 保持“显式 new 对象”的简单工厂，不引入更重的依赖注入框架。
     return FileObjectStorage()
 
 
@@ -37,6 +40,7 @@ def build_lock_port() -> RedisDistributedLock:
 
 
 def build_task_queue() -> CeleryTaskQueueAdapter:
+    # 正常运行路径始终走 Celery；只有 eager/测试才会显式切到内存队列。
     return CeleryTaskQueueAdapter()
 
 

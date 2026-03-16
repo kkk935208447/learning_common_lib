@@ -1,3 +1,5 @@
+"""Outbox dispatcher plus local task executor used by eager mode and repair flows."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +37,7 @@ class OutboxDispatcherService:
     async def dispatch_pending(self, limit: int = 100) -> int:
         repo = OutboxRepository(self.session)
         events = await repo.list_ready(limit)
+        # 先拍平快照，再结束当前事务，避免持有数据库连接去执行 Celery/Redis 调用。
         event_snapshots = [
             {
                 "event_id": event.id,
@@ -86,6 +89,7 @@ class OutboxDispatcherService:
 
     async def _dispatch_one(self, event: dict[str, Any]) -> str | None:
         if get_settings().celery_eager:
+            # eager 模式直接在当前进程里执行，便于 demo_flow 这种单进程回归脚本快速闭环。
             await execute_local_task(
                 task_name=event["task_name"],
                 payload=event["payload_json"],
@@ -125,12 +129,14 @@ async def best_effort_dispatch_outbox(limit: int = 100) -> None:
     lock = None
     token = None
     if not settings.celery_eager:
+        # best-effort 派发本质是“顺手推一把”，这里加 leader lock，避免 API 和 Beat 同时扫同一批事件。
         lock = build_lock_port()
         token = await asyncio.to_thread(lock.try_lock, "rag:outbox:dispatcher", settings.lock_ttl_seconds)
         if token is None:
             logger.info("skip best effort dispatch because dispatcher lock is held")
             return None
     try:
+        # 这里刻意使用 task_session_scope：Celery task 内部经常由不同事件循环执行，不能复用全局 async engine。
         async with task_session_scope() as session:
             dispatcher = OutboxDispatcherService(session, build_task_queue())
             count = await dispatcher.dispatch_pending(limit=limit)

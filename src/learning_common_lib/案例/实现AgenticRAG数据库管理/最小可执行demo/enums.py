@@ -1,15 +1,19 @@
+"""Domain status enums used by the minimal Agentic RAG demo."""
+
 from __future__ import annotations
 
 from enum import Enum
 
 
 class DocumentLifecycleStatus(str, Enum):
+    # 面向 document 级别的生命周期：逻辑文档是否仍对外存在。
     ACTIVE = "ACTIVE"
     DELETING = "DELETING"
     DELETED = "DELETED"
 
 
 class ParseStatus(str, Enum):
+    # 面向 parse 阶段的流水线状态。
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
@@ -17,6 +21,7 @@ class ParseStatus(str, Enum):
 
 
 class IndexStatus(str, Enum):
+    # 面向 index 阶段的流水线状态。
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
@@ -24,6 +29,7 @@ class IndexStatus(str, Enum):
 
 
 class ProjectionStatus(str, Enum):
+    # 面向外部投影（Milvus/ES mock）的状态。
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
@@ -31,6 +37,7 @@ class ProjectionStatus(str, Enum):
 
 
 class StorageStatus(str, Enum):
+    # 面向对象存储源文件的状态。
     PENDING_UPLOAD = "PENDING_UPLOAD"
     READY = "READY"
     DELETE_PENDING = "DELETE_PENDING"
@@ -39,6 +46,7 @@ class StorageStatus(str, Enum):
 
 
 class VisibilityStatus(str, Enum):
+    # 面向读路径的可见性状态：是否 staged/active/superseded/deleted。
     STAGED = "STAGED"
     ACTIVE = "ACTIVE"
     SUPERSEDED = "SUPERSEDED"
@@ -63,8 +71,8 @@ class PublishStatus(str, Enum):
     SENT = "SENT"
     FAILED = "FAILED"
 
-
 class QueueName(str, Enum):
+    # Celery 队列名直接放在这里，读 Celery 配置时不需要再跳文件。
     PARSE = "parse_jobs"
     INDEX = "index_jobs"
     CLEAN = "clean_jobs"
@@ -73,6 +81,7 @@ class QueueName(str, Enum):
 
 
 class TaskName(str, Enum):
+    # task 名称保留统一前缀，方便在 worker 日志里快速筛选。
     PARSE_VERSION = "min_rag_demo.parse_version"
     INDEX_VERSION = "min_rag_demo.index_version"
     CLEAN_VERSION = "min_rag_demo.clean_version"

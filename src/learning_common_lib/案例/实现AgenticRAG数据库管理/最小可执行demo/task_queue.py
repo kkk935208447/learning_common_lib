@@ -1,3 +1,5 @@
+"""Task queue adapters used by the Outbox dispatcher and eager mode tests."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -29,13 +31,14 @@ class CeleryTaskQueueAdapter(BaseTaskQueue):
         countdown: int | None = None,
     ) -> str | None:
         try:
-            from .tasks import ensure_tasks_registered
             from .celery_app import celery_app
+            from .task_registry import autodiscover_demo_tasks
         except ImportError:
-            from tasks import ensure_tasks_registered
             from celery_app import celery_app
+            from task_registry import autodiscover_demo_tasks
 
-        ensure_tasks_registered()
+        # API / Outbox 并不保证提前 import 过 tasks，这里按需 discovery 一次最稳妥。
+        autodiscover_demo_tasks(celery_app)
         task = celery_app.tasks[task_name]
         result = task.apply_async(kwargs=payload, queue=queue_name, countdown=countdown)
         return result.id
@@ -63,6 +66,7 @@ class InMemoryTaskQueueAdapter(BaseTaskQueue):
         queue_name: str,
         countdown: int | None = None,
     ) -> str | None:
+        # 内存队列只服务测试/演示，不承担真正异步执行。
         self.events.append(
             {
                 "task_name": task_name,

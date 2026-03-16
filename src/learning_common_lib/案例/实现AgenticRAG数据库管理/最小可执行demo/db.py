@@ -1,3 +1,5 @@
+"""Database engine and session helpers for API requests and Celery tasks."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -69,8 +71,23 @@ async def create_tables() -> None:
 
 
 async def drop_tables() -> None:
+    settings = get_settings()
     async with get_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        result = await conn.execute(
+            text(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE TABLE_SCHEMA = :schema_name"
+            ),
+            {"schema_name": settings.mysql_database},
+        )
+        existing_tables = {row[0] for row in result.fetchall()}
+
+        # 对教学 demo 来说，显式按依赖逆序删除比 `metadata.drop_all()` 更稳妥：
+        # 1. 阅读时更容易看清删除顺序
+        # 2. 不会因为 MySQL 反射或 `IF EXISTS` 警告把输出搞得很乱
+        for table in reversed(Base.metadata.sorted_tables):
+            if table.name in existing_tables:
+                await conn.execute(text(f"DROP TABLE `{table.name}`"))
 
 
 @asynccontextmanager
@@ -84,6 +101,7 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 @asynccontextmanager
 async def task_session_scope() -> AsyncIterator[AsyncSession]:
+    # Celery task常常由新的 asyncio event loop 驱动，单独建 engine 可以规避 loop 交叉复用。
     engine = build_engine()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     session = session_factory()

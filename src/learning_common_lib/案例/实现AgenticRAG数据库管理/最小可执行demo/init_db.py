@@ -1,3 +1,5 @@
+"""Reset and initialize the demo schema and runtime directory."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +14,7 @@ except ImportError:
 
 async def main() -> None:
     settings = get_settings()
+    # demo 目录强调“可重复重跑”，因此 init_db 直接走 drop + create。
     await drop_tables()
     await create_tables()
     print("数据库与表已重置并初始化完成")

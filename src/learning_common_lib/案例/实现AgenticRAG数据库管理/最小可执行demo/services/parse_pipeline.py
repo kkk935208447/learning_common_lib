@@ -1,3 +1,5 @@
+"""Parse pipeline that reads source objects and materializes MySQL chunks."""
+
 from __future__ import annotations
 
 import logging
@@ -78,6 +80,7 @@ class ParsePipelineService:
         try:
             raw_bytes = await self.object_storage.get(version.storage_key)
             if version.parser_config_hash != build_parser_config_hash():
+                # 同一 version_id 必须对应稳定的 parser 配置，否则会破坏幂等语义。
                 raise ValidationError("parser_config_hash 不匹配，拒绝原地重跑")
 
             text = parse_bytes_to_text(raw_bytes, version.mime_type)
@@ -103,6 +106,7 @@ class ParsePipelineService:
                 version = await version_repo.get_by_id(version_id, for_update=True)
                 if version is None:
                     raise NotFoundError(f"version {version_id} 不存在")
+                # replace_for_version 保证重复解析时不会把旧 chunks 和新 chunks 混在一起。
                 await chunk_repo.replace_for_version(version_id, chunks)
                 version.chunk_count = len(chunks)
                 version.parse_status = ParseStatus.SUCCESS

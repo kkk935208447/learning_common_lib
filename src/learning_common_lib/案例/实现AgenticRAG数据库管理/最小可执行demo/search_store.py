@@ -1,3 +1,5 @@
+"""File-based search store mock used to simulate ES-style text projections."""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +42,7 @@ class FileSearchStore(BaseSearchStore):
             for doc in docs:
                 path = self._path(doc["chunk_uid"])
                 tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+                # 保持和对象存储、向量存储一致的原子写策略，减少 mock 数据损坏窗口。
                 tmp_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
                 tmp_path.replace(path)
 
@@ -57,6 +60,7 @@ class FileSearchStore(BaseSearchStore):
     async def count_by_version(self, version_id: int) -> int:
         def _count() -> int:
             count = 0
+            # 文件型 mock 直接扫目录即可，代价是性能一般，但逻辑非常直观。
             for path in self.root_dir.glob("*.json"):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if payload.get("version_id") == version_id:
