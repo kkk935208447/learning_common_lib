@@ -1,18 +1,21 @@
+"""Thin repository helpers that keep repeated ORM queries out of services."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from .enums import IndexStatus, ParseStatus, PublishStatus, VisibilityStatus
+    from .enums import IndexStatus, ParseStatus, PublishStatus, StorageStatus, VisibilityStatus
     from .models import Document, DocumentChunk, DocumentVersion, OutboxEvent
 except ImportError:
-    from enums import IndexStatus, ParseStatus, PublishStatus, VisibilityStatus
+    from enums import IndexStatus, ParseStatus, PublishStatus, StorageStatus, VisibilityStatus
     from models import Document, DocumentChunk, DocumentVersion, OutboxEvent
 
 
+# Repository 层只封装重复查询，不承接复杂业务判断。
 class BaseRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -22,6 +25,7 @@ class DocumentRepository(BaseRepository):
     async def get_by_id(self, document_id: int, *, for_update: bool = False) -> Document | None:
         stmt = select(Document).where(Document.id == document_id)
         if for_update:
+            # 需要修改文档主状态时，再由调用方显式申请行锁。
             stmt = stmt.with_for_update()
         return await self.session.scalar(stmt)
 
@@ -53,12 +57,14 @@ class VersionRepository(BaseRepository):
         return list((await self.session.scalars(stmt)).all())
 
     async def find_inflight_by_document(self, document_id: int) -> DocumentVersion | None:
+        # 只要版本仍停留在 STAGED 且上传/解析/索引任一阶段未完成，就算“在途版本”。
         stmt = (
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)
             .where(DocumentVersion.visibility_status == VisibilityStatus.STAGED)
             .where(
-                (DocumentVersion.parse_status.in_((ParseStatus.PENDING, ParseStatus.RUNNING)))
+                (DocumentVersion.storage_status == StorageStatus.PENDING_UPLOAD)
+                | (DocumentVersion.parse_status.in_((ParseStatus.PENDING, ParseStatus.RUNNING)))
                 | (DocumentVersion.index_status.in_((IndexStatus.PENDING, IndexStatus.RUNNING)))
             )
             .order_by(DocumentVersion.version_no.desc())
@@ -67,6 +73,7 @@ class VersionRepository(BaseRepository):
         return await self.session.scalar(stmt)
 
     async def list_versions_for_document_cleanup(self, document_id: int) -> list[DocumentVersion]:
+        # 清理阶段只关心“还没被标记成彻底删除”的版本。
         stmt = (
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)
@@ -82,9 +89,22 @@ class VersionRepository(BaseRepository):
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_by_parse_status(self, status: ParseStatus) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.parse_status == status)
+        return int((await self.session.scalar(stmt)) or 0)
+
+    async def count_by_index_status(self, status: IndexStatus) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.index_status == status)
+        return int((await self.session.scalar(stmt)) or 0)
+
+    async def count_active(self) -> int:
+        stmt = select(func.count(DocumentVersion.id)).where(DocumentVersion.visibility_status == VisibilityStatus.ACTIVE)
+        return int((await self.session.scalar(stmt)) or 0)
+
 
 class ChunkRepository(BaseRepository):
     async def replace_for_version(self, version_id: int, chunks: list[DocumentChunk]) -> None:
+        # 先删后插的策略更适合 demo，能清楚表达“重跑解析会完全覆盖事实数据”。
         await self.session.execute(delete(DocumentChunk).where(DocumentChunk.version_id == version_id))
         self.session.add_all(chunks)
 
@@ -99,6 +119,7 @@ class ChunkRepository(BaseRepository):
 
 class OutboxRepository(BaseRepository):
     async def list_ready(self, limit: int) -> list[OutboxEvent]:
+        # Dispatcher 只看待发和待重试事件，历史 SENT 事件由清理任务回收。
         stmt = (
             select(OutboxEvent)
             .where(OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED)))
@@ -107,7 +128,23 @@ class OutboxRepository(BaseRepository):
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def list_pending(self, limit: int) -> list[OutboxEvent]:
+        stmt = (
+            select(OutboxEvent)
+            .where(OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED)))
+            .order_by(OutboxEvent.id.asc())
+            .limit(limit)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def count_pending(self) -> int:
+        stmt = select(func.count(OutboxEvent.id)).where(
+            OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED))
+        )
+        return int((await self.session.scalar(stmt)) or 0)
+
     async def cleanup_sent_older_than(self, days: int) -> int:
+        # 这个方法让 Outbox 历史回收逻辑留在仓储层，而不是散在 Beat/task 中拼 SQL。
         cutoff = datetime.utcnow() - timedelta(days=days)
         stmt = (
             delete(OutboxEvent)

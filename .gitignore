@@ -15,3 +15,7 @@ wheels/
 
 # 包含子目录中的 .DS_Store
 **/.DS_Store
+
+# Demo runtime artifacts
+**/.runtime/
+**/celerybeat-schedule*

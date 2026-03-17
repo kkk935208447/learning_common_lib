@@ -1,3 +1,5 @@
+"""Offline smoke script that submits directly to MySQL and waits for worker completion."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,23 +11,25 @@ from uuid import uuid4
 try:
     from .bootstrap import build_object_storage
     from .db import create_tables, session_scope
-    from .enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, VisibilityStatus
+    from .enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, StorageStatus, VisibilityStatus
     from .repositories import DocumentRepository, VersionRepository
     from .services import DocumentCommandService
 except ImportError:
     from bootstrap import build_object_storage
     from db import create_tables, session_scope
-    from enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, VisibilityStatus
+    from enums import DocumentLifecycleStatus, IndexStatus, ParseStatus, StorageStatus, VisibilityStatus
     from repositories import DocumentRepository, VersionRepository
     from services import DocumentCommandService
 
 logger = logging.getLogger(__name__)
 
 
+# 这两个快照 dataclass 用于把数据库当前状态打平成日志友好的结构。
 @dataclass
 class VersionSnapshot:
     version_id: int
     version_no: int
+    storage_status: str
     parse_status: str
     index_status: str
     milvus_status: str
@@ -46,6 +50,7 @@ class DocumentSnapshot:
 
 
 async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
+    # 每次轮询都重新开 session 读取，避免把过期 ORM 对象缓存成“旧状态”。
     async with session_scope() as session:
         doc_repo = DocumentRepository(session)
         version_repo = VersionRepository(session)
@@ -63,6 +68,7 @@ async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
                 VersionSnapshot(
                     version_id=version.id,
                     version_no=version.version_no,
+                    storage_status=version.storage_status.value,
                     parse_status=version.parse_status.value,
                     index_status=version.index_status.value,
                     milvus_status=version.milvus_status.value,
@@ -77,19 +83,22 @@ async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
 
 
 def is_upload_finished(snapshot: DocumentSnapshot) -> bool:
+    # 离线脚本只关心“业务结果是否已经可用”，而不是中间 task 有没有短暂重试。
     if snapshot.active_version_id is None:
         return False
     active = next((item for item in snapshot.versions if item.version_id == snapshot.active_version_id), None)
     if active is None:
         return False
     return (
-        active.parse_status == ParseStatus.SUCCESS.value
+        active.storage_status == StorageStatus.READY.value
+        and active.parse_status == ParseStatus.SUCCESS.value
         and active.index_status == IndexStatus.SUCCESS.value
         and active.visibility_status == VisibilityStatus.ACTIVE.value
     )
 
 
 def is_delete_finished(snapshot: DocumentSnapshot) -> bool:
+    # 删除完成的判定故意只看 document 生命周期，符合外部调用方视角。
     return snapshot.lifecycle_status == DocumentLifecycleStatus.DELETED.value
 
 
@@ -101,6 +110,7 @@ async def wait_until(
     timeout_seconds: int = 60,
     interval_seconds: int = 2,
 ) -> DocumentSnapshot:
+    # 这里用定时轮询替代事件订阅，是为了让脚本保持最小依赖和最强可读性。
     loops = max(timeout_seconds // interval_seconds, 1)
     last_snapshot: DocumentSnapshot | None = None
     for _ in range(loops):
@@ -116,6 +126,7 @@ async def wait_until(
 async def submit_upload() -> tuple[int, int]:
     external_doc_key = f"offline-demo-doc-{uuid4().hex[:8]}"
     async with session_scope() as session:
+        # 离线提交脚本直接调用服务层，绕过 API，适合验证 DB + Worker 组合是否正常。
         service = DocumentCommandService(session, build_object_storage())
         outcome = await service.upload_document(
             external_doc_key=external_doc_key,
@@ -140,6 +151,7 @@ async def submit_delete(document_id: int) -> None:
 
 
 async def main() -> None:
+    # 离线模式不要求 API 存在，但仍依赖数据库和 Worker 正常工作。
     await create_tables()
 
     document_id, version_id = await submit_upload()
