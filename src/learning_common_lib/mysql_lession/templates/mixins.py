@@ -8,7 +8,7 @@
 import asyncio
 from datetime import datetime
 
-from sqlalchemy import Integer, DateTime, Boolean
+from sqlalchemy import Integer, BIGINT, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -50,7 +50,7 @@ class VersionMixin:
     """
 
     version: Mapped[int] = mapped_column(
-        Integer,
+        BIGINT,    # 64 位数值乐观锁，防止上溢
         default=1,
         comment="乐观锁版本号",
     )
@@ -92,6 +92,15 @@ async def _demo() -> None:
         async with session.begin():
             product = DemoProduct(name="键盘", stock=100)
             session.add(product)
+            # flush / refresh / commit 的区别（这三者经常被混用）：
+            # - flush(): 把当前 Session 中“待写入”的 INSERT/UPDATE/DELETE 发送到数据库执行，但不提交事务；
+            #           主要用于：提前拿到自增主键 id、尽早触发唯一/外键等约束错误、在同一事务中继续依赖已写入的数据。
+            # - refresh(obj): 对 obj 再发起一次 SELECT，用数据库“最终落盘”的值覆盖/补全对象属性；
+            #                常用于读取数据库端生成/更新的字段（如 DEFAULT now()、on update、触发器、计算列等）。
+            # - commit(): 提交事务，使变更对其他连接可见且不可用 rollback 撤销；commit 通常会先隐式 flush。
+            #   这里处在 `async with session.begin():` 事务块内：退出该块时会自动 commit（若中途无异常）。
+            #
+            # 本 demo 连用 flush + refresh，是为了在事务内立刻看到数据库端生成/维护的字段值（例如 created_at/updated_at）。
             await session.flush()
             await session.refresh(product)
             print(f"  创建: {product.name}, is_deleted={product.is_deleted}, version={product.version}")
@@ -124,7 +133,7 @@ async def _demo() -> None:
                 .where(DemoProduct.id == p.id, DemoProduct.version == old_version)
                 .values(stock=90, version=old_version + 1)
             )
-            if result.rowcount == 1:
+            if result.rowcount == 1:  # 如果没人并发改过它：version 匹配，更新成功，即rowcount == 1， rowcount 在这里就是“乐观锁是否成功抢到更新权”的直接信号
                 print(f"  更新成功: stock=90, version={old_version + 1}")
             else:
                 print(f"  乐观锁冲突! rowcount={result.rowcount}")

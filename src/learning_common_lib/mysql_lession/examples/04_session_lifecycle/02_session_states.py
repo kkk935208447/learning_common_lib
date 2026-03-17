@@ -79,6 +79,12 @@ async def main() -> None:
         show_state(item, "2. session.add() 后")
 
         # ── 3. Persistent（持久）：flush 后，数据库中有对应行 ──
+        # flush / refresh / commit 的区别（这三者经常被混用）：
+        # - flush(): 把当前 Session 中“待写入”的 INSERT/UPDATE/DELETE 发送到数据库执行，但不提交事务；
+        #           主要用于：提前拿到自增主键 id、尽早触发唯一/外键等约束错误、在同一事务中继续依赖已写入的数据。
+        # - refresh(obj): 对 obj 再发起一次 SELECT，用数据库“最终落盘”的值覆盖/补全对象属性；
+        #                常用于读取数据库端生成/更新的字段（如 DEFAULT now()、on update、触发器、计算列等）。
+        # - commit(): 提交事务，使变更对其他连接可见且不可用 rollback 撤销；commit 通常会先隐式 flush。
         await session.flush()
         show_state(item, "3. session.flush() 后")
         print(f"       此时已有 id: {item.id}")
