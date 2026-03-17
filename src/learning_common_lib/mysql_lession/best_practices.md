@@ -55,11 +55,12 @@ global_session = async_session()  # 多个请求共享，状态混乱
 ## 3. 模型定义：2.0 风格 + 公共字段抽取
 
 ```python
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, func
 from datetime import datetime
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 class IdMixin:
@@ -84,7 +85,9 @@ class User(IdMixin, TimestampMixin, Base):
 - 使用 `Mapped[T]` 声明字段类型，IDE 能正确推断类型
 - `mapped_column()` 替代旧的 `Column()`，参数完全兼容
 - 公共字段抽取为 Mixin，避免每个模型重复定义 id/created_at/updated_at
+- `AsyncAttrs` 让模型具备 `awaitable_attrs`，可在异步里显式 await 加载关系
 - `server_default=func.now()` 让数据库生成时间戳，比 Python 端 `default=datetime.utcnow` 更可靠
+- 但 `AsyncAttrs` 不是鼓励你依赖隐式关系加载；企业代码仍应把关系加载策略写在查询上
 
 ---
 
@@ -113,21 +116,27 @@ user = result.scalars().first()
 ## 5. 关系加载：显式指定，禁用 lazy loading
 
 ```python
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy.orm import selectinload, joinedload, relationship
 
-# 正确 — 显式预加载
+# 推荐 — 关系定义时就禁止隐式 lazy loading
+posts: Mapped[list["Post"]] = relationship(back_populates="author", lazy="raise")
+
+# 正确 — 查询阶段显式预加载
 stmt = select(User).options(selectinload(User.posts))
 result = await session.execute(stmt)
 users = result.scalars().all()
 for user in users:
     print(user.posts)  # 已加载，不会触发额外查询
 
-# 错误 — 依赖 lazy loading（异步中直接报错）
+# 错误 — 依赖 lazy loading（异步中常见为 StatementError -> MissingGreenlet）
 stmt = select(User)
 result = await session.execute(stmt)
 users = result.scalars().all()
 for user in users:
     print(user.posts)  # MissingGreenlet 错误！
+
+# 可用但不作为默认主方案 — 显式 await 关系
+posts = await user.awaitable_attrs.posts
 ```
 
 加载策略选择：
@@ -139,6 +148,13 @@ for user in users:
 | `subqueryload` | 大数据量一对多 | 额外一条子查询 |
 
 经验法则：**一对多用 `selectinload`，多对一用 `joinedload`**。`selectinload` 不会产生笛卡尔积，是最安全的默认选择。
+
+补充规则：
+
+- 如果外层看到的是 `StatementError`，先检查 `exc.orig`，根因往往是 `MissingGreenlet`
+- `awaitable_attrs` 适合教学、调试或局部显式加载；大多数业务代码仍应优先在查询阶段写清加载策略
+- FastAPI / Pydantic 在 `from_attributes=True` 或响应序列化时也可能访问关系属性；进入序列化前必须预加载好关系
+- 团队协作场景下，`lazy="raise"` 比“默认 lazy，运行时再撞 MissingGreenlet”更容易发现问题
 
 ---
 
@@ -466,7 +482,7 @@ expected_version = product.version
 # 更新时检查 expected_version：WHERE version=N, SET version=N+1
 product = await repo.update(1, expected_version=expected_version, stock=90)
 
-# 重试策略
+# 重试策略：每次尝试都重新开启新事务并重读最新 version
 for attempt in range(3):
     try:
         async with session_factory() as session:
@@ -490,6 +506,10 @@ for attempt in range(3):
 - 乐观锁适合读多写少场景（电商库存、配置管理等）
 - `rowcount == 0` 是检测冲突的关键，不检查就会静默丢失更新
 - 真实 HTTP API 场景里，应显式携带客户端看到的 `version`，而不是只在仓储内部偷偷读取当前版本
+- 重试必须在新事务中重新读取最新版本，不要在失败的旧事务里继续沿用旧对象和旧 `expected_version`
+- 如果为了教学或调试手写 Core `UPDATE`，要注意它默认会同步 Session 中已加载的 ORM 对象，`obj.version` 可能会被直接推到新值
+- 空更新不应让 `version` 白白递增；无业务字段的更新请求应视为非法输入
+- `version` / `is_deleted` / `deleted_at` / 时间戳等系统字段应由专门机制维护，不要通过通用 `update()` 直接改写
 - 重试次数应有上限（通常 3 次），避免无限重试
 - 高并发写入场景考虑悲观锁（`SELECT FOR UPDATE`）
 
@@ -503,6 +523,7 @@ for attempt in range(3):
 - [ ] `pool_pre_ping=True` 已开启
 - [ ] `pool_recycle` 小于 MySQL `wait_timeout`
 - [ ] `expire_on_commit=False` 已设置
+- [ ] 关系字段默认使用了 `lazy="raise"` 或有同等明确的 fail-fast 策略
 - [ ] 所有关系加载都显式指定了 `selectinload` / `joinedload`
 - [ ] 没有在异步代码中使用 `session.query()` 旧 API
 - [ ] Session 在请求结束时正确关闭（使用 `async with` 或 `Depends`）
@@ -516,3 +537,4 @@ for attempt in range(3):
 - [ ] FastAPI 中的 Engine / SessionFactory 已挂载到 `app.state`
 - [ ] 需要审计的数据使用软删除而非物理删除
 - [ ] 并发更新场景使用乐观锁 + `expected_version` + 重试策略
+- [ ] 通用 `update()` 不被用于修改 `id` / 时间戳 / 软删除字段 / `version`

@@ -4,7 +4,8 @@
 Python 版本: 3.11+
 运行命令: uv run python examples/05_relationships/01_one_to_many.py  (从 mysql_lession/ 目录)
 预期现象: 创建 Author 和 Article 表，插入作者及其文章，通过 selectinload 查询并打印关联数据
-生产提醒: 异步 ORM 中禁止使用默认的 lazy loading，必须用 selectinload/joinedload 等显式加载策略
+生产提醒: 异步 ORM 中禁止使用默认的 lazy loading，必须用 selectinload/joinedload 等显式加载策略；
+    MissingGreenlet 的完整触发链路与 lazy="raise" 对比，见 03_missing_greenlet_lazy_loading.py
 """
 
 import asyncio
@@ -118,6 +119,7 @@ async def main() -> None:
     async with session_factory() as session:
         # selectinload 会用一条额外的 SELECT ... WHERE id IN (...) 加载关联数据
         # 这是异步场景下最推荐的加载策略
+        # 如果想看默认 lazy loading 为什么会报错，专门看 03_missing_greenlet_lazy_loading.py
         stmt = select(Author).options(selectinload(Author.articles)).order_by(Author.id)
         result = await session.execute(stmt)
         authors = result.scalars().all()

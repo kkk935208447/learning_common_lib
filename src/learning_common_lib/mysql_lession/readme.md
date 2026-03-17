@@ -65,7 +65,8 @@ mysql_lession/
 │   │   └── 02_session_states.py
 │   ├── 05_relationships/
 │   │   ├── 01_one_to_many.py
-│   │   └── 02_many_to_many.py
+│   │   ├── 02_many_to_many.py
+│   │   └── 03_missing_greenlet_lazy_loading.py
 │   ├── 06_query_patterns/
 │   │   ├── 01_filter_and_where.py
 │   │   ├── 02_join_and_subquery.py
@@ -134,10 +135,10 @@ uv run python src/learning_common_lib/mysql_lession/examples/01_connection/01_as
 | 2 | 模型定义 | `02_model_definition/` | DeclarativeBase、Mapped 类型注解、列类型与字段约束 |
 | 3 | CRUD 基础 | `03_crud_basics/` | insert/select/update/delete 的 2.0 风格写法 |
 | 4 | Session 生命周期 | `04_session_lifecycle/` | Session 状态机、expire_on_commit、refresh |
-| 5 | 关系映射 | `05_relationships/` | 一对多、多对多、relationship 配置 |
+| 5 | 关系映射 | `05_relationships/` | 一对多、多对多、relationship 配置、MissingGreenlet 诊断 |
 | 6 | 查询模式 | `06_query_patterns/` | 条件过滤、联表/子查询、分页与排序 |
 | 7 | 事务管理 | `07_transactions/` | commit/rollback、savepoint 嵌套事务 |
-| 8 | Repository 模式 | `08_repository_pattern/` | 泛型基类 Repository、Unit of Work |
+| 8 | Repository 模式 | `08_repository_pattern/` | 泛型基类 Repository、Unit of Work、软删除与乐观锁 |
 | 9 | 性能优化 | `09_performance/` | selectinload/joinedload、批量操作 |
 | 10 | FastAPI 集成 | `10_fastapi_integration/` | Depends 注入 Session、完整 CRUD API |
 
@@ -148,12 +149,13 @@ uv run python src/learning_common_lib/mysql_lession/examples/01_connection/01_as
 ## 核心原则
 
 1. **始终使用 2.0 风格** — `select()` 替代 `session.query()`，`Mapped[T]` 替代 `Column()`，这是 SQLAlchemy 的未来方向
-2. **异步环境禁用 lazy loading** — 异步中访问未加载的关系会抛出 `MissingGreenlet`，必须显式使用 `selectinload` / `joinedload`
+2. **异步环境禁用 lazy loading** — 异步中访问未加载的关系会抛出 `MissingGreenlet`，必须显式使用 `selectinload` / `joinedload`；团队默认可进一步配合 `lazy="raise"` 提前 fail-fast
 3. **Session 即工作单元** — 一个请求一个 Session，用完即关，不要跨请求复用
 4. **expire_on_commit=False** — 异步场景下 commit 后仍需访问对象属性，默认的 expire 行为会导致 detached instance 错误
 5. **连接池是生命线** — 合理配置 `pool_size`、`pool_recycle`、`pool_pre_ping`，避免连接泄漏和连接池耗尽
 6. **错误映射要按约束类型细分** — `IntegrityError` 不等于“重复数据”，唯一约束、外键约束、非空约束应区分处理
-7. **乐观锁要基于客户端读到的版本** — 真实 API 场景下应显式传递 `expected_version`，不要只在仓储内部读取“当前 version”
+7. **乐观锁要基于客户端读到的版本** — 真实 API 场景下应显式传递 `expected_version`，不要只在仓储内部读取“当前 version”；`04_optimistic_lock.py` 还会演示同一 Session 下 Core `UPDATE` 的同步陷阱，避免把被同步后的 version 误当旧快照
+8. **通用 update 不应篡改系统字段** — `id` / 时间戳 / 软删除字段 / `version` 应由专门机制维护，不应通过普通 `update()` 绕过语义边界
 
 ---
 
@@ -173,7 +175,7 @@ uv run python src/learning_common_lib/mysql_lession/examples/01_connection/01_as
 - 配置生产级异步连接池，理解每个参数对性能和稳定性的影响
 - 使用 SQLAlchemy 2.0 风格定义模型，抽取公共字段为 Mixin
 - 在异步环境中正确管理 Session 生命周期，避免 detached instance 和连接泄漏
-- 使用 selectinload / joinedload 解决 N+1 查询和 MissingGreenlet 问题
+- 诊断 `MissingGreenlet` / `StatementError.orig`，并使用 selectinload / joinedload / `lazy="raise"` 修复异步关系加载问题
 - 用 savepoint 实现部分回滚，用最小事务范围提升并发性能
 - 封装泛型 Repository 和 Unit of Work，为 FastAPI 项目搭建清晰的数据访问层
 - 为软删除、错误码映射、乐观锁和 request_id 设计可落地的工程边界

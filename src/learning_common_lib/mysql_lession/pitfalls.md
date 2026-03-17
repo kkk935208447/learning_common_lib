@@ -17,6 +17,18 @@ for user in users:
 
 原因：SQLAlchemy 的 lazy loading 需要同步发起 SQL 查询，但异步环境中没有同步 IO 通道。访问未加载的关系属性时，SQLAlchemy 尝试隐式发起查询，发现当前不在 greenlet 上下文中，直接报错。
 
+真实项目里经常不是直接看到 `MissingGreenlet`，而是先看到一层 `StatementError`：
+
+```python
+try:
+    print(user.posts)
+except Exception as exc:
+    print(type(exc).__name__)      # StatementError
+    print(type(exc.orig).__name__) # MissingGreenlet
+```
+
+另外一个高频触发点不是业务代码，而是 **FastAPI / Pydantic 响应序列化**。如果路由返回 ORM 对象，序列化阶段访问到尚未加载的关系，也会在看似“无辜”的地方触发同样的隐式 IO。
+
 这是异步 ORM 最常见的错误，没有之一。
 
 正确做法：
@@ -28,6 +40,12 @@ users = result.scalars().all()
 
 for user in users:
     print(user.posts)  # 已预加载，正常访问
+
+# 或者在模型上显式禁止隐式加载
+posts: Mapped[list["Post"]] = relationship(back_populates="author", lazy="raise")
+
+# AsyncAttrs 也允许显式 await
+posts = await user.awaitable_attrs.posts
 ```
 
 ---
@@ -324,7 +342,7 @@ except SQLAlchemyError as e:
 
 ---
 
-## 11. 乐观锁不检查 rowcount，或不使用客户端版本号
+## 11. 乐观锁不检查 rowcount、误用当前版本号、空更新递增 version，或忽略 Session 同步
 
 ```python
 # 错误 1 — 不检查 rowcount，并发覆盖静默发生
@@ -338,9 +356,28 @@ await session.execute(stmt)
 # 错误 2 — 只在仓储内部读取“当前 version”，而不是使用客户端读到的旧 version
 current = await repo.get_by_id(product_id)
 await repo.update(product_id, expected_version=current.version, stock=new_stock)
+
+# 错误 3 — 同一 Session 执行 Core UPDATE 后，obj.version 可能已被同步成新值
+product = await repo.get_by_id(product_id, strict=True)
+stale_version = product.version
+
+await session.execute(
+    update(Product)
+    .where(Product.id == product_id)
+    .values(version=stale_version + 1)
+)
+
+# 这里的 product.version 很可能已经变成新值，不再是“旧页面版本”
+await repo.update(product_id, expected_version=product.version, stock=new_stock)
+
+# 错误 4 — 空更新也让 version +1，制造无意义的“成功写入”
+await repo.update(product_id, expected_version=stale_version)
+
+# 错误 5 — 直接改写系统字段，绕过仓储语义
+await repo.update(product_id, version=999, is_deleted=True)
 ```
 
-后果：并发场景下数据静默丢失，或者看似“用了乐观锁”，实际上永远拿的是数据库最新版本，根本无法表达“我是基于旧页面编辑的”。
+后果：并发场景下数据静默丢失，或者看似“用了乐观锁”，实际上永远拿的是数据库最新版本，根本无法表达“我是基于旧页面编辑的”。如果你在同一 Session 里手写了 Core `UPDATE`，还可能误把已经被同步过的 `obj.version` 当成旧快照，导致“以为自己在模拟冲突，其实根本没有旧版本提交”。空更新还会制造无意义的版本膨胀，而直接改写 `version` / `is_deleted` 等系统字段会破坏仓储边界，让软删除和乐观锁语义失真。
 
 正确做法：
 
@@ -354,6 +391,29 @@ stmt = (
 result = await session.execute(stmt)
 if result.rowcount == 0:
     raise OptimisticLockError(detail={"expected_version": expected_version})
+
+# 如果必须在同一 Session 里手写 DML，先保存旧版本，并关闭这次 DML 的 Session 同步
+stale_version = product.version
+await session.execute(
+    update(Product)
+    .where(Product.id == product_id)
+    .values(version=stale_version + 1)
+    .execution_options(synchronize_session=False)
+)
+
+result = await session.execute(
+    update(Product)
+    .where(Product.id == product_id, Product.version == stale_version)
+    .values(stock=new_stock, version=stale_version + 1)
+)
+if result.rowcount == 0:
+    raise OptimisticLockError(detail={"expected_version": stale_version})
+
+# 空更新应被视为非法输入，而不是偷偷递增 version
+if not payload:
+    raise AppValidationError(message="更新内容不能为空")
+
+# 通用 update 不要允许修改 version / is_deleted / deleted_at / 时间戳等系统字段
 ```
 
 ---

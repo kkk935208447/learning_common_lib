@@ -76,7 +76,16 @@ class BaseRepository(Generic[T]):
         mapper = sa_inspect(self.model)
         return {attr.key for attr in mapper.column_attrs}
 
+    def _protected_update_fields(self) -> set[str]:
+        """通用 update 默认禁止改写系统字段。"""
+        return {"id", "created_at", "updated_at"} & self._mapped_column_keys()
+
     def _validate_update_fields(self, kwargs: dict[str, object]) -> None:
+        if not kwargs:
+            raise AppValidationError(
+                message="更新内容不能为空",
+                detail={"model": self.model.__name__},
+            )
         invalid_fields = sorted(set(kwargs) - self._mapped_column_keys())
         if invalid_fields:
             raise AppValidationError(
@@ -84,6 +93,15 @@ class BaseRepository(Generic[T]):
                 detail={
                     "model": self.model.__name__,
                     "invalid_fields": invalid_fields,
+                },
+            )
+        protected_fields = sorted(set(kwargs) & self._protected_update_fields())
+        if protected_fields:
+            raise AppValidationError(
+                message="存在不允许直接更新的系统字段",
+                detail={
+                    "model": self.model.__name__,
+                    "protected_fields": protected_fields,
                 },
             )
 
@@ -199,6 +217,7 @@ class BaseRepository(Generic[T]):
 
         strict=True 时，不存在则抛出 NotFoundError。
         refresh 参数含义同 create。
+        通用 update 不允许空更新，也不允许直接改写系统字段。
         """
         obj = await self.get_by_id(id, strict=strict)
         if obj is None:
@@ -278,6 +297,9 @@ class SoftDeleteRepository(BaseRepository[T]):
                 f"{type(self).__name__} requires model {model.__name__} "
                 f"to define fields: {joined}"
             )
+
+    def _protected_update_fields(self) -> set[str]:
+        return super()._protected_update_fields() | {"is_deleted", "deleted_at"}
 
     async def get_by_id(
         self,
@@ -417,7 +439,7 @@ class VersionedRepository(SoftDeleteRepository[T]):
 
     用法:
         repo = VersionedRepository(session, Product)
-        product = await repo.update(1, stock=90)  # 自动检查并递增 version
+        product = await repo.update(1, expected_version=3, stock=90)  # 自动检查并递增 version
     """
 
     def __init__(self, session: AsyncSession, model: type[T]) -> None:
@@ -426,6 +448,9 @@ class VersionedRepository(SoftDeleteRepository[T]):
             raise TypeError(
                 f"{type(self).__name__} requires model {model.__name__} to define field: version"
             )
+
+    def _protected_update_fields(self) -> set[str]:
+        return super()._protected_update_fields() | {"version"}
 
     async def update(
         self,
@@ -570,7 +595,7 @@ async def _demo() -> None:
             p = await repo.create(Product(name="键盘", stock=100))
             print(f"  创建: name={p.name}, version={p.version}")
 
-            p = await repo.update(p.id, stock=90)
+            p = await repo.update(p.id, expected_version=p.version, stock=90)
             print(f"  更新: stock={p.stock}, version={p.version}")
 
     # 模拟乐观锁冲突

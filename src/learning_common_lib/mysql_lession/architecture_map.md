@@ -48,7 +48,7 @@
 | 架构层 | ORM 职责 | 教程示例 | 企业模板 |
 |--------|---------|---------|---------|
 | 连接层 | create_async_engine、连接池参数、pool_pre_ping | `01_connection/01, 02` | `db_engine.py` |
-| 模型层 | DeclarativeBase、Mapped[T]、Mixin 公共字段 | `02_model_definition/01, 02` | `base_model.py`, `mixins.py` |
+| 模型层 | DeclarativeBase、AsyncAttrs、Mapped[T]、Mixin 公共字段 | `02_model_definition/01, 02` | `base_model.py`, `mixins.py` |
 | 会话层 | AsyncSession 状态机、expire_on_commit | `04_session_lifecycle/01, 02` | `db_session.py` |
 | 查询层 | select/insert/update/delete、过滤分页聚合 | `03_crud_basics/01, 02`、`06_query_patterns/01, 02, 03` | — |
 | 事务层 | commit/rollback、begin_nested savepoint | `07_transactions/01, 02` | — |
@@ -56,7 +56,7 @@
 | 异常处理层 | 错误码注册、异常层级树、全局异常处理器 | — | `error_registry.py`, `error_base.py`, `error_handler.py` |
 | API 集成层 | Depends 注入 Session、完整 CRUD API | `10_fastapi_integration/01, 02` | `fastapi_db_middleware.py` |
 
-跨层关注点：关系映射（`05_relationships/`）横跨模型层和查询层；性能优化（`09_performance/`）横跨查询层和连接层；异常处理横跨仓储层和 API 集成层。
+跨层关注点：关系映射（`05_relationships/`）横跨模型层和查询层；性能优化（`09_performance/`）横跨查询层和连接层；异常处理横跨仓储层和 API 集成层。`MissingGreenlet` 就是“模型层默认 lazy + 查询层未显式加载策略”共同导致的典型问题。
 
 ---
 
@@ -90,16 +90,18 @@ engine = create_async_engine(
 
 - **使用 2.0 风格的 `Mapped[T]` + `mapped_column()`**，不要用旧的 `Column()` 风格
 - 公共字段（id、created_at、updated_at）抽取为 Mixin，所有模型继承
+- 异步项目的 Base 建议继承 `AsyncAttrs`，让模型具备 `awaitable_attrs`
 - 重要业务模型建议显式声明 `__tablename__`；模板也提供自动生成能力，便于教学和快速原型
-- 关系字段必须声明加载策略，不要依赖默认的 lazy loading
+- 关系字段必须声明加载策略，不要依赖默认的 lazy loading；团队默认推荐 `lazy="raise"`
 
 ```python
 from datetime import datetime
 
 from sqlalchemy import MetaData, func
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     metadata = MetaData(
         naming_convention={
             "pk": "pk_%(table_name)s",
@@ -140,6 +142,7 @@ async with async_session() as session:
 - 所有查询通过 `session.execute()` 执行，结果用 `scalars()` 提取 ORM 对象
 - 条件过滤使用 `where()` 而不是 `filter()`（两者等价，但 `where()` 是 2.0 推荐风格）
 - 关联查询必须显式指定加载策略（`selectinload` / `joinedload`）
+- 在异步里看到 `StatementError` 时要检查 `exc.orig`，根因往往是 `MissingGreenlet`
 
 ```python
 from sqlalchemy import select
@@ -179,6 +182,7 @@ async with session.begin():
 - 使用泛型基类 `BaseRepository[T]` 封装通用 CRUD，具体 Repository 继承并扩展
 - Repository 接收 Session 作为构造参数，不自己创建 Session
 - 软删除仓储应默认过滤已删除记录；乐观锁仓储应允许传入 `expected_version`
+- 通用 `update()` 不应允许改写 `id` / 时间戳 / 软删除字段 / `version` 等系统字段
 - Unit of Work 协调多个 Repository 的事务边界
 
 ```python
