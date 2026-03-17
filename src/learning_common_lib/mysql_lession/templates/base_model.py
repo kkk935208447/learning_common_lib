@@ -10,12 +10,8 @@ import asyncio
 from datetime import datetime
 
 from sqlalchemy import Integer, DateTime, MetaData, func
-from sqlalchemy.orm import (
-    DeclarativeBase,
-    Mapped,
-    mapped_column,
-    declared_attr,
-)
+from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 # 统一约束命名规范 — 让数据库生成的约束名可预测，便于 Alembic 迁移管理
 # 不设置的话，数据库会生成随机约束名，迁移脚本无法正确识别和比对
@@ -28,12 +24,16 @@ NAMING_CONVENTION = {
 }
 
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     """
     声明式基类，所有模型继承此类。
 
     自动将 CamelCase 类名转换为 snake_case 表名。
     例如: UserProfile → user_profile
+
+    同时继承 AsyncAttrs，模型会具备 awaitable_attrs 能力。
+    这能让关系属性在异步里显式 await 加载，但企业代码仍推荐：
+    relationship(..., lazy="raise") + 查询时 selectinload/joinedload 显式预加载。
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)

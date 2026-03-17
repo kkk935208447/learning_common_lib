@@ -4,7 +4,8 @@
 Python 版本: 3.11+
 运行命令: uv run python examples/05_relationships/02_many_to_many.py  (从 mysql_lession/ 目录)
 预期现象: 创建学生、课程、关联表，插入数据并建立多对多关系，双向查询并打印
-生产提醒: 关联表如需额外字段（如选课时间、成绩），应改用 Association Object 模式而非纯 secondary
+生产提醒: 关联表如需额外字段（如选课时间、成绩），应改用 Association Object 模式而非纯 secondary；
+    异步中不要依赖隐式 lazy loading，MissingGreenlet 的完整说明见 03_missing_greenlet_lazy_loading.py
 """
 
 import asyncio
@@ -47,6 +48,8 @@ class Student(Base):
     name: Mapped[str] = mapped_column(String(50), comment="学生姓名")
 
     # 多对多关系：通过 secondary 指定关联表
+    # lazy="raise" — 异步环境下必须显式加载（selectinload/joinedload），
+    #   防止意外触发隐式 SQL 导致 MissingGreenlet 错误
     courses: Mapped[list["Course"]] = relationship(
         secondary=student_course,
         back_populates="students",
@@ -107,6 +110,7 @@ async def main() -> None:
     # ── 从学生方向查询：每个学生选了哪些课 ──
     print("\n--- 学生 → 课程 ---")
     async with session_factory() as session:
+        # selectinload 是多对多集合关系在异步里最稳妥的默认选择
         stmt = (
             select(Student)
             .options(selectinload(Student.courses))

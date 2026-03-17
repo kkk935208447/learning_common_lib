@@ -5,6 +5,7 @@ Python 版本: 3.11+
 运行命令: uv run python examples/09_performance/01_eager_loading.py  (从 mysql_lession/ 目录)
 预期现象: 先展示 N+1 问题 (异步下直接报错)，再用 selectinload 和 joinedload 分别修复，打印 SQL 对比
 生产提醒: selectinload 适合一对多 (用 IN 子查询)；joinedload 适合多对一或数据量小的关系；大集合慎用 joinedload 会产生笛卡尔积
+    MissingGreenlet 的完整异常链路见 05_relationships/03_missing_greenlet_lazy_loading.py
 """
 
 import asyncio
@@ -110,7 +111,11 @@ async def main() -> None:
                 print(f"  {a.name}: {len(a.books)} 本书")
             except Exception as e:
                 print(f"  ❌ 访问 {a.name}.books 报错: {type(e).__name__}")
-                print(f"     异步 ORM 不支持隐式懒加载，必须使用预加载策略！")
+                original = getattr(e, 'orig', None)
+                if original is not None:
+                    print(f"     内层根因: {type(original).__name__}: {original}")
+                print("     异步 ORM 不支持隐式懒加载，必须使用预加载策略！")
+                print("     更完整的 MissingGreenlet 触发链路，请看 05_relationships/03_missing_greenlet_lazy_loading.py")
                 break
 
     # ── 2. selectinload 修复 ──

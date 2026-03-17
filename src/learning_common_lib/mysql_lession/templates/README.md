@@ -40,7 +40,7 @@ from templates.fastapi_db_middleware import db_lifespan, get_db_session
 | `__init__.py` | 公开 API 导出，分 core 层和集成层，附 `__all__` 列表 |
 | `db_engine.py` | 引擎创建与连接池配置，支持单例模式和环境变量读取 |
 | `db_session.py` | 异步 Session 工厂与生命周期管理（open/close），事务由调用方控制 |
-| `base_model.py` | 声明式基类与公共字段混入（id、created_at、updated_at） |
+| `base_model.py` | 声明式基类 + AsyncAttrs 与公共字段混入（id、created_at、updated_at） |
 | `mixins.py` | 可选混入：SoftDeleteMixin（软删除）、VersionMixin（乐观锁） |
 | `error_registry.py` | 错误码注册表，(code, message, http_status) 三元组 + 导入时唯一性校验 |
 | `error_base.py` | 异常层级树，AppError → ClientError/ServerError → 具体异常类 |
@@ -99,6 +99,45 @@ BaseRepository          — 基础 CRUD + 异常转换（适合大多数场景�
 - 需要软删除但不需要乐观锁 → `SoftDeleteRepository`
 - 需要全套企业级特性 → `VersionedRepository`
 
+## 异步关系加载与 MissingGreenlet
+
+模板的 `Base` 继承了 `AsyncAttrs`，所以模型天然具备 `awaitable_attrs`：
+
+```python
+posts = await user.awaitable_attrs.posts
+```
+
+这能帮助你在异步里显式加载关系，但不代表企业代码应该把关系加载分散在业务逻辑里。
+
+推荐默认规则：
+
+- 关系字段优先写 `lazy="raise"`，禁止隐式 lazy loading
+- 查询时显式使用 `selectinload()` / `joinedload()`
+- FastAPI / Pydantic 响应序列化前，必须把要输出的关系预加载好
+
+推荐写法：
+
+```python
+from sqlalchemy import ForeignKey, select
+from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
+
+class User(TimestampMixin, Base):
+    __tablename__ = "users"
+    name: Mapped[str] = mapped_column(String(50))
+    posts: Mapped[list["Post"]] = relationship(back_populates="author", lazy="raise")
+
+class Post(TimestampMixin, Base):
+    __tablename__ = "posts"
+    title: Mapped[str] = mapped_column(String(100))
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    author: Mapped[User] = relationship(back_populates="posts", lazy="raise")
+
+stmt = select(User).options(selectinload(User.posts))
+users = (await session.execute(stmt)).scalars().all()
+```
+
+如果你在异步中直接访问未加载关系，外层常常看到 `StatementError`，真正根因通常在 `exc.orig` 里的 `MissingGreenlet`。
+
 ## 快速上手
 
 ### 最小 CRUD
@@ -138,6 +177,8 @@ await repo.delete(1)          # 软删除
 await repo.get_by_id(1)       # None（默认不返回已删除记录）
 await repo.restore(1)         # 恢复
 await repo.hard_delete(1)     # 物理删除
+
+# 不要用 update(is_deleted=...) 绕过 delete()/restore()
 ```
 
 ### 乐观锁
@@ -155,6 +196,9 @@ try:
 except OptimisticLockError:
     # 重新读取最新版本后重试
     pass
+
+# version 只由 VersionedRepository 维护
+# 空更新和 update(version=...) 都会被视为非法请求
 ```
 
 ## 推荐阅读顺序
@@ -174,10 +218,13 @@ except OptimisticLockError:
 - [ ] `pool_pre_ping=True` 已开启
 - [ ] `pool_recycle` 小于 MySQL `wait_timeout`
 - [ ] `expire_on_commit=False` 已设置
+- [ ] 关系字段已明确选择加载策略（推荐 `lazy="raise"`）
+- [ ] 查询阶段已显式使用 `selectinload` / `joinedload`，不依赖响应序列化时隐式加载关系
 - [ ] 全局异常处理器已注册（`register_exception_handlers`）
 - [ ] RequestIdMiddleware 已添加（链路追踪）
 - [ ] Repository 层异常已转换（不泄漏 SQLAlchemy 异常给客户端）
 - [ ] `IntegrityError` 已按错误码细分，不把所有约束错误都误判为重复数据
 - [ ] 软删除数据有定期归档策略
 - [ ] 乐观锁更新明确携带 `expected_version`，并配套重试机制
+- [ ] 通用 `update()` 不被用于修改 `id` / 时间戳 / 软删除字段 / `version`
 - [ ] 表结构变更使用 Alembic 迁移
