@@ -44,11 +44,13 @@ except ImportError:
     from services import DocumentCommandService, JanitorService, OutboxDispatcherService, best_effort_dispatch_outbox
 
 
+# API 层只做协议适配和响应拼装，真正的状态推进仍然下沉到服务层。
 def ok(data: Any = None, message: str = "success") -> dict[str, Any]:
     return {"code": "OK", "message": message, "data": data}
 
 
 async def load_document_detail(session: AsyncSession, document_id: int) -> DocumentRead:
+    # 文档详情会顺带带出全部版本，方便 demo 直接观察状态机推进结果。
     doc_repo = DocumentRepository(session)
     version_repo = VersionRepository(session)
     document = await doc_repo.get_by_id(document_id)
@@ -69,6 +71,7 @@ async def load_document_detail(session: AsyncSession, document_id: int) -> Docum
 
 
 async def load_version_detail(session: AsyncSession, version_id: int) -> VersionRead:
+    # 单版本详情接口主要给运维和调试使用，不参与在线查询主链路。
     version_repo = VersionRepository(session)
     version = await version_repo.get_by_id(version_id)
     if version is None:
@@ -122,6 +125,7 @@ async def upload_document(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # 上传接口保持瘦身，只负责收文件并调用写侧服务。
     # demo 仍采用整文件读入，便于把校验、哈希和对象写入串成清晰主路径。
     content = await file.read()
     service = DocumentCommandService(session, build_object_storage())
@@ -164,6 +168,7 @@ async def delete_document(
     document_id: int,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # 删除请求本身只把文档推入 DELETE_PENDING/DELETING，再交给 Cleaner 异步收尾。
     service = DocumentCommandService(session, build_object_storage())
     await service.delete_document(document_id)
     return ok(message="删除请求已进入清理流水线")
@@ -174,6 +179,7 @@ async def rebuild_version(
     version_id: int,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # 手工重建依然通过 Outbox 发起，避免绕开统一异步入口。
     service = DocumentCommandService(session, build_object_storage())
     await service.request_rebuild(version_id)
     return ok(message="已写入 REBUILD_REQUESTED")

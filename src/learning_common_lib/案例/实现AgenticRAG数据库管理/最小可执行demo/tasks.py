@@ -36,6 +36,7 @@ except ImportError:
     from services import CleanupService, IndexPipelineService, JanitorService, OutboxDispatcherService, ParsePipelineService
     from task_queue import CeleryTaskQueueAdapter
 
+# tasks.py 只负责把 Celery 协议层接到服务层，不在这里重写业务逻辑。
 def _retry_countdown(retries: int) -> int:
     settings = get_settings()
     # 指数退避用最简单的 2^n 形式，足够演示 Celery 重试节奏。
@@ -49,6 +50,7 @@ def _should_retry(exc: Exception) -> bool:
 
 def _run_locked(lock_key: str | None, runner) -> dict[str, Any]:
     if lock_key is None:
+        # 某些任务允许并发执行时，直接运行即可，不额外申请排他锁。
         return asyncio.run(runner())
     settings = get_settings()
     lock = build_lock_port()
@@ -94,6 +96,7 @@ def dispatch_outbox(self: Any) -> dict[str, Any]:
 @celery_app.task(bind=True, name=TaskName.CLEAN_OUTBOX.value)
 def clean_outbox(self: Any) -> dict[str, Any]:
     async def _run() -> dict[str, Any]:
+        # Outbox 历史清理和主派发解耦，避免大批量删除影响实时投递。
         async with task_session_scope() as session:
             dispatcher = OutboxDispatcherService(session, CeleryTaskQueueAdapter())
             deleted = await dispatcher.cleanup_sent_history()
@@ -105,6 +108,7 @@ def clean_outbox(self: Any) -> dict[str, Any]:
 @celery_app.task(bind=True, name=TaskName.PARSE_VERSION.value)
 def parse_version(self: Any, version_id: int) -> dict[str, Any]:
     async def _run() -> dict[str, Any]:
+        # task 层只装配依赖，ParsePipelineService 才是实际的解析状态机。
         async with task_session_scope() as session:
             service = ParsePipelineService(session, build_object_storage())
             return await service.run(version_id)
@@ -115,6 +119,7 @@ def parse_version(self: Any, version_id: int) -> dict[str, Any]:
 @celery_app.task(bind=True, name=TaskName.INDEX_VERSION.value)
 def index_version(self: Any, version_id: int) -> dict[str, Any]:
     async def _run() -> dict[str, Any]:
+        # Index 任务在这里集中装配 embedding/vector/search 三类依赖。
         async with task_session_scope() as session:
             service = IndexPipelineService(
                 session,
@@ -130,6 +135,7 @@ def index_version(self: Any, version_id: int) -> dict[str, Any]:
 @celery_app.task(bind=True, name=TaskName.CLEAN_VERSION.value)
 def clean_version(self: Any, version_id: int) -> dict[str, Any]:
     async def _run() -> dict[str, Any]:
+        # Cleaner 不加版本级锁，原因是 dedupe_key 已经把同类清理请求压到很低。
         async with task_session_scope() as session:
             service = CleanupService(
                 session,

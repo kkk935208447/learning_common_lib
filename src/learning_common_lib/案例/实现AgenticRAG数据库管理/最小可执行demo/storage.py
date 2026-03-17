@@ -13,6 +13,7 @@ except ImportError:
     from config import get_settings
 
 
+# 对象存储接口故意保持很薄，方便后续替换成真实 OSS SDK。
 class BaseObjectStorage(ABC):
     @abstractmethod
     async def put(self, storage_key: str, content: bytes) -> None:
@@ -34,6 +35,7 @@ class BaseObjectStorage(ABC):
 class FileObjectStorage(BaseObjectStorage):
     def __init__(self, root_dir: Path | None = None) -> None:
         settings = get_settings()
+        # 文件系统 mock 让不同进程之间也能共享同一份“对象存储”状态。
         self.root_dir = root_dir or (settings.runtime_dir / "object_store")
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -41,6 +43,7 @@ class FileObjectStorage(BaseObjectStorage):
         return self.root_dir / storage_key
 
     def _resolve_for_write(self, storage_key: str) -> Path:
+        # 写入前保证目录结构存在，调用方不需要关心路径准备细节。
         path = self._path(storage_key)
         path.parent.mkdir(parents=True, exist_ok=True)
         return path

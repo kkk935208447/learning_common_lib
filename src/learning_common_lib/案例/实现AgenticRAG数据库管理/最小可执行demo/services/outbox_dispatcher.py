@@ -29,6 +29,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# Dispatcher 是 Outbox 到 Celery 之间的桥，不负责决定业务是否应该产生事件。
 class OutboxDispatcherService:
     def __init__(self, session: AsyncSession, task_queue) -> None:
         self.session = session
@@ -58,6 +59,7 @@ class OutboxDispatcherService:
         sent = 0
         for event in event_snapshots:
             try:
+                # 逐条派发并逐条更新状态，便于失败时保留精确的 event 级重试信息。
                 task_id = await self._dispatch_one(event)
                 sent += 1
                 await self._mark_event_sent(event_id=event["event_id"], task_id=task_id)
@@ -88,6 +90,7 @@ class OutboxDispatcherService:
         return await repo.count_pending()
 
     async def _dispatch_one(self, event: dict[str, Any]) -> str | None:
+        # eager 模式与 Celery 模式共用同一套事件数据结构，只在这里分岔执行方式。
         if get_settings().celery_eager:
             # eager 模式直接在当前进程里执行，便于 demo_flow 这种单进程回归脚本快速闭环。
             await execute_local_task(
@@ -121,6 +124,7 @@ class OutboxDispatcherService:
             if event is None:
                 return
             event.publish_status = PublishStatus.FAILED
+            # 失败后统一写 next_retry_at，Dispatcher 下一轮扫描时就能自动跳过未到期事件。
             event.next_retry_at = utcnow() + timedelta(seconds=get_settings().task_retry_base_seconds)
 
 
@@ -149,6 +153,7 @@ async def best_effort_dispatch_outbox(limit: int = 100) -> None:
 
 
 async def execute_local_task(task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    # 本地执行器只给 eager 模式和单进程演示脚本使用，不替代正式 worker。
     async with session_scope() as session:
         if task_name == TaskName.PARSE_VERSION.value:
             try:

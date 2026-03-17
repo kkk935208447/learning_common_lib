@@ -14,6 +14,7 @@ except ImportError:
     from config import get_settings
 
 
+# 向量库接口只暴露 demo 当前需要的最小读写能力。
 class BaseVectorStore(ABC):
     @abstractmethod
     async def upsert_chunks(self, version_id: int, records: list[dict]) -> None:
@@ -35,6 +36,7 @@ class BaseVectorStore(ABC):
 class FileVectorStore(BaseVectorStore):
     def __init__(self, root_dir: Path | None = None) -> None:
         settings = get_settings()
+        # 每个 chunk 一个 JSON 文件，能直观看到投影结果，也方便手工篡改做 Janitor 演示。
         self.root_dir = root_dir or (settings.runtime_dir / "vector_store")
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -54,6 +56,7 @@ class FileVectorStore(BaseVectorStore):
 
     async def delete_by_version(self, version_id: int) -> None:
         def _delete() -> None:
+            # 删除策略按 version_id 扫描，强调“索引投影可由 version 粒度整体回收”。
             for path in self.root_dir.glob("*.json"):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if payload.get("version_id") == version_id:
@@ -75,6 +78,7 @@ class FileVectorStore(BaseVectorStore):
 
     async def remove_one_for_version(self, version_id: int) -> bool:
         def _remove() -> bool:
+            # 这个辅助方法只给 demo_flow 做故障注入，正常主流程不会调用。
             for path in self.root_dir.glob("*.json"):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if payload.get("version_id") == version_id:

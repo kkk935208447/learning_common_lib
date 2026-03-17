@@ -13,6 +13,7 @@ except ImportError:
     from enums import QueueName, TaskName
 
 
+# Celery app 运行时配置统一收口在这里，CLI 入口和代码调用都复用同一实例。
 settings = get_settings()
 
 celery_app = Celery(
@@ -45,6 +46,7 @@ celery_app.conf.update(
         },
         "clean-sent-outbox-daily": {
             "task": TaskName.CLEAN_OUTBOX.value,
+            # 历史清理任务不追求准点，固定 24 小时轮询已经足够。
             "schedule": schedule(run_every=24 * 60 * 60),
         },
     },

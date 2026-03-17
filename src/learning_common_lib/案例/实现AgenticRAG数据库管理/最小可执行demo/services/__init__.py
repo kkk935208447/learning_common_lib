@@ -1,5 +1,6 @@
 """Lazy exports for the service layer so script mode and package mode stay lightweight."""
 
+# 这里的导出层只做懒加载转发，避免脚本模式一上来把所有依赖链都 import 进去。
 __all__ = [
     "CleanupService",
     "DocumentCommandService",

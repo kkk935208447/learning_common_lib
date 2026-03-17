@@ -28,6 +28,7 @@ except ImportError:
 
 
 def reset_runtime_dir() -> None:
+    # eager 自测会直接读写本地 mock 存储，因此每次都把 runtime 目录清空最直观。
     runtime_dir = get_settings().runtime_dir
     if runtime_dir.exists():
         shutil.rmtree(runtime_dir)
@@ -35,6 +36,7 @@ def reset_runtime_dir() -> None:
 
 
 async def print_document_state(document_id: int) -> None:
+    # 这里打印的是业务态快照，而不是 task 明细，便于对照 README 看状态跃迁。
     async with session_scope() as session:
         doc_repo = DocumentRepository(session)
         version_repo = VersionRepository(session)
@@ -64,6 +66,7 @@ async def print_document_state(document_id: int) -> None:
 
 
 async def print_outbox_state() -> None:
+    # 顺手把 Outbox 打印出来，可以验证 eager 模式仍然保留事务消息边界。
     async with session_scope() as session:
         events = list((await session.scalars(select(OutboxEvent).order_by(OutboxEvent.id.asc()))).all())
         print(
@@ -118,6 +121,7 @@ async def main() -> None:
 
     vector_store = build_vector_store()
     search_store = build_search_store()
+    # 人为删掉一个向量投影，模拟 Janitor 发现“事实表与投影 count 不一致”的场景。
     removed = await vector_store.remove_one_for_version(outcome.version_id)
     print({"tamper_vector_store": removed})
 

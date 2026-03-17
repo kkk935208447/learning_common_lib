@@ -51,6 +51,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# IndexPipelineService 负责把 MySQL chunks 投影到向量库和搜索库，并切换 active version。
 class IndexPipelineService:
     def __init__(
         self,
@@ -79,11 +80,13 @@ class IndexPipelineService:
                 raise ValidationError("版本尚未解析成功，不能建立索引")
             if version.index_status == IndexStatus.SUCCESS and version.visibility_status == VisibilityStatus.ACTIVE:
                 return {"version_id": version_id, "status": "already_indexed"}
+            # 先占住 RUNNING 状态，避免多个 worker 同时认为自己是“第一个索引者”。
             version.index_status = IndexStatus.RUNNING
             version.row_version += 1
 
         try:
             async with self.session.begin():
+                # chunk 读取仍然走数据库事实表，而不是依赖 parser 的中间内存结果。
                 chunks = await chunk_repo.list_by_version(version_id)
             # 投影写入放在事务外，避免把外部 IO 包进数据库锁窗口。
             vectors = await self.embedding_provider.embed([chunk.content for chunk in chunks])
@@ -156,6 +159,7 @@ class IndexPipelineService:
             await best_effort_dispatch_outbox()
             return {"version_id": version_id, "status": "indexed", "chunk_count": len(chunks)}
         except Exception as exc:
+            # 清理半成功投影是 index 失败补偿的核心，否则 Janitor 只能看到持续脏数据。
             # 一旦索引链路失败，先尽力删除已写入的投影，避免 Janitor 看到“半成功”状态。
             await self.vector_store.delete_by_version(version_id)
             await self.search_store.delete_by_version(version_id)

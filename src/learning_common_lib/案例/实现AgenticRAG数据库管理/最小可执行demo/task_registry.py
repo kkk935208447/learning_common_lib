@@ -9,6 +9,7 @@ _TASKS_DISCOVERED = False
 
 
 def iter_task_module_names() -> tuple[str, ...]:
+    # 根据当前导入方式推导任务模块名，兼容包内运行和脚本目录运行。
     package_name = __package__
     if package_name:
         return (f"{package_name}.tasks",)

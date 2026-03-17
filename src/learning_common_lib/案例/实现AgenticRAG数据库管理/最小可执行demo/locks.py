@@ -13,6 +13,7 @@ except ImportError:
     from config import get_settings
 
 
+# 锁适配器只提供 try_lock/release 两个动作，够支撑 dispatcher leader 和任务排他。
 class BaseDistributedLock(ABC):
     @abstractmethod
     def try_lock(self, key: str, ttl_seconds: int) -> str | None:
@@ -26,6 +27,7 @@ class BaseDistributedLock(ABC):
 class RedisDistributedLock(BaseDistributedLock):
     def __init__(self) -> None:
         settings = get_settings()
+        # 锁和 broker/backend 分库，便于演示不同 Redis 用途的边界。
         self.client = Redis.from_url(settings.redis_lock_url, decode_responses=True)
 
     def try_lock(self, key: str, ttl_seconds: int) -> str | None:

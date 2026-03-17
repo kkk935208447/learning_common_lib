@@ -11,6 +11,7 @@ except ImportError:
     from config import get_settings
 
 
+# embedding 接口和实现拆开，是为了让 index 流程不直接依赖某个具体模型。
 class BaseEmbeddingProvider(ABC):
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -29,6 +30,7 @@ class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
             digest = hashlib.sha256(text.encode("utf-8")).digest()
             vector = []
             for idx in range(self.dim):
+                # 这里只取 digest 的前 dim 个字节，目标是稳定而不是语义质量。
                 byte = digest[idx]
                 vector.append(round(byte / 255.0, 6))
             vectors.append(vector)

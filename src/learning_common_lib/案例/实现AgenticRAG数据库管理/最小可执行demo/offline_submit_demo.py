@@ -24,6 +24,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# 这两个快照 dataclass 用于把数据库当前状态打平成日志友好的结构。
 @dataclass
 class VersionSnapshot:
     version_id: int
@@ -49,6 +50,7 @@ class DocumentSnapshot:
 
 
 async def load_document_snapshot(document_id: int) -> DocumentSnapshot:
+    # 每次轮询都重新开 session 读取，避免把过期 ORM 对象缓存成“旧状态”。
     async with session_scope() as session:
         doc_repo = DocumentRepository(session)
         version_repo = VersionRepository(session)
@@ -96,6 +98,7 @@ def is_upload_finished(snapshot: DocumentSnapshot) -> bool:
 
 
 def is_delete_finished(snapshot: DocumentSnapshot) -> bool:
+    # 删除完成的判定故意只看 document 生命周期，符合外部调用方视角。
     return snapshot.lifecycle_status == DocumentLifecycleStatus.DELETED.value
 
 
@@ -107,6 +110,7 @@ async def wait_until(
     timeout_seconds: int = 60,
     interval_seconds: int = 2,
 ) -> DocumentSnapshot:
+    # 这里用定时轮询替代事件订阅，是为了让脚本保持最小依赖和最强可读性。
     loops = max(timeout_seconds // interval_seconds, 1)
     last_snapshot: DocumentSnapshot | None = None
     for _ in range(loops):
@@ -122,6 +126,7 @@ async def wait_until(
 async def submit_upload() -> tuple[int, int]:
     external_doc_key = f"offline-demo-doc-{uuid4().hex[:8]}"
     async with session_scope() as session:
+        # 离线提交脚本直接调用服务层，绕过 API，适合验证 DB + Worker 组合是否正常。
         service = DocumentCommandService(session, build_object_storage())
         outcome = await service.upload_document(
             external_doc_key=external_doc_key,

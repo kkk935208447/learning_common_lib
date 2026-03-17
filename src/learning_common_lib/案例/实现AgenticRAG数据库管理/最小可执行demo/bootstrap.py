@@ -18,6 +18,7 @@ except ImportError:
     from vector_store import FileVectorStore
 
 
+# 这个模块就是 demo 的“手写组装根”，负责把具体适配器实例化出来。
 def build_object_storage() -> FileObjectStorage:
     # demo 保持“显式 new 对象”的简单工厂，不引入更重的依赖注入框架。
     return FileObjectStorage()
@@ -32,6 +33,7 @@ def build_search_store() -> FileSearchStore:
 
 
 def build_embedding_provider() -> DeterministicEmbeddingProvider:
+    # embedding provider 也通过工厂暴露，后续替换真实模型时不需要改调用方。
     return DeterministicEmbeddingProvider()
 
 

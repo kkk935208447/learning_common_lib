@@ -57,6 +57,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# ParsePipelineService 负责把 READY 源文件转成 MySQL chunk 事实数据。
 class ParsePipelineService:
     def __init__(self, session: AsyncSession, object_storage: BaseObjectStorage) -> None:
         self.session = session
@@ -74,6 +75,7 @@ class ParsePipelineService:
                 raise ValidationError("版本源文件尚未就绪，不能开始解析")
             if version.parse_status == ParseStatus.SUCCESS:
                 return {"version_id": version_id, "status": "already_parsed"}
+            # 先把状态切到 RUNNING，再离开事务做对象读取和解析计算。
             version.parse_status = ParseStatus.RUNNING
             version.row_version += 1
 
@@ -132,6 +134,7 @@ class ParsePipelineService:
             await best_effort_dispatch_outbox()
             return {"version_id": version_id, "chunk_count": len(chunks), "status": "parsed"}
         except Exception as exc:
+            # 失败时只回写状态和错误信息，不在这里吞异常，交给 task 层决定是否重试。
             async with self.session.begin():
                 version = await version_repo.get_by_id(version_id, for_update=True)
                 if version is not None:

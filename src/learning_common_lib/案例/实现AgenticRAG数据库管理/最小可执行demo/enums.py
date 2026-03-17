@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import Enum
 
 
+# 所有跨模块共享的状态值都集中放这里，避免服务层散落字符串字面量。
 class DocumentLifecycleStatus(str, Enum):
     # 面向 document 级别的生命周期：逻辑文档是否仍对外存在。
     ACTIVE = "ACTIVE"
@@ -55,6 +56,7 @@ class VisibilityStatus(str, Enum):
 
 
 class AggregateType(str, Enum):
+    # aggregate_type 让 Outbox 事件能标明自己附着在哪类实体上。
     DOCUMENT = "DOCUMENT"
     DOCUMENT_VERSION = "DOCUMENT_VERSION"
 

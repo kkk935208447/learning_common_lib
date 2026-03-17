@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BASE_DIR = Path(__file__).resolve().parent
 
 
+# 统一把环境变量解析、默认值和派生连接串收口在一个 Settings 对象里。
 class Settings(BaseSettings):
     # demo 统一用 `MIN_RAG_` 前缀，方便和仓库里其他案例共存。
     model_config = SettingsConfigDict(
@@ -109,6 +110,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    # 全局只构造一份配置，避免重复读取环境变量和重复创建 runtime 目录。
     settings = Settings()
     # 初始化时顺手保证运行时目录存在，避免每个适配器都重复 mkdir。
     settings.runtime_dir.mkdir(parents=True, exist_ok=True)

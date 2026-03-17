@@ -18,6 +18,7 @@ except ImportError:
     from errors import FileTooLargeError, UnsupportedMediaTypeError, ValidationError
 
 
+# common.py 集中保存跨服务复用的“小而关键”的规则函数，避免状态机细节四处复制。
 def utcnow():
     from datetime import datetime
 
@@ -48,6 +49,7 @@ def build_parser_config_hash() -> str:
 
 
 def sanitize_file_name(file_name: str) -> str:
+    # 这里只保留纯文件名，避免上传时把本地路径片段写进 storage_key。
     raw_name = Path(file_name or "unnamed.txt").name.strip()
     return raw_name or "unnamed.txt"
 
@@ -124,6 +126,7 @@ def _parse_pdf_to_text(content: bytes) -> str:
 
 def parse_bytes_to_text(content: bytes, mime_type: str) -> str:
     normalized_mime_type = normalize_mime_type(mime_type)
+    # 解析策略刻意写死在这里，方便读者顺着一个入口看清 MIME -> parser 的分派逻辑。
     if normalized_mime_type in {"text/plain", "text/markdown"}:
         return content.decode("utf-8", errors="ignore")
     if normalized_mime_type == "application/pdf":
@@ -133,6 +136,7 @@ def parse_bytes_to_text(content: bytes, mime_type: str) -> str:
 
 def next_retry_delay(retries: int) -> int:
     settings = get_settings()
+    # retries 从 1 开始更符合“第一次失败后的等待时间”直觉。
     return settings.task_retry_base_seconds * (2 ** max(retries - 1, 0))
 
 
@@ -151,6 +155,7 @@ def build_outbox_event(
     except ImportError:
         from models import OutboxEvent
 
+    # 事件构造统一走这个函数，能保证 task_name/queue_name/dedupe_key 的约束风格一致。
     # Outbox 事件默认就是 PENDING；是否真正发出由 dispatcher 再决定。
     return OutboxEvent(
         aggregate_type=aggregate_type,
@@ -166,6 +171,7 @@ def build_outbox_event(
 
 
 def should_dispatch_event(*, publish_status: PublishStatus, next_retry_at) -> bool:
+    # Dispatcher 是否该重发事件，只依赖当前发布状态和时间窗口。
     if publish_status == PublishStatus.PENDING:
         return True
     if publish_status == PublishStatus.FAILED:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+# 领域异常统一走这条继承链，便于 API 和任务层共享一套错误语义。
 class DemoError(Exception):
     def __init__(self, message: str, *, code: str = "INTERNAL_ERROR") -> None:
         super().__init__(message)
@@ -17,6 +18,7 @@ class NotFoundError(DemoError):
 
 
 class ConflictError(DemoError):
+    # 冲突错误主要表达“状态不允许当前动作”，比如存在在途版本时重复上传。
     def __init__(self, message: str) -> None:
         super().__init__(message, code="CONFLICT")
 

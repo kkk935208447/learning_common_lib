@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+# 任务队列抽象把“生成异步任务”与“具体由 Celery 还是本地执行”隔开。
 class BaseTaskQueue(ABC):
     @abstractmethod
     def dispatch(
@@ -44,6 +45,7 @@ class CeleryTaskQueueAdapter(BaseTaskQueue):
         return result.id
 
     def dispatch_batch(self, events: list[dict[str, Any]]) -> list[str | None]:
+        # 批量派发本质仍是逐条投递，保持实现简单并复用单条派发逻辑。
         return [
             self.dispatch(
                 task_name=event["task_name"],
@@ -57,6 +59,7 @@ class CeleryTaskQueueAdapter(BaseTaskQueue):
 
 class InMemoryTaskQueueAdapter(BaseTaskQueue):
     def __init__(self) -> None:
+        # 内存适配器只记录事件快照，方便 eager 模式和测试断言。
         self.events: list[dict[str, Any]] = []
 
     def dispatch(

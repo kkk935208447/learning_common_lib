@@ -14,6 +14,7 @@ except ImportError:
     from config import get_settings
 
 
+# 搜索库 mock 与向量库 mock 保持对称接口，便于 index/cleanup 统一处理。
 class BaseSearchStore(ABC):
     @abstractmethod
     async def upsert_chunks(self, version_id: int, docs: list[dict]) -> None:
@@ -31,6 +32,7 @@ class BaseSearchStore(ABC):
 class FileSearchStore(BaseSearchStore):
     def __init__(self, root_dir: Path | None = None) -> None:
         settings = get_settings()
+        # 文本投影落文件后，排查时可以直接打开 JSON 看内容和元数据。
         self.root_dir = root_dir or (settings.runtime_dir / "search_store")
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,6 +52,7 @@ class FileSearchStore(BaseSearchStore):
 
     async def delete_by_version(self, version_id: int) -> None:
         def _delete() -> None:
+            # 这里和向量库一样按 version 粒度清理，保证两个投影侧行为一致。
             for path in self.root_dir.glob("*.json"):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 if payload.get("version_id") == version_id:

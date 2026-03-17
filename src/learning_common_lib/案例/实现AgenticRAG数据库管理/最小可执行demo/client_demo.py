@@ -15,6 +15,7 @@ except ImportError:
 
 
 def print_section(title: str) -> None:
+    # 输出分段标题，方便肉眼跟踪一整条 HTTP 烟雾测试链路。
     print(f"\n=== {title} ===")
 
 
@@ -48,6 +49,7 @@ async def wait_for_condition(
 
 
 async def print_admin_stats(client: httpx.AsyncClient) -> None:
+    # 统计接口能快速判断 Outbox 是否堆积、解析/索引是否出现失败。
     response = await client.get("/admin/stats")
     response.raise_for_status()
     print(response.json()["data"])
@@ -118,6 +120,7 @@ async def main() -> None:
         await print_admin_stats(client)
 
         print_section("手动触发 Janitor")
+        # 正常情况下这里不会修复任何东西，这一步主要验证管理接口是否通。
         response = await client.post("/admin/janitor/run")
         response.raise_for_status()
         print(response.json()["data"])

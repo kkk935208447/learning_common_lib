@@ -15,6 +15,7 @@ except ImportError:
     from models import Document, DocumentChunk, DocumentVersion, OutboxEvent
 
 
+# Repository 层只封装重复查询，不承接复杂业务判断。
 class BaseRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -72,6 +73,7 @@ class VersionRepository(BaseRepository):
         return await self.session.scalar(stmt)
 
     async def list_versions_for_document_cleanup(self, document_id: int) -> list[DocumentVersion]:
+        # 清理阶段只关心“还没被标记成彻底删除”的版本。
         stmt = (
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)
@@ -102,6 +104,7 @@ class VersionRepository(BaseRepository):
 
 class ChunkRepository(BaseRepository):
     async def replace_for_version(self, version_id: int, chunks: list[DocumentChunk]) -> None:
+        # 先删后插的策略更适合 demo，能清楚表达“重跑解析会完全覆盖事实数据”。
         await self.session.execute(delete(DocumentChunk).where(DocumentChunk.version_id == version_id))
         self.session.add_all(chunks)
 
@@ -116,6 +119,7 @@ class ChunkRepository(BaseRepository):
 
 class OutboxRepository(BaseRepository):
     async def list_ready(self, limit: int) -> list[OutboxEvent]:
+        # Dispatcher 只看待发和待重试事件，历史 SENT 事件由清理任务回收。
         stmt = (
             select(OutboxEvent)
             .where(OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED)))
@@ -140,6 +144,7 @@ class OutboxRepository(BaseRepository):
         return int((await self.session.scalar(stmt)) or 0)
 
     async def cleanup_sent_older_than(self, days: int) -> int:
+        # 这个方法让 Outbox 历史回收逻辑留在仓储层，而不是散在 Beat/task 中拼 SQL。
         cutoff = datetime.utcnow() - timedelta(days=days)
         stmt = (
             delete(OutboxEvent)

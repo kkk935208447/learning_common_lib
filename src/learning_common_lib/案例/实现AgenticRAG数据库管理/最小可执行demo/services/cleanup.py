@@ -26,6 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# CleanupService 负责异步回收旧版本或已删除文档关联的所有外部资源。
 class CleanupService:
     def __init__(
         self,
@@ -49,6 +50,7 @@ class CleanupService:
                 raise NotFoundError(f"version {version_id} 不存在")
             storage_key = version.storage_key
 
+        # 先删外部资源，再回写数据库状态，能明确表达“数据库记录是真理源，外部系统只是投影”。
         # 外部投影和对象清理放在事务外，避免把文件系统/外部 IO 放进数据库锁窗口。
         await self.vector_store.delete_by_version(version_id)
         await self.search_store.delete_by_version(version_id)

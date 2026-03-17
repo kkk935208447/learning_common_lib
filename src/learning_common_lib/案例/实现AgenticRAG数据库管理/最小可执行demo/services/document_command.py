@@ -64,6 +64,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# 上传结果对象把“新建版本”和“命中幂等复用”两种结果统一封装起来。
 @dataclass
 class UploadOutcome:
     document_id: int
@@ -98,6 +99,7 @@ class DocumentCommandService:
         doc_repo = DocumentRepository(self.session)
         version_repo = VersionRepository(self.session)
 
+        # 先准备好几个跨事务共享的局部变量，后续分别承接幂等复用或新建版本两条路径。
         reuse_outcome: UploadOutcome | None = None
         version_id: int | None = None
         document_id: int | None = None
@@ -133,6 +135,7 @@ class DocumentCommandService:
                     message="命中相同 file_hash，复用当前活动版本",
                 )
             else:
+                # 只有确认不是幂等复用后，才分配新的 version_no 和正式 storage_key。
                 next_version_no = document.latest_version_no + 1
                 storage_key = build_storage_key(document.id, next_version_no, normalized_file_name)
                 version = DocumentVersion(
@@ -234,6 +237,7 @@ class DocumentCommandService:
         )
 
     async def delete_document(self, document_id: int) -> None:
+        # 删除命令只做状态切换和投递清理事件，真实资源删除交给 Cleaner。
         doc_repo = DocumentRepository(self.session)
         version_repo = VersionRepository(self.session)
         async with self.session.begin():
@@ -249,6 +253,7 @@ class DocumentCommandService:
 
             versions = await version_repo.list_versions_for_document_cleanup(document.id)
             for version in versions:
+                # 每个未删版本都各自投递 CLEAN_REQUESTED，保证清理具备 version 级幂等。
                 version.visibility_status = VisibilityStatus.DELETE_PENDING
                 if version.storage_status != StorageStatus.DELETED:
                     version.storage_status = StorageStatus.DELETE_PENDING
@@ -269,6 +274,7 @@ class DocumentCommandService:
         await best_effort_dispatch_outbox()
 
     async def request_rebuild(self, version_id: int) -> None:
+        # 手工重建总是生成新的 dedupe_key，这样同一版本可以被多次人工触发修复。
         version_repo = VersionRepository(self.session)
         async with self.session.begin():
             version = await version_repo.get_by_id(version_id, for_update=True)
@@ -290,6 +296,7 @@ class DocumentCommandService:
         await best_effort_dispatch_outbox()
 
     async def _mark_version_upload_failed(self, version_id: int, error_message: str) -> None:
+        # 上传失败补偿前先 rollback，确保脱离之前可能已经中断的事务上下文。
         await self.session.rollback()
         version_repo = VersionRepository(self.session)
         async with self.session.begin():

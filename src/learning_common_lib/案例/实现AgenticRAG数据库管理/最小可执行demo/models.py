@@ -37,6 +37,7 @@ class Base(DeclarativeBase):
     pass
 
 
+# 共享时间戳 mixin，避免 4 张核心表重复声明相同列。
 class TimestampMixin:
     # 所有核心表统一带上 created_at / updated_at，方便演示状态推进时间线。
     created_at: Mapped[datetime] = mapped_column(
@@ -130,6 +131,7 @@ class DocumentVersion(TimestampMixin, Base):
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
     last_error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     retry_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    # row_version 在 demo 里主要用来显式呈现状态变更次数，方便观察并发更新。
     row_version: Mapped[int] = mapped_column(default=0, nullable=False)
 
 
@@ -139,6 +141,7 @@ class DocumentChunk(TimestampMixin, Base):
         UniqueConstraint("version_id", "chunk_no", name="uq_rag_min_demo_chunks_ver_chunk"),
     )
 
+    # Chunk 表保存的是 MySQL 中的事实数据，向量库和搜索库都可以从这里重建。
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     version_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -169,6 +172,7 @@ class OutboxEvent(TimestampMixin, Base):
         default=PublishStatus.PENDING,
         nullable=False,
     )
+    # 可用时间与下次重试时间分开保存，便于 Dispatcher 统一处理首次投递和失败重试。
     available_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

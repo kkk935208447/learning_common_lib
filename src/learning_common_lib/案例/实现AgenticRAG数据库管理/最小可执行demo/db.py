@@ -22,6 +22,7 @@ _session_factory = None
 
 
 def build_engine(dsn: str | None = None):
+    # 这里保留一个轻量工厂，既能给全局 engine 用，也能给 task 独立建连接。
     settings = get_settings()
     return create_async_engine(dsn or settings.mysql_dsn, echo=False, pool_pre_ping=True)
 
@@ -34,6 +35,7 @@ def get_engine():
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    # API 请求优先复用同一套 session factory，减少重复初始化成本。
     global _session_factory
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
@@ -65,6 +67,7 @@ async def ensure_database_exists() -> None:
 
 
 async def create_tables() -> None:
+    # 首次启动或脚本演示时先保证数据库存在，再按 ORM 元数据建表。
     await ensure_database_exists()
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -92,6 +95,7 @@ async def drop_tables() -> None:
 
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
+    # 通用 session_scope 主要给 API 和本地脚本使用。
     session = get_session_factory()()
     try:
         yield session
@@ -121,5 +125,6 @@ async def dispose_engine() -> None:
 
 
 async def get_db_session(_: Request) -> AsyncIterator[AsyncSession]:
+    # FastAPI 依赖项只负责交付 session，不在这里额外引入事务语义。
     async with session_scope() as session:
         yield session

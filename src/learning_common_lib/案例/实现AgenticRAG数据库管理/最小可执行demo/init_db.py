@@ -13,6 +13,7 @@ except ImportError:
 
 
 async def main() -> None:
+    # init_db 的目标是“一次清空再重建”，适合教学 demo 的重复回放。
     settings = get_settings()
     # demo 目录强调“可重复重跑”，因此 init_db 直接走 drop + create。
     await drop_tables()

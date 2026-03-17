@@ -25,6 +25,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# JanitorService 只做轻量对账和发起修复，不直接承担重建执行。
 class JanitorService:
     def __init__(
         self,
@@ -57,6 +58,7 @@ class JanitorService:
             if mysql_count != vector_count or mysql_count != search_count:
                 versions_to_rebuild.append(version.id)
 
+        # 前面读取结束后先回滚当前事务，避免带着只读事务去写新的 Outbox 事件。
         await self.session.rollback()
         async with self.session.begin():
             # Janitor 自己不直接重建，而是仍通过 Outbox 进入统一异步链路。
