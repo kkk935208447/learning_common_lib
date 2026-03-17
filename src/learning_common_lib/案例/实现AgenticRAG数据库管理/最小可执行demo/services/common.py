@@ -22,14 +22,17 @@ except ImportError:
 def utcnow():
     from datetime import datetime
 
+    # 统一放一个 helper，方便将来替换成时区感知时间或注入测试时钟。
     return datetime.utcnow()
 
 
 def sha256_text(value: str) -> str:
+    # 文本哈希主要用于 chunk_hash 和 parser 配置哈希。
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def sha256_bytes(value: bytes) -> str:
+    # 文件哈希用于上传幂等判断和对象写入回读校验。
     return hashlib.sha256(value).hexdigest()
 
 
@@ -55,6 +58,7 @@ def sanitize_file_name(file_name: str) -> str:
 
 
 def normalize_mime_type(mime_type: str | None) -> str:
+    # MIME 统一转小写并去掉空白，减少调用端传值差异带来的分支膨胀。
     value = (mime_type or "application/octet-stream").strip().lower()
     return value or "application/octet-stream"
 
@@ -109,6 +113,7 @@ def chunk_text(content: str) -> list[str]:
         chunk = stripped[start:end].strip()
         if chunk:
             chunks.append(chunk)
+        # overlap 的效果体现在 step 上，而不是对 chunk 结果再做后处理。
         start += step
     return chunks
 
@@ -119,6 +124,7 @@ def _parse_pdf_to_text(content: bytes) -> str:
     except ImportError as exc:
         raise ValidationError("当前环境未安装 pypdf，无法解析 PDF") from exc
 
+    # PDF 解析保持最小实现：抽文本即可，不处理复杂版面和 OCR。
     reader = PdfReader(BytesIO(content))
     pages = [page.extract_text() or "" for page in reader.pages]
     return "\n".join(text.strip() for text in pages if text.strip())
@@ -177,6 +183,7 @@ def should_dispatch_event(*, publish_status: PublishStatus, next_retry_at) -> bo
     if publish_status == PublishStatus.FAILED:
         # 失败事件只有到达 next_retry_at 才允许再次派发，避免重试风暴。
         if next_retry_at is None:
+            # 历史脏数据如果没写 next_retry_at，也允许重新被扫描出来。
             return True
         return next_retry_at <= utcnow()
     return False

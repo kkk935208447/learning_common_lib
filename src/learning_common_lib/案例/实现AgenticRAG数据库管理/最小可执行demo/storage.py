@@ -40,6 +40,7 @@ class FileObjectStorage(BaseObjectStorage):
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, storage_key: str) -> Path:
+        # storage_key 和磁盘路径 1:1 对应，便于肉眼从目录结构看出文档版本关系。
         return self.root_dir / storage_key
 
     def _resolve_for_write(self, storage_key: str) -> Path:
@@ -67,7 +68,9 @@ class FileObjectStorage(BaseObjectStorage):
     async def delete(self, storage_key: str) -> None:
         path = self._path(storage_key)
         if path.exists():
+            # 删除采用“存在才删”的宽松语义，避免清理任务因为对象已不存在而失败。
             await asyncio.to_thread(path.unlink)
 
     async def exists(self, storage_key: str) -> bool:
+        # exists 主要给上传后回读校验或测试场景使用。
         return self._path(storage_key).exists()

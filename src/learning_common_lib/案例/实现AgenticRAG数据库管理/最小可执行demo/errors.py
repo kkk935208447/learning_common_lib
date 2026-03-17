@@ -24,6 +24,7 @@ class ConflictError(DemoError):
 
 
 class ValidationError(DemoError):
+    # 参数校验失败统一落成 400，避免和状态冲突类错误混淆。
     def __init__(self, message: str) -> None:
         super().__init__(message, code="VALIDATION_ERROR")
 
@@ -34,6 +35,7 @@ class UnsupportedMediaTypeError(DemoError):
 
 
 class FileTooLargeError(DemoError):
+    # 文件过大单独保留错误类型，API 层可翻成更准确的 413。
     def __init__(self, message: str) -> None:
         super().__init__(message, code="FILE_TOO_LARGE")
 

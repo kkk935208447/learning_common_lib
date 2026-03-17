@@ -75,6 +75,7 @@ class UploadOutcome:
 
 class DocumentCommandService:
     def __init__(self, session: AsyncSession, object_storage: BaseObjectStorage) -> None:
+        # session 由外部注入，这样 API、脚本、测试都能复用同一服务实现。
         self.session = session
         self.object_storage = object_storage
 
@@ -95,6 +96,7 @@ class DocumentCommandService:
         )
         file_hash = sha256_bytes(content)
         parser_config_hash = build_parser_config_hash()
+        # 文件哈希和 parser 配置哈希都会固化到 version，后续用于幂等和重跑保护。
 
         doc_repo = DocumentRepository(self.session)
         version_repo = VersionRepository(self.session)
@@ -116,6 +118,7 @@ class DocumentCommandService:
                 )
                 self.session.add(document)
                 await self.session.flush()
+                # flush 后才能拿到 document.id，后续生成 storage_key 和 version 号都依赖它。
             else:
                 if document.lifecycle_status != DocumentLifecycleStatus.ACTIVE:
                     raise ConflictError("文档当前不允许上传新版本")
@@ -161,6 +164,7 @@ class DocumentCommandService:
 
                 document.title = title or document.title or normalized_file_name
                 document.latest_version_no = next_version_no
+                # row_version 递增只是显式记录“这行又被业务更新过一次”。
                 document.row_version += 1
 
                 document_id = document.id
@@ -201,6 +205,7 @@ class DocumentCommandService:
                     raise NotFoundError(f"version {version_id} 不存在")
                 version.storage_status = StorageStatus.READY
                 version.last_error_message = None
+                # 只有对象可读且状态成功切到 READY，才有资格发 parse 事件。
                 version.row_version += 1
                 self.session.add(
                     build_outbox_event(
@@ -245,6 +250,7 @@ class DocumentCommandService:
             if document is None:
                 raise NotFoundError(f"document {document_id} 不存在")
             if document.lifecycle_status in {DocumentLifecycleStatus.DELETING, DocumentLifecycleStatus.DELETED}:
+                # 重复删除请求直接幂等返回，不再额外写事件。
                 return
 
             document.lifecycle_status = DocumentLifecycleStatus.DELETING
@@ -306,5 +312,6 @@ class DocumentCommandService:
             version.storage_status = StorageStatus.FAILED
             version.parse_status = ParseStatus.FAILED
             version.index_status = IndexStatus.FAILED
+            # 这里把 parse/index 一并打成 FAILED，是为了表达“这个版本不会再继续推进”。
             version.last_error_message = error_message[:1024]
             version.row_version += 1

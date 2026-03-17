@@ -37,10 +37,12 @@ class FileSearchStore(BaseSearchStore):
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, chunk_uid: str) -> Path:
+        # 搜索投影与向量投影复用同样的 chunk_uid 主键策略，便于 Janitor 做 count 对账。
         return self.root_dir / f"{chunk_uid}.json"
 
     async def upsert_chunks(self, version_id: int, docs: list[dict]) -> None:
         def _write() -> None:
+            # 每个搜索文档单独落盘，便于手工打开文件验证切片内容。
             for doc in docs:
                 path = self._path(doc["chunk_uid"])
                 tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")

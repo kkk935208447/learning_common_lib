@@ -46,6 +46,7 @@ except ImportError:
 
 # API 层只做协议适配和响应拼装，真正的状态推进仍然下沉到服务层。
 def ok(data: Any = None, message: str = "success") -> dict[str, Any]:
+    # 统一包一层固定响应结构，便于 demo 脚本和前端调用端少写分支判断。
     return {"code": "OK", "message": message, "data": data}
 
 
@@ -56,6 +57,7 @@ async def load_document_detail(session: AsyncSession, document_id: int) -> Docum
     document = await doc_repo.get_by_id(document_id)
     if document is None:
         raise NotFoundError(f"document {document_id} 不存在")
+    # 版本按 version_no 倒序返回，调用端天然就能把第一条当作“最新版本”观察。
     versions = await version_repo.list_by_document(document_id)
     return DocumentRead(
         id=document.id,
@@ -97,6 +99,7 @@ app = FastAPI(title="Agentic RAG Min Demo", lifespan=lifespan)
 async def handle_demo_error(_: Request, exc: DemoError):
     status_code = 500
     # 统一在这里把领域异常翻译成 HTTP 状态码，路由函数本身保持业务语义。
+    # 这样服务层抛出的错误不需要知道 FastAPI 的存在，分层更干净。
     if isinstance(exc, NotFoundError):
         status_code = 404
     elif isinstance(exc, ConflictError):
@@ -115,6 +118,7 @@ async def handle_demo_error(_: Request, exc: DemoError):
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    # health 只判断进程是否存活，不在这里耦合 DB/Redis 深度探活。
     return ok({"status": "up"})
 
 
@@ -127,6 +131,7 @@ async def upload_document(
 ) -> dict[str, Any]:
     # 上传接口保持瘦身，只负责收文件并调用写侧服务。
     # demo 仍采用整文件读入，便于把校验、哈希和对象写入串成清晰主路径。
+    # 对于这个教学 demo，清晰比流式上传优化更重要。
     content = await file.read()
     service = DocumentCommandService(session, build_object_storage())
     outcome = await service.upload_document(
@@ -150,6 +155,7 @@ async def get_document(
     document_id: int,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # 读侧接口只读数据库真理源，不直接访问向量库或搜索库 mock。
     detail = await load_document_detail(session, document_id)
     return ok(detail.model_dump())
 
@@ -187,6 +193,7 @@ async def rebuild_version(
 
 @app.post("/admin/outbox/dispatch")
 async def dispatch_outbox() -> dict[str, Any]:
+    # 管理接口给“手动推一把”留入口，便于演示 Outbox 不依赖 Beat 才能运转。
     await best_effort_dispatch_outbox()
     return ok(message="已触发 Outbox Dispatcher")
 
@@ -216,6 +223,7 @@ async def get_admin_stats(
 ) -> dict[str, Any]:
     outbox_repo = OutboxRepository(session)
     version_repo = VersionRepository(session)
+    # 这几个指标刚好覆盖“积压、解析失败、索引失败、现存活动版本”四类最小观测面。
     payload = AdminStatsRead(
         outbox_pending_count=await outbox_repo.count_pending(),
         parse_failed_count=await version_repo.count_by_parse_status(ParseStatus.FAILED),
@@ -236,4 +244,5 @@ async def run_janitor() -> dict[str, Any]:
 
 if __name__ == "__main__":
     settings = get_settings()
+    # 直接运行 api.py 时沿用配置中的 host/port，减少启动参数心智负担。
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     runtime_dir: Path = BASE_DIR / ".runtime"
 
+    # eager 模式会让 Celery 任务在当前进程同步执行，便于单进程回归脚本。
     celery_eager: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = 8091
@@ -113,5 +114,6 @@ def get_settings() -> Settings:
     # 全局只构造一份配置，避免重复读取环境变量和重复创建 runtime 目录。
     settings = Settings()
     # 初始化时顺手保证运行时目录存在，避免每个适配器都重复 mkdir。
+    # 这也意味着单测或 demo 脚本只要拿到 settings，就可以安全写 runtime 文件。
     settings.runtime_dir.mkdir(parents=True, exist_ok=True)
     return settings

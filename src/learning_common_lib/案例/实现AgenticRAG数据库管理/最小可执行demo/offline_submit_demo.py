@@ -116,6 +116,7 @@ async def wait_until(
     for _ in range(loops):
         snapshot = await load_document_snapshot(document_id)
         last_snapshot = snapshot
+        # 每轮都打日志，超时时可以直接看到系统最后停在哪个状态。
         logger.info("%s: %s", label, asdict(snapshot))
         if predicate(snapshot):
             return snapshot
@@ -146,6 +147,7 @@ async def submit_upload() -> tuple[int, int]:
 async def submit_delete(document_id: int) -> None:
     async with session_scope() as session:
         service = DocumentCommandService(session, build_object_storage())
+        # 删除动作同样走服务层，保证与 API 路径保持完全同一套业务规则。
         await service.delete_document(document_id)
         logger.info("delete submitted: document_id=%s", document_id)
 

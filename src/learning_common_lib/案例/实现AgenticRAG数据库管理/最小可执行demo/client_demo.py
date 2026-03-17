@@ -40,6 +40,7 @@ async def wait_for_condition(
                 payload["lifecycle_status"] == expected_document_status
                 and latest["visibility_status"] == expected_version_status
             ):
+                # 一旦业务态满足预期就提前返回，不再继续轮询 task 级细节。
                 return payload
         await asyncio.sleep(1)
     raise TimeoutError(
@@ -61,6 +62,7 @@ async def wait_for_api_ready(client: httpx.AsyncClient, timeout_seconds: int = 3
         try:
             response = await client.get("/health")
             if response.status_code == 200:
+                # 这里只验证 HTTP 入口 ready，不覆盖后端依赖是否全部健康。
                 return
         except httpx.HTTPError:
             pass
@@ -97,6 +99,7 @@ async def main() -> None:
         upload_payload = response.json()["data"]
         print(upload_payload)
 
+        # 后续所有观测都基于 document_id，尽量站在业务对象视角验证系统行为。
         document_id = upload_payload["document_id"]
 
         print_section("等待异步解析与索引完成")
@@ -114,6 +117,7 @@ async def main() -> None:
         print_section("查看活动版本详情")
         response = await client.get(f"/versions/{version_id}")
         response.raise_for_status()
+        # 单版本详情能验证 parse/index/storage 等细粒度状态是否都落到预期值。
         print(response.json()["data"])
 
         print_section("查看管理统计")

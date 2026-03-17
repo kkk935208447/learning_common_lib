@@ -20,6 +20,7 @@ def autodiscover_demo_tasks(celery_app: Celery) -> None:
     global _TASKS_DISCOVERED
 
     if _TASKS_DISCOVERED:
+        # 做成幂等方法后，API、worker、dispatcher 都可以放心重复调用。
         return
 
     # 同时兼容 `python -m package.module` 和 `cd demo && python script.py` 两种导入路径。

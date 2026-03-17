@@ -43,6 +43,7 @@ class JanitorService:
         except ImportError:
             from config import get_settings
 
+        # 允许外部传 limit，便于管理接口或测试时做小批量扫描。
         limit = limit or get_settings().janitor_scan_limit
         version_repo = VersionRepository(self.session)
         chunk_repo = ChunkRepository(self.session)
@@ -79,4 +80,5 @@ class JanitorService:
         if rebuild_count:
             logger.info("janitor requested rebuild", extra={"versions": versions_to_rebuild})
             await best_effort_dispatch_outbox()
+        # 没发现异常也返回扫描结果，调用方可以把它当成一次对账报告。
         return {"scanned": len(active_versions), "rebuild_requested": rebuild_count}

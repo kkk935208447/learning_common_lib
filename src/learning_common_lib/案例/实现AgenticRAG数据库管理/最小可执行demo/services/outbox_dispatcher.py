@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Dispatcher 是 Outbox 到 Celery 之间的桥，不负责决定业务是否应该产生事件。
 class OutboxDispatcherService:
     def __init__(self, session: AsyncSession, task_queue) -> None:
+        # task_queue 抽象让 dispatcher 不关心“发到 Celery 还是本地执行”。
         self.session = session
         self.task_queue = task_queue
 
@@ -54,6 +55,7 @@ class OutboxDispatcherService:
                 next_retry_at=event.next_retry_at,
             )
         ]
+        # 这里主动 rollback 的目的，是尽快释放数据库事务和连接占用。
         await self.session.rollback()
 
         sent = 0
@@ -79,6 +81,7 @@ class OutboxDispatcherService:
     async def cleanup_sent_history(self) -> int:
         repo = OutboxRepository(self.session)
         async with self.session.begin():
+            # 历史清理复用 repository，避免 task 层自己写 delete SQL。
             return await repo.cleanup_sent_older_than(get_settings().outbox_cleanup_days)
 
     async def list_pending_events(self, limit: int = 100) -> list[OutboxEvent]:
@@ -114,6 +117,7 @@ class OutboxDispatcherService:
             event.published_at = utcnow()
             event.next_retry_at = None
             if task_id is not None:
+                # 把 celery task_id 回填进 payload，排障时可以从 DB 反查 worker 日志。
                 payload = dict(event.payload_json)
                 payload["celery_task_id"] = task_id
                 event.payload_json = payload
@@ -141,6 +145,7 @@ async def best_effort_dispatch_outbox(limit: int = 100) -> None:
             return None
     try:
         # 这里刻意使用 task_session_scope：Celery task 内部经常由不同事件循环执行，不能复用全局 async engine。
+        # API 侧手动触发 dispatcher 时也沿用同样策略，减少 event loop 相关偶发问题。
         async with task_session_scope() as session:
             dispatcher = OutboxDispatcherService(session, build_task_queue())
             count = await dispatcher.dispatch_pending(limit=limit)
@@ -205,4 +210,5 @@ async def execute_local_task(task_name: str, payload: dict[str, Any]) -> dict[st
 
             service = JanitorService(session, build_vector_store(), build_search_store())
             return await service.run_once()
+        # 未注册任务直接报错，避免 eager 模式把拼错的 task_name 静默吞掉。
         raise ValueError(f"未知 task_name: {task_name}")

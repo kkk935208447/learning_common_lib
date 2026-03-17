@@ -74,6 +74,7 @@ class ParsePipelineService:
             if version.storage_status != StorageStatus.READY:
                 raise ValidationError("版本源文件尚未就绪，不能开始解析")
             if version.parse_status == ParseStatus.SUCCESS:
+                # 已成功解析过的版本直接短路返回，避免重复写 chunks。
                 return {"version_id": version_id, "status": "already_parsed"}
             # 先把状态切到 RUNNING，再离开事务做对象读取和解析计算。
             version.parse_status = ParseStatus.RUNNING
@@ -87,6 +88,7 @@ class ParsePipelineService:
 
             text = parse_bytes_to_text(raw_bytes, version.mime_type)
             chunk_texts = chunk_text(text)
+            # chunk_uid 只依赖 version.id 和 chunk 序号，确保重复解析结果可覆盖。
             chunks = [
                 DocumentChunk(
                     version_id=version.id,
@@ -112,6 +114,7 @@ class ParsePipelineService:
                 await chunk_repo.replace_for_version(version_id, chunks)
                 version.chunk_count = len(chunks)
                 version.parse_status = ParseStatus.SUCCESS
+                # parse 成功后显式把 index 状态重新置回 PENDING，为下游建立新起点。
                 version.index_status = IndexStatus.PENDING
                 version.milvus_status = ProjectionStatus.PENDING
                 version.es_status = ProjectionStatus.PENDING

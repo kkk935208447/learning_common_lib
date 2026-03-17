@@ -68,6 +68,7 @@ class CleanupService:
             version.es_status = ProjectionStatus.DELETED
             version.storage_status = StorageStatus.DELETED
             if version.visibility_status == VisibilityStatus.DELETE_PENDING:
+                # 只有处于待删态的版本，清理完成后才切成真正 DELETED。
                 version.visibility_status = VisibilityStatus.DELETED
             version.row_version += 1
 

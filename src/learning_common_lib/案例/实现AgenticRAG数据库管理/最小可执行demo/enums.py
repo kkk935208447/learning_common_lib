@@ -69,12 +69,14 @@ class OutboxEventType(str, Enum):
 
 
 class PublishStatus(str, Enum):
+    # PENDING 表示从未投递，FAILED 表示投递过但需要等待重试窗口。
     PENDING = "PENDING"
     SENT = "SENT"
     FAILED = "FAILED"
 
 class QueueName(str, Enum):
     # Celery 队列名直接放在这里，读 Celery 配置时不需要再跳文件。
+    # 这也让 Outbox 事件写入时可以使用强约束枚举，而不是裸字符串。
     PARSE = "parse_jobs"
     INDEX = "index_jobs"
     CLEAN = "clean_jobs"
@@ -84,6 +86,7 @@ class QueueName(str, Enum):
 
 class TaskName(str, Enum):
     # task 名称保留统一前缀，方便在 worker 日志里快速筛选。
+    # 这里的值既是 Celery 注册名，也是 Outbox 中写入的 task_name。
     PARSE_VERSION = "min_rag_demo.parse_version"
     INDEX_VERSION = "min_rag_demo.index_version"
     CLEAN_VERSION = "min_rag_demo.clean_version"

@@ -18,6 +18,7 @@ except ImportError:
 # Repository 层只封装重复查询，不承接复杂业务判断。
 class BaseRepository:
     def __init__(self, session: AsyncSession) -> None:
+        # Repository 生命周期和 session 绑定，调用方负责决定事务边界。
         self.session = session
 
 
@@ -37,6 +38,7 @@ class DocumentRepository(BaseRepository):
     ) -> Document | None:
         stmt = select(Document).where(Document.external_doc_key == external_doc_key)
         if for_update:
+            # 上传新版本时会锁定文档行，防止并发请求同时分配 version_no。
             stmt = stmt.with_for_update()
         return await self.session.scalar(stmt)
 
@@ -54,6 +56,7 @@ class VersionRepository(BaseRepository):
             .where(DocumentVersion.document_id == document_id)
             .order_by(DocumentVersion.version_no.desc())
         )
+        # 倒序返回后，最新版本天然排在前面，接口层无需额外 reverse。
         return list((await self.session.scalars(stmt)).all())
 
     async def find_inflight_by_document(self, document_id: int) -> DocumentVersion | None:
@@ -87,6 +90,7 @@ class VersionRepository(BaseRepository):
             .where(DocumentVersion.visibility_status == VisibilityStatus.ACTIVE)
             .limit(limit)
         )
+        # Janitor 当前只扫 ACTIVE 版本，避免把已淘汰版本的缺失误判为异常。
         return list((await self.session.scalars(stmt)).all())
 
     async def count_by_parse_status(self, status: ParseStatus) -> int:
@@ -113,6 +117,7 @@ class ChunkRepository(BaseRepository):
         return list((await self.session.scalars(stmt)).all())
 
     async def count_by_version(self, version_id: int) -> int:
+        # demo 为了清晰直接复用 list 逻辑；如果后续数据量变大再换 count SQL。
         chunks = await self.list_by_version(version_id)
         return len(chunks)
 
@@ -129,6 +134,7 @@ class OutboxRepository(BaseRepository):
         return list((await self.session.scalars(stmt)).all())
 
     async def list_pending(self, limit: int) -> list[OutboxEvent]:
+        # 这个接口和 list_ready 保持相同筛选口径，便于运维观察“还能被投递的事件”。
         stmt = (
             select(OutboxEvent)
             .where(OutboxEvent.publish_status.in_((PublishStatus.PENDING, PublishStatus.FAILED)))
