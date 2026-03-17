@@ -134,6 +134,7 @@ async def _demo() -> None:
                 update(DemoProduct)
                 .where(DemoProduct.id == p.id, DemoProduct.version == old_version)
                 .values(stock=80, version=old_version + 1)
+                .execution_options(synchronize_session=False)
             )
             if result.rowcount == 0:
                 print(f"  模拟冲突: 旧 version={old_version} 更新失败 (rowcount=0)")
