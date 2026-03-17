@@ -66,6 +66,7 @@ class BaseRepository(Generic[T]):
         code = args[0]
         return code if isinstance(code, int) else None
 
+    # * 表示 后面的参数必须用关键字方式传递（keyword-only），不能用位置参数传
     def _build_model_detail(self, *, id: int | None = None) -> dict[str, object]:
         detail: dict[str, object] = {"model": self.model.__name__}
         if id is not None:
@@ -78,6 +79,7 @@ class BaseRepository(Generic[T]):
 
     def _protected_update_fields(self) -> set[str]:
         """通用 update 默认禁止改写系统字段。"""
+        # & 取两个集合的交集
         return {"id", "created_at", "updated_at"} & self._mapped_column_keys()
 
     def _validate_update_fields(self, kwargs: dict[str, object]) -> None:
