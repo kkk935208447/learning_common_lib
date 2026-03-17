@@ -15,6 +15,7 @@ except ImportError:
 class BaseEmbeddingProvider(ABC):
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        # 批量接口让 IndexPipelineService 不需要关心具体 provider 是否支持并行优化。
         raise NotImplementedError
 
 

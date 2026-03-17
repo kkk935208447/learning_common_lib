@@ -24,6 +24,7 @@ celery_app = Celery(
 
 celery_app.conf.update(
     task_always_eager=settings.celery_eager,
+    # 默认队列设成 parse，只是兜底值；正式任务路由都在 task_routes 里显式声明。
     task_default_queue=QueueName.PARSE.value,
     # demo 规模不大，直接把路由放在 Celery app 配置里比再跳一层模块更直观。
     task_routes={

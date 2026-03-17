@@ -38,6 +38,7 @@ def build_embedding_provider() -> DeterministicEmbeddingProvider:
 
 
 def build_lock_port() -> RedisDistributedLock:
+    # 锁客户端也从这里集中创建，调用方不用关心 Redis 连接细节。
     return RedisDistributedLock()
 
 
@@ -47,4 +48,5 @@ def build_task_queue() -> CeleryTaskQueueAdapter:
 
 
 def build_in_memory_task_queue() -> InMemoryTaskQueueAdapter:
+    # 这个工厂主要给 demo_flow 之类的单进程场景准备。
     return InMemoryTaskQueueAdapter()

@@ -93,6 +93,7 @@ async def main() -> None:
 
     async with session_scope() as session:
         service = DocumentCommandService(session, build_object_storage())
+        # 第一步先走上传，eager 模式下 parse/index 会在同进程内被立刻执行完。
         outcome = await service.upload_document(
             external_doc_key="employee-handbook",
             title="员工手册",
@@ -127,6 +128,7 @@ async def main() -> None:
 
     async with session_scope() as session:
         janitor = JanitorService(session, vector_store, search_store)
+        # 第二步演示 Janitor 只负责发现异常并触发 rebuild，不自己直接做重建。
         result = await janitor.run_once()
         print({"janitor_result": result})
 
@@ -135,6 +137,7 @@ async def main() -> None:
 
     async with session_scope() as session:
         service = DocumentCommandService(session, build_object_storage())
+        # 最后再触发删除，验证 Cleaner 能把对象与投影一起回收。
         await service.delete_document(outcome.document_id)
 
     await print_outbox_state()

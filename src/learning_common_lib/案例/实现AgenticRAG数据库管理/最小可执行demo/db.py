@@ -30,6 +30,7 @@ def build_engine(dsn: str | None = None):
 def get_engine():
     global _engine
     if _engine is None:
+        # 全局 engine 只在需要时懒初始化，避免 import 阶段就尝试连库。
         _engine = build_engine()
     return _engine
 
@@ -44,6 +45,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 async def ensure_database_exists() -> None:
     settings = get_settings()
+    # 单独连 mysql 系统库检查 schema 是否存在，避免业务库不存在时直接连库失败。
     engine = create_async_engine(settings.mysql_admin_dsn, echo=False, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
@@ -88,6 +90,7 @@ async def drop_tables() -> None:
         # 对教学 demo 来说，显式按依赖逆序删除比 `metadata.drop_all()` 更稳妥：
         # 1. 阅读时更容易看清删除顺序
         # 2. 不会因为 MySQL 反射或 `IF EXISTS` 警告把输出搞得很乱
+        # 3. 真出问题时，也更容易知道卡在哪张表
         for table in reversed(Base.metadata.sorted_tables):
             if table.name in existing_tables:
                 await conn.execute(text(f"DROP TABLE `{table.name}`"))
@@ -106,6 +109,7 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 @asynccontextmanager
 async def task_session_scope() -> AsyncIterator[AsyncSession]:
     # Celery task常常由新的 asyncio event loop 驱动，单独建 engine 可以规避 loop 交叉复用。
+    # 代价是每个任务多一次 engine 生命周期，但对 demo 的稳定性更值。
     engine = build_engine()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     session = session_factory()

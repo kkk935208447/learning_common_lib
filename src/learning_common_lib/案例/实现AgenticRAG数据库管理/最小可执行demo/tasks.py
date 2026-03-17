@@ -40,11 +40,13 @@ except ImportError:
 def _retry_countdown(retries: int) -> int:
     settings = get_settings()
     # 指数退避用最简单的 2^n 形式，足够演示 Celery 重试节奏。
+    # 第 0 次重试使用 base_seconds，第 1 次则翻倍。
     return settings.task_retry_base_seconds * (2 ** retries)
 
 
 def _should_retry(exc: Exception) -> bool:
     # 未知异常默认按“可能是临时故障”处理，教学上更能体现“宁可重复，不要静默丢任务”。
+    # 只有明确的业务异常且不属于 RetryableTaskError，才认为不值得重试。
     return isinstance(exc, RetryableTaskError) or not isinstance(exc, DemoError)
 
 
@@ -54,6 +56,7 @@ def _run_locked(lock_key: str | None, runner) -> dict[str, Any]:
         return asyncio.run(runner())
     settings = get_settings()
     lock = build_lock_port()
+    # 同一锁 key 获取不到时直接返回 skipped，而不是把它当成失败重试。
     token = lock.try_lock(lock_key, settings.lock_ttl_seconds)
     if token is None:
         return {"status": "skipped", "reason": "lock_not_acquired", "lock_key": lock_key}
@@ -69,6 +72,7 @@ def _execute_task(self: Any, *, lock_key: str | None, runner) -> dict[str, Any]:
         # Parser / Index 之类的任务允许重复投递，但同一版本同一时刻只跑一个实例。
         return _run_locked(lock_key, runner)
     except Exception as exc:
+        # Celery 的 retry 在这里统一处理，服务层只需要专注抛出正确异常。
         if _should_retry(exc) and self.request.retries < settings.task_max_retries:
             raise self.retry(exc=exc, countdown=_retry_countdown(self.request.retries))
         raise
@@ -84,6 +88,7 @@ def dispatch_outbox(self: Any) -> dict[str, Any]:
             return {"sent": 0, "reason": "lock_not_acquired"}
         try:
             async with task_session_scope() as session:
+                # task 内部总是用 CeleryTaskQueueAdapter，确保真正投递到 broker。
                 dispatcher = OutboxDispatcherService(session, CeleryTaskQueueAdapter())
                 count = await dispatcher.dispatch_pending(limit=100)
                 return {"sent": count}
@@ -156,4 +161,5 @@ def janitor_scan(self: Any) -> dict[str, Any]:
             return await service.run_once()
 
     # Janitor 也是单领导者任务，避免多 worker 周期性重复扫描同一批 active 版本。
+    # 和 dispatcher 一样，抢不到锁时不视为错误。
     return _run_locked("rag:janitor:leader", _run)

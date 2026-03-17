@@ -60,6 +60,7 @@ class IndexPipelineService:
         search_store: BaseSearchStore,
         embedding_provider: BaseEmbeddingProvider,
     ) -> None:
+        # 这里同时注入三类依赖，强调 index 过程本质是“从事实表生成多份投影”。
         self.session = session
         self.vector_store = vector_store
         self.search_store = search_store
@@ -79,6 +80,7 @@ class IndexPipelineService:
             if version.parse_status != ParseStatus.SUCCESS:
                 raise ValidationError("版本尚未解析成功，不能建立索引")
             if version.index_status == IndexStatus.SUCCESS and version.visibility_status == VisibilityStatus.ACTIVE:
+                # 已经切活的成功版本无需重复索引，除非走手工 rebuild 重新投递。
                 return {"version_id": version_id, "status": "already_indexed"}
             # 先占住 RUNNING 状态，避免多个 worker 同时认为自己是“第一个索引者”。
             version.index_status = IndexStatus.RUNNING
@@ -100,6 +102,7 @@ class IndexPipelineService:
                 }
                 for chunk, vector in zip(chunks, vectors, strict=False)
             ]
+            # 搜索投影和向量投影共享同一批 chunk 事实，但写入结构各自独立。
             search_docs = [
                 {
                     "chunk_uid": chunk.chunk_uid,
@@ -133,6 +136,7 @@ class IndexPipelineService:
                 document.active_version_id = version.id
                 document.row_version += 1
                 if document.lifecycle_status != DocumentLifecycleStatus.ACTIVE:
+                    # 即使之前文档处于其他状态，只要新版本成功切活，就恢复为 ACTIVE。
                     document.lifecycle_status = DocumentLifecycleStatus.ACTIVE
 
                 if old_active_version_id is not None and old_active_version_id != version.id:

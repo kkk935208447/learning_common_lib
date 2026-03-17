@@ -41,10 +41,12 @@ class FileVectorStore(BaseVectorStore):
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, chunk_uid: str) -> Path:
+        # chunk_uid 稳定后，同一 chunk 的多次 upsert 会直接覆盖同一文件。
         return self.root_dir / f"{chunk_uid}.json"
 
     async def upsert_chunks(self, version_id: int, records: list[dict]) -> None:
         def _write() -> None:
+            # 这里不使用 version_id 目录分桶，是为了让 chunk_uid 成为唯一主键语义更直观。
             for record in records:
                 path = self._path(record["chunk_uid"])
                 tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")

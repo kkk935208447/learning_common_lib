@@ -30,6 +30,7 @@ class VersionRead(BaseModel):
     updated_at: datetime
 
     # 允许直接从 ORM 对象构造，减少 API 层手写字段搬运。
+    # 同时也能让 demo 在 schema 变更时更容易发现字段遗漏。
     model_config = {"from_attributes": True}
 
 
@@ -68,6 +69,7 @@ class OutboxEventRead(BaseModel):
     next_retry_at: datetime | None
     published_at: datetime | None
 
+    # Outbox ORM 对象可以直接喂给 schema，省掉管理接口层的手工映射。
     model_config = {"from_attributes": True}
 
 

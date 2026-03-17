@@ -16,6 +16,7 @@ __all__ = [
 
 def __getattr__(name: str):
     # 惰性导入的目的是减少脚本模式下的导入耦合，而不是做运行期“魔法封装”。
+    # 这里手写映射表而不是动态反射，优点是导出边界一眼可见。
     if name == "CleanupService":
         from .cleanup import CleanupService
 

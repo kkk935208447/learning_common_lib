@@ -66,6 +66,7 @@ class Document(TimestampMixin, Base):
         nullable=False,
     )
     active_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # latest_version_no 记录“已经分配到几号版本”，不等于当前活动版本号。
     latest_version_no: Mapped[int] = mapped_column(default=0, nullable=False)
     row_version: Mapped[int] = mapped_column(default=0, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -97,6 +98,7 @@ class DocumentVersion(TimestampMixin, Base):
         ForeignKey("rag_min_demo_documents.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # version_no 在单文档内单调递增，用来生成稳定 storage_key 和排查日志。
     version_no: Mapped[int] = mapped_column(nullable=False)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     file_name: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -125,6 +127,7 @@ class DocumentVersion(TimestampMixin, Base):
         default=VisibilityStatus.STAGED,
         nullable=False,
     )
+    # chunk_count 是一个缓存字段，让 Janitor/管理接口无需每次都重新 count facts。
     chunk_count: Mapped[int] = mapped_column(default=0, nullable=False)
     parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
     parser_config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -149,6 +152,7 @@ class DocumentChunk(TimestampMixin, Base):
         nullable=False,
     )
     chunk_uid: Mapped[str] = mapped_column(String(96), unique=True, nullable=False)
+    # chunk_no 让同一版本的 chunk 顺序可重建，chunk_uid 让跨存储投影具备稳定主键。
     chunk_no: Mapped[int] = mapped_column(nullable=False)
     chunk_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -165,6 +169,7 @@ class OutboxEvent(TimestampMixin, Base):
     event_type: Mapped[OutboxEventType] = mapped_column(Enum(OutboxEventType), nullable=False)
     queue_name: Mapped[str] = mapped_column(String(64), nullable=False)
     task_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # dedupe_key 用于压制同一业务动作的重复派发，不要求和 payload 一一对应。
     dedupe_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     publish_status: Mapped[PublishStatus] = mapped_column(

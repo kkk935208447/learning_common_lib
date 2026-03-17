@@ -16,6 +16,7 @@ class BaseTaskQueue(ABC):
         queue_name: str,
         countdown: int | None = None,
     ) -> str | None:
+        # 返回值预留 task_id，便于记录到 Outbox payload 中做后续排查。
         raise NotImplementedError
 
     @abstractmethod
@@ -40,6 +41,7 @@ class CeleryTaskQueueAdapter(BaseTaskQueue):
 
         # API / Outbox 并不保证提前 import 过 tasks，这里按需 discovery 一次最稳妥。
         autodiscover_demo_tasks(celery_app)
+        # 通过注册名查 task，确保 Outbox 中的 task_name 就是唯一调度入口。
         task = celery_app.tasks[task_name]
         result = task.apply_async(kwargs=payload, queue=queue_name, countdown=countdown)
         return result.id
@@ -78,6 +80,7 @@ class InMemoryTaskQueueAdapter(BaseTaskQueue):
                 "countdown": countdown,
             }
         )
+        # 内存模式不生成真实 task_id，因为不存在独立 worker 生命周期。
         return None
 
     def dispatch_batch(self, events: list[dict[str, Any]]) -> list[str | None]:

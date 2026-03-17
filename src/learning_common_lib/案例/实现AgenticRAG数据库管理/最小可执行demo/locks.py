@@ -21,6 +21,7 @@ class BaseDistributedLock(ABC):
 
     @abstractmethod
     def release(self, key: str, token: str) -> None:
+        # release 显式要求 token，避免调用方把“删锁”误当成无条件操作。
         raise NotImplementedError
 
 
