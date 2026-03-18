@@ -60,10 +60,11 @@ class BaseRepository(Generic[T]):
     def _extract_dbapi_code(error: SQLAlchemyError) -> int | None:
         """提取底层 DBAPI/MySQL 错误码，用于细分异常类型。"""
         original = getattr(error, "orig", None)
+        # SQLAlchemy 异常通常包裹了 DBAPI 异常：优先从 e.orig.args 取（如 MySQL errno=1062）
         args = getattr(original, "args", ()) or getattr(error, "args", ())
         if not args:
             return None
-        code = args[0]
+        code = args[0]  # MySQL driver 一般把错误码放在 args[0]
         return code if isinstance(code, int) else None
 
     # * 表示 后面的参数必须用关键字方式传递（keyword-only），不能用位置参数传
@@ -74,7 +75,7 @@ class BaseRepository(Generic[T]):
         return detail
 
     def _mapped_column_keys(self) -> set[str]:
-        mapper = sa_inspect(self.model)
+        mapper = sa_inspect(self.model)  # 映射信息来自 SQLAlchemy Mapper（不是实例属性 dict）
         return {attr.key for attr in mapper.column_attrs}
 
     def _protected_update_fields(self) -> set[str]:
@@ -88,6 +89,7 @@ class BaseRepository(Generic[T]):
                 message="更新内容不能为空",
                 detail={"model": self.model.__name__},
             )
+        # 这里用“列映射”而不是 hasattr：避免把 relationship / property 等非列字段误当作可更新字段
         invalid_fields = sorted(set(kwargs) - self._mapped_column_keys())
         if invalid_fields:
             raise AppValidationError(
@@ -110,6 +112,7 @@ class BaseRepository(Generic[T]):
     def _apply_default_ordering(self, stmt):
         """分页查询默认按主键升序，避免无序分页带来的不稳定结果。"""
         if hasattr(self.model, "id"):
+            # 无 ORDER BY 的 offset/limit 在并发写入下会出现“翻页重复/遗漏”的不稳定现象
             return stmt.order_by(self.model.id.asc())
         return stmt
 
@@ -125,6 +128,7 @@ class BaseRepository(Generic[T]):
         internal_message = str(error)
 
         if mysql_code == 1062:
+            # 1062: Duplicate entry（唯一索引冲突）
             return DuplicateError(
                 message="资源已存在（唯一约束冲突）",
                 detail=detail,
@@ -132,6 +136,7 @@ class BaseRepository(Generic[T]):
             )
 
         if mysql_code in {1048, 1451, 1452}:
+            # 1048: Column cannot be null; 1451/1452: 外键约束失败（删除/插入更新）
             return AppValidationError(
                 message="数据约束校验失败，请检查关联关系和必填字段",
                 detail={**detail, "db_error_code": mysql_code},
@@ -164,7 +169,7 @@ class BaseRepository(Generic[T]):
         strict=True 时，不存在则抛出 NotFoundError。
         """
         try:
-            obj = await self.session.get(self.model, id)
+            obj = await self.session.get(self.model, id)  # 直接按主键查；可能命中 identity map（减少一次 SQL）
         except SQLAlchemyError as e:
             raise DatabaseError(
                 internal_message=str(e),
@@ -199,9 +204,9 @@ class BaseRepository(Generic[T]):
         """
         try:
             self.session.add(obj)
-            await self.session.flush()
+            await self.session.flush()  # flush 只把变更“发送到数据库”，不等于 commit（事务是否提交由外层控制）
             if refresh:
-                await self.session.refresh(obj)
+                await self.session.refresh(obj)  # 会额外 SELECT：用于拿到 server_default/触发器写入后的字段
             return obj
         except DataError as e:
             raise self._map_data_error(e) from e
@@ -224,13 +229,14 @@ class BaseRepository(Generic[T]):
         obj = await self.get_by_id(id, strict=strict)
         if obj is None:
             return None
+        # 验证 更新字段是否合法
         self._validate_update_fields(kwargs)
         try:
             for key, value in kwargs.items():
-                setattr(obj, key, value)
-            await self.session.flush()
+                setattr(obj, key, value)  # 走 ORM 单对象更新
+            await self.session.flush()  # 依赖 flush 让约束错误尽早暴露（而不是等到 commit）
             if refresh:
-                await self.session.refresh(obj)
+                await self.session.refresh(obj)  # 若依赖 DB 侧更新时间戳/计算列，refresh 才能保证返回值准确
             return obj
         except DataError as e:
             raise self._map_data_error(e, id=id) from e
@@ -249,7 +255,7 @@ class BaseRepository(Generic[T]):
             return False
         try:
             await self.session.delete(obj)
-            await self.session.flush()
+            await self.session.flush()  # 同样：flush 触发 FK/约束检查，事务提交仍由外层控制
             return True
         except IntegrityError as e:
             raise self._map_integrity_error(e, id=id) from e
@@ -312,6 +318,7 @@ class SoftDeleteRepository(BaseRepository[T]):
     ) -> T | None:
         """默认忽略软删除数据；恢复/物理删除场景可显式 include_deleted。"""
         try:
+            # 软删除场景不能用 session.get：get 只按主键取，不方便叠加 is_deleted 过滤条件
             stmt = select(self.model).where(self.model.id == id)
             if not include_deleted:
                 stmt = stmt.where(self.model.is_deleted.is_(False))
@@ -352,7 +359,7 @@ class SoftDeleteRepository(BaseRepository[T]):
             return False
         try:
             obj.is_deleted = True
-            obj.deleted_at = datetime.now()
+            obj.deleted_at = datetime.now()  # 这里用本地时间；若系统统一用 UTC，可改为 datetime.utcnow()/timezone-aware
             await self.session.flush()
             return True
         except SQLAlchemyError as e:
@@ -467,6 +474,7 @@ class VersionedRepository(SoftDeleteRepository[T]):
         obj = await self.get_by_id(id, strict=strict)
         if obj is None:
             return None
+        # expected_version 允许调用方把“读到的版本号”带回来：避免同一对象跨请求更新时 version 已变化
         current_version = expected_version if expected_version is not None else obj.version
         self._validate_update_fields(kwargs)
         try:
@@ -476,8 +484,9 @@ class VersionedRepository(SoftDeleteRepository[T]):
                 .where(self.model.id == id, self.model.version == current_version)
                 .values(**values)
             )
-            result = await self.session.execute(stmt)
+            result = await self.session.execute(stmt)  # 走 UPDATE ... WHERE version=...：避免先读后写的竞态窗口
             if result.rowcount == 0:
+                # rowcount=0 通常意味着版本不匹配（或记录不存在/被软删除过滤导致 get_by_id 返回 None）
                 raise OptimisticLockError(
                     detail={
                         "resource": self.model.__name__,
@@ -488,8 +497,9 @@ class VersionedRepository(SoftDeleteRepository[T]):
                 )
             # 刷新 ORM 对象以反映数据库中的最新状态
             if refresh:
-                await self.session.refresh(obj)
+                await self.session.refresh(obj)  # 刷新能保证对象状态与 DB 一致（包括触发器/默认值/更新时间戳）
             else:
+                # 不 refresh 时，手动回填字段，避免调用方拿到“旧对象”误以为更新失败
                 for key, value in values.items():
                     setattr(obj, key, value)
             return obj
@@ -567,6 +577,13 @@ async def _demo() -> None:
                 print(f"  strict 模式: {e}")
 
             # 演示 DuplicateError
+            # 注意：这里“故意制造唯一键冲突”时，即使我们在 Python 层 catch 了 DuplicateError
+            #      外层 `async with session.begin():` 这笔事务仍然可能在退出时回滚，导致前面已经 flush的插入/更新最终并没有真正落库。
+            # 原因是：DuplicateError 的根源是数据库返回的 IntegrityError（属于 DBAPI/SQLAlchemyError）。一旦数据库侧发生过这类错误，当前事务会被标记为失败（failed/needs rollback）： “捕获异常”只是让程序继续往下走，并不能把事务从失败态恢复为可提交态，在失败态下继续执行 SQL 通常也会报错，外层事务退出时会 rollback
+            # 对比：`NotFoundError` 这种“业务异常”是我们自己根据查询结果手动 raise 的，并没有触发数据库/驱动层异常，因此不会污染事务状态，也不会导致外层自动回滚。
+            # 解决方式通常有两种：
+            #   1) 显式 `await session.rollback()`，然后开启一个新事务继续后续逻辑（更适合真实业务）
+            #   2) 用 SAVEPOINT（`begin_nested()`：async with session.begin_nested()）把“预期会失败的演示/探测性写入”包起来：内层失败只回滚到 savepoint，不影响外层事务最终提交（适合 demo / 需要隔离的局部操作）
             try:
                 await repo.create(User(name="王五", email="zhangsan@example.com"))
             except DuplicateError as e:
