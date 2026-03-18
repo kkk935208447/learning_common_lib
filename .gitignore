@@ -19,3 +19,7 @@ wheels/
 # Demo runtime artifacts
 **/.runtime/
 **/celerybeat-schedule*
+
+# pycharm .idea
+.idea/
+*.iml
