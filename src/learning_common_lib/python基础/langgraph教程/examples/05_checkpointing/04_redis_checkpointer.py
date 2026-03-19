@@ -8,51 +8,47 @@ from __future__ import annotations
   1. 连接 Redis 并创建 AsyncRedisSaver
   2. 多轮对话后 checkpoint 持久化到 Redis
   3. 模拟"跨进程恢复"：重新编译图并从 Redis 恢复状态
-  4. ResilientCheckpointer 包装器演示：写入失败时降级为日志
+  4. 输出明确的运行时状态，便于 smoke / 排障判断是否真的用了 Redis
 生产提醒：
   - 需要安装: pip install langgraph-checkpoint-redis
   - 需要带 RediSearch/Redis Stack 能力的 Redis 实例，普通 Redis 可能报 `FT._LIST` 不存在
   - Redis 连接需要配置密码和合适的 DB 编号
-  - 建议为不同环境（dev/staging/prod）使用不同的 DB 编号
+  - 教程默认让 checkpoint / store 共用 db=0，通过不同 prefix 隔离
   - TTL 策略：通过 Redis 的 EXPIRE 或定期清理过期 checkpoint
 """
 
 import asyncio
-import logging
+import sys
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import MessagesState, StateGraph
 
-logger = logging.getLogger(__name__)
+try:
+    from ...templates import DEFAULT_RUNTIME_SETTINGS
+except ImportError:  # pragma: no cover - 允许直接运行脚本
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates import DEFAULT_RUNTIME_SETTINGS
 
 # Redis 连接配置
-REDIS_URL = "redis://:123456@localhost:6379/0"
+REDIS_URL = DEFAULT_RUNTIME_SETTINGS.checkpoint_url
+STRICT_REDIS = DEFAULT_RUNTIME_SETTINGS.strict_redis
 
 
-# ── 1. ResilientCheckpointer 包装器 ─────────────────────────
-class ResilientCheckpointer:
-    """包装 checkpointer，写入失败时降级为仅日志，不阻塞主流程"""
+def emit_runtime_status(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    line = f"RUNTIME_STATUS checkpoint={backend} degraded={degraded} strict={STRICT_REDIS}"
+    if last_error:
+        line += f" last_error={last_error}"
+    print(line)
 
-    def __init__(self, underlying: object) -> None:
-        self._underlying = underlying
 
-    async def aput(self, config: dict, checkpoint: dict, metadata: dict) -> dict:
-        try:
-            return await self._underlying.aput(config, checkpoint, metadata)
-        except Exception as e:
-            logger.error(f"Checkpoint 写入失败，继续执行: {e}")
-            return config
-
-    async def aget(self, config: dict) -> dict | None:
-        try:
-            return await self._underlying.aget(config)
-        except Exception as e:
-            logger.error(f"Checkpoint 读取失败: {e}")
-            return None
-
-    # 代理其他方法到底层 checkpointer
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._underlying, name)
+def require_real_redis(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    emit_runtime_status(backend=backend, degraded=degraded, last_error=last_error)
+    if STRICT_REDIS and (backend != "redis" or degraded):
+        raise RuntimeError(
+            "Redis checkpoint 示例要求真实 Redis backend；"
+            f"当前 backend={backend}, degraded={degraded}, last_error={last_error}"
+        )
 
 
 def chatbot(state: MessagesState) -> dict:
@@ -73,11 +69,46 @@ def build_graph() -> StateGraph:
     return graph
 
 
+async def open_async_redis_saver(async_redis_saver_cls):
+    """重复运行示例时复用现有索引，避免 `Index already exists` 误判为失败。"""
+    saver_cm = async_redis_saver_cls.from_conn_string(
+        REDIS_URL,
+        checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
+        checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
+    )
+    try:
+        saver = await saver_cm.__aenter__()
+        return saver, saver_cm.__aexit__
+    except Exception as exc:
+        if "index already exists" not in str(exc).lower():
+            raise
+
+        from langgraph.checkpoint.redis.aio import AsyncKeyRegistry
+
+        saver = async_redis_saver_cls(
+            redis_url=REDIS_URL,
+            checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
+            checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
+        )
+        saver.create_indexes()
+        await saver._detect_cluster_mode()
+        saver._key_registry = AsyncKeyRegistry(saver._redis)
+        await saver.aset_client_info()
+        return saver, saver.__aexit__
+
+
 async def main() -> None:
-    # ── 2. 连接 Redis 并创建 checkpointer ───────────────────
+    run_id = DEFAULT_RUNTIME_SETTINGS.demo_suffix("redis-checkpoint")
+    thread_id = DEFAULT_RUNTIME_SETTINGS.global_thread_id("demo", run_id)
+
     try:
         from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-    except ImportError:
+    except ImportError as exc:
+        require_real_redis(
+            backend="memory",
+            degraded=True,
+            last_error=f"ImportError: {exc}",
+        )
         print("请先安装: pip install langgraph-checkpoint-redis")
         print("以下使用 MemorySaver 作为降级演示...\n")
         from langgraph.checkpoint.memory import MemorySaver
@@ -85,7 +116,7 @@ async def main() -> None:
         checkpointer = MemorySaver()
         graph = build_graph()
         app = graph.compile(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": "redis-demo-fallback"}}
+        config = {"configurable": {"thread_id": thread_id}}
 
         print("=== 降级模式：MemorySaver ===")
         r = app.invoke({"messages": [HumanMessage(content="测试")]}, config=config)
@@ -94,14 +125,15 @@ async def main() -> None:
         return
 
     try:
-        # 使用 async context manager 管理 Redis 连接
-        async with AsyncRedisSaver.from_conn_string(REDIS_URL) as checkpointer:
+        checkpointer, close_checkpointer = await open_async_redis_saver(AsyncRedisSaver)
+        try:
+            require_real_redis(backend="redis", degraded=False)
             print("=== Redis Checkpointer 已连接 ===")
+            print(f"thread_id: {thread_id}")
 
-            # ── 3. 第一个"进程"：创建对话 ───────────────────────
             graph = build_graph()
             app = graph.compile(checkpointer=checkpointer)
-            config = {"configurable": {"thread_id": "redis-thread-001"}}
+            config = {"configurable": {"thread_id": thread_id}}
 
             print("\n--- 进程 A：创建对话 ---")
             for msg_text in ["你好", "LangGraph 怎么用？"]:
@@ -111,7 +143,6 @@ async def main() -> None:
                 print(f"  用户: {msg_text}")
                 print(f"  助手: {result['messages'][-1].content}")
 
-            # ── 4. 模拟"跨进程恢复" ─────────────────────────────
             print("\n--- 进程 B：从 Redis 恢复状态 ---")
             graph2 = build_graph()
             app2 = graph2.compile(checkpointer=checkpointer)
@@ -127,17 +158,24 @@ async def main() -> None:
                     {"messages": [HumanMessage(content="继续上次的话题")]}, config=config
                 )
                 print(f"\n  继续对话后消息数: {len(result['messages'])}")
+            else:
+                raise RuntimeError("Redis checkpoint 未恢复到任何状态，示例不符合预期")
 
-            # ── 5. DB 隔离策略说明 ──────────────────────────────
-            print("\n=== DB 隔离策略 ===")
+            print("\n=== DB / Prefix 隔离策略 ===")
             print("  推荐方案：")
-            print("  - DB 0: 开发环境 checkpoint")
-            print("  - DB 1: 测试环境 checkpoint")
-            print("  - DB 2: 生产环境 checkpoint")
-            print("  - 或通过 key prefix 隔离: env:prod:thread:{id}")
+            print("  - checkpoint / store 默认共享 DB 0")
+            print("  - 通过 checkpoint/store 各自 prefix 隔离 key 空间")
+            print("  - cache 或实验数据可单独放到 DB 2")
 
-        print("\n=== Redis 连接已关闭 ===")
+        finally:
+            await close_checkpointer(None, None, None)
+            print("\n=== Redis 连接已关闭 ===")
     except Exception as exc:
+        require_real_redis(
+            backend="memory",
+            degraded=True,
+            last_error=f"{type(exc).__name__}: {exc}",
+        )
         print(f"Redis 不可用，降级到 MemorySaver: {type(exc).__name__}: {exc}")
         if "FT._LIST" in str(exc):
             print("提示: 当前 Redis 缺少 RediSearch/Redis Stack 能力，无法使用 langgraph-checkpoint-redis")
@@ -146,7 +184,7 @@ async def main() -> None:
         checkpointer = MemorySaver()
         graph = build_graph()
         app = graph.compile(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": "redis-demo-degraded"}}
+        config = {"configurable": {"thread_id": thread_id}}
         result = await app.ainvoke(
             {"messages": [HumanMessage(content="Redis 不可用时如何处理？")]},
             config=config,

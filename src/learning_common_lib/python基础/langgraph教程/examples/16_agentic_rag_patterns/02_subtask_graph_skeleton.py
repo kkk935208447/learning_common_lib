@@ -61,6 +61,7 @@ def init_node(state: SubtaskState) -> dict:
 def retrieve_node(state: SubtaskState) -> dict:
     """检索节点：从知识库检索相关文档"""
     query = state.get("query", "")
+
     print(f"[retrieve] 检索查询: {query}")
 
     # 模拟检索（生产环境替换为向量数据库调用）

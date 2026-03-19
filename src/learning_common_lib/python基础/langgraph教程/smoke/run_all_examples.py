@@ -1,6 +1,7 @@
 """Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。"""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,9 +19,29 @@ def classify_example(rel_path: str) -> str:
     return "integration" if rel_path in INTEGRATION_EXAMPLES else "core"
 
 
+def validate_integration_output(rel_path: str, stdout: str) -> str | None:
+    """集成示例必须显式证明自己真的连上了 Redis。"""
+    if "RUNTIME_STATUS" not in stdout:
+        return "缺少 RUNTIME_STATUS 运行时状态输出"
+    if "degraded=True" in stdout:
+        return "集成示例发生了 Redis 降级"
+    if rel_path == "05_checkpointing/04_redis_checkpointer.py":
+        if "RUNTIME_STATUS checkpoint=redis degraded=False" not in stdout:
+            return "Redis checkpointer 未确认使用真实 Redis backend"
+    if rel_path == "15_production_deployment/01_fastapi_sse_integration.py":
+        if "RUNTIME_STATUS checkpoint=redis store=redis degraded=False" not in stdout:
+            return "FastAPI SSE 示例未确认 checkpoint/store 都使用真实 Redis backend"
+    if rel_path == "16_agentic_rag_patterns/03_celery_bridge.py":
+        if "RUNTIME_STATUS checkpoint=redis degraded=False" not in stdout:
+            return "Celery bridge 示例未确认使用真实 Redis checkpoint backend"
+    return None
+
+
 def run_all() -> dict[str, list]:
     """运行所有示例文件，返回结果汇总。"""
-    examples_dir = Path(__file__).parent.parent / "examples"
+    tutorial_root = Path(__file__).resolve().parent.parent
+    project_root = tutorial_root.parents[3]
+    examples_dir = tutorial_root / "examples"
     results: dict[str, list] = {"passed": [], "failed": [], "skipped": []}
     kind_summary = {
         "core": {"passed": 0, "failed": 0, "skipped": 0},
@@ -31,12 +52,24 @@ def run_all() -> dict[str, list]:
         print(f"示例目录不存在: {examples_dir}")
         return results
 
-    py_files = sorted(examples_dir.rglob("*.py"))
+    py_files = sorted(
+        py_file
+        for py_file in examples_dir.rglob("*.py")
+        if py_file.name != "__init__.py"
+    )
     if not py_files:
         print("未找到任何 .py 文件")
         return results
 
     print(f"共发现 {len(py_files)} 个示例文件\n")
+
+    runner = "import runpy, sys; runpy.run_path(sys.argv[1], run_name='__main__')"
+    env = os.environ.copy()
+    pythonpath_parts = [str(project_root / "src")]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    env["LANGGRAPH_STRICT_REDIS"] = "1"
 
     for py_file in py_files:
         rel_path = str(py_file.relative_to(examples_dir))
@@ -46,19 +79,26 @@ def run_all() -> dict[str, list]:
 
         try:
             result = subprocess.run(
-                [sys.executable, str(py_file)],
+                [sys.executable, "-c", runner, str(py_file)],
                 capture_output=True,
                 text=True,
                 timeout=60,
+                cwd=project_root,
+                env=env,
             )
-            if result.returncode == 0:
+            validation_error = None
+            if result.returncode == 0 and kind == "integration":
+                validation_error = validate_integration_output(rel_path, result.stdout)
+
+            if result.returncode == 0 and validation_error is None:
                 results["passed"].append(rel_path)
                 kind_summary[kind]["passed"] += 1
                 print(f"  [PASS] 通过")
             else:
-                results["failed"].append((rel_path, result.stderr[:200]))
+                error_text = validation_error or result.stderr[:400] or result.stdout[:400]
+                results["failed"].append((rel_path, error_text))
                 kind_summary[kind]["failed"] += 1
-                print(f"  [FAIL] 失败: {result.stderr[:200]}")
+                print(f"  [FAIL] 失败: {error_text[:200]}")
         except subprocess.TimeoutExpired:
             results["skipped"].append(rel_path)
             kind_summary[kind]["skipped"] += 1

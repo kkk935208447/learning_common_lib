@@ -12,17 +12,19 @@ uv sync
 uv add langgraph-checkpoint-redis
 
 # 确保 Redis 已启动且密码正确（checkpoint / store / Celery 需要）
-docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
-
-# 或 Python 方式验证
+# 推荐先用 Python 方式验证
 python -c "import redis; print(redis.Redis(host='localhost', port=6379, password='123456').ping())"
+
+# 如本机安装了 redis-cli，也可以补充验证
+docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 ```
 
 补充说明：
 
 - `langgraph-checkpoint-redis` 需要支持 RediSearch / Redis Stack 的 Redis 实例
-- 普通 Redis 能连通，不代表 Redis checkpoint 示例一定能真正初始化成功
-- 教程里的 Redis 示例已经做了降级处理，但你仍应理解真实生产前提
+- 普通 Redis 能连通，不代表 Redis checkpoint / RedisStore 一定能真正初始化成功
+- Store 默认必须使用 `db=0`，否则可能报 `Cannot create index on db != 0`
+- 集成示例与 smoke 默认启用严格模式，只要降级到内存 backend 就算失败
 
 ## 阶段一：图基础（第 1-3 章）
 
@@ -159,10 +161,12 @@ python -c "import redis; print(redis.Redis(host='localhost', port=6379, password
 | 65 | `templates/state_schemas.py` | 可复用状态 schema |
 | 66 | `templates/safe_node.py` | 节点错误处理中间件 |
 | 67 | `templates/graph_builder.py` | 生产级图构建工厂 |
-| 68 | `templates/checkpoint_manager.py` | Checkpoint 管理器 |
-| 69 | `templates/multi_agent_orchestrator.py` | 多 Agent 编排骨架 |
-| 70 | `templates/celery_graph_bridge.py` | LangGraph + Celery 桥接 |
-| 71 | `templates/fastapi_graph_app.py` | FastAPI 集成 |
+| 68 | `templates/runtime_settings.py` | Redis-first 运行时配置 |
+| 69 | `templates/checkpoint_manager.py` | Redis-first Checkpoint 管理器 |
+| 70 | `templates/store_manager.py` | Redis-first Store 管理器 |
+| 71 | `templates/multi_agent_orchestrator.py` | 多 Agent 编排骨架 |
+| 72 | `templates/celery_graph_bridge.py` | LangGraph + Celery 桥接 |
+| 73 | `templates/fastapi_graph_app.py` | FastAPI 集成 |
 
 模板代码面向“复用模式”，不是最小教学路径；建议在完成前五个阶段后再进入。
 

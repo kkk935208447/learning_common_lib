@@ -12,7 +12,7 @@ import redis as redis_lib
 
 def reset_tutorial_redis() -> None:
     """清空教程专用 Redis DB，避免示例之间互相污染。"""
-    for db in (0, 1, 2):
+    for db in (0, 2):
         client = redis_lib.Redis(
             host="localhost",
             port=6379,
@@ -32,8 +32,7 @@ reset_tutorial_redis()
 
 说明：
 
-- `db=0`：通常给 checkpoint / Celery broker 使用
-- `db=1`：通常给 store / result backend 使用
+- `db=0`：教程默认给 checkpoint / store / Celery 使用，通过不同 prefix 隔离
 - `db=2`：通常给业务缓存或实验数据使用
 
 ## 定位
@@ -93,14 +92,15 @@ uv sync
 uv add langgraph-checkpoint-redis
 
 # 3. 确保 Redis 已启动（带密码 123456）
-# Docker 方式验证:
-docker exec <redis容器名> redis-cli -a 123456 ping  # 应返回 PONG
-
-# 或 Python 方式验证:
+# 推荐先用 Python 方式验证:
 python -c "import redis; print(redis.Redis(host='localhost', port=6379, password='123456').ping())"
+
+# 如本机安装了 redis-cli，也可以补充验证:
+docker exec <redis容器名> redis-cli -a 123456 ping  # 应返回 PONG
 ```
 
-如果你要验证 `langgraph-checkpoint-redis` 的真实能力，除了 Redis 连通外，还需要 Redis 支持 RediSearch。
+如果你要验证 `langgraph-checkpoint-redis` / `RedisStore` 的真实能力，除了 Redis 连通外，还需要 Redis 支持 RediSearch。
+另外，Store 默认必须落在 `db=0`，否则你会遇到 `Cannot create index on db != 0`。
 
 ## 目录结构
 
@@ -134,7 +134,9 @@ langgraph教程/
 │   ├── state_schemas.py
 │   ├── safe_node.py
 │   ├── graph_builder.py
+│   ├── runtime_settings.py
 │   ├── checkpoint_manager.py
+│   ├── store_manager.py
 │   ├── multi_agent_orchestrator.py
 │   ├── celery_graph_bridge.py
 │   └── fastapi_graph_app.py
@@ -149,7 +151,6 @@ cd src/learning_common_lib/python基础/langgraph教程
 
 # 如果之前运行过其他示例，建议先清理 Redis：
 redis-cli -a 123456 -n 0 FLUSHDB
-redis-cli -a 123456 -n 1 FLUSHDB
 redis-cli -a 123456 -n 2 FLUSHDB
 
 # 运行第一个示例（同步最小对照）
@@ -166,6 +167,18 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 
 - `core`：核心控制流示例
 - `integration`：Redis / FastAPI / Celery 集成示例
+- `integration` 默认采用严格模式：只要降级到内存 backend，就判定失败
+
+注意：
+
+- 集成示例会输出 `RUNTIME_STATUS ...` 行，明确说明是否真的连接到了 Redis
+- 退出码为 0 不再代表“Redis 一定工作正常”，必须同时看到 `backend=redis` / `degraded=False`
+
+模板层的生产默认约定：
+
+- `runtime_settings.py`：统一 Redis URL / DB / thread_id 命名
+- `checkpoint_manager.py`：Redis-first checkpoint，失败降级到 `MemorySaver`
+- `store_manager.py`：Redis-first store，失败降级到 `InMemoryStore`
 
 ## LLM 使用说明
 
@@ -265,15 +278,16 @@ LangGraph 提供两种 API 风格，教程都会覆盖：
 
 ```text
 checkpoint: redis://:123456@localhost:6379/0
-store:      redis://:123456@localhost:6379/1
+store:      redis://:123456@localhost:6379/0
 cache:      redis://:123456@localhost:6379/2
 ```
 
 说明：
 
-- 分库能避免不同教程组件的 key 冲突
+- checkpoint / store 默认共享 db=0，通过不同 key prefix 隔离
+- cache 仍建议单独放在 db=2，便于独立清理
 - 对 checkpoint 来说，推荐 Redis Stack / RediSearch 能力更完整
-- 普通 Redis 不一定支持 `langgraph-checkpoint-redis` 的所有命令
+- 普通 Redis 不一定支持 `langgraph-checkpoint-redis` 或 `RedisStore` 的所有命令
 
 thread_id 命名约定（参考 AgenticRAG）：
 
