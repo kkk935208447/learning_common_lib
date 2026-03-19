@@ -23,6 +23,7 @@
   - delay() 与 apply_async(args=..., kwargs=...) 在基础调用上效果一致
   - 一旦需要调度或路由，必须切到 apply_async()
   - queue/countdown/eta/expires 等能力构成了 apply_async 的完整价值
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
 """
 
 from __future__ import annotations

@@ -7,6 +7,7 @@ Python 版本: 3.11+
   终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/02_task_definition/02_serialization.py
 预期现象: JSON 安全类型正常传递，不安全类型触发异常并展示 workaround
 生产提醒: 始终使用 JSON 序列化 (勿用 pickle)，复杂对象先转为 JSON 安全类型再传入任务
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
 """
 
 from __future__ import annotations

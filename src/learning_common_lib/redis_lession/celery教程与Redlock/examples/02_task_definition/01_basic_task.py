@@ -24,6 +24,7 @@
   - self.request.id 是任务的唯一标识符，用于结果存储和状态跟踪
   - delivery_info 包含队列、交换机、路由键等消息传递信息
   - 任务继承允许在 on_success、on_failure 等钩子中添加通用逻辑
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
 """
 
 from __future__ import annotations
