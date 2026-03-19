@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -56,7 +57,7 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
     # 1. 获取 Mermaid 文本
@@ -83,10 +84,10 @@ def main() -> None:
     except Exception:
         print("draw_png 不可用（需要 pip install pygraphviz）")
 
-    # 4. 正常执行图
-    result = app.invoke({"data": "  hello world  ", "log": []})
+    # 4. async-first 主线使用 ainvoke 执行图
+    result = await app.ainvoke({"data": "  hello world  ", "log": []})
     print(f"\n执行结果: {result}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

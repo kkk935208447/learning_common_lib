@@ -23,9 +23,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.store.memory import InMemoryStore
@@ -97,27 +98,27 @@ def build_store_graph():
 
 
 if __name__ == "__main__":
-    app = build_store_graph()
+    async def main() -> None:
+        app = build_store_graph()
 
-    # ── 线程 A：用户表达偏好 ──
-    print("=== 线程 A: 用户表达偏好 ===\n")
-    config_a = {"configurable": {"thread_id": "thread-A"}}
-    app.invoke(
-        {"query": "我喜欢机器学习", "response": "", "user_id": "user-42"},
-        config=config_a,
-    )
+        print("=== 线程 A: 用户表达偏好 ===\n")
+        config_a = {"configurable": {"thread_id": "thread-A"}}
+        await app.ainvoke(
+            {"query": "我喜欢机器学习", "response": "", "user_id": "user-42"},
+            config=config_a,
+        )
 
-    # ── 线程 B：新对话，但能读取之前的偏好 ──
-    print("\n=== 线程 B: 跨线程读取偏好 ===\n")
-    config_b = {"configurable": {"thread_id": "thread-B"}}
-    result = app.invoke(
-        {"query": "给我推荐一些内容", "response": "", "user_id": "user-42"},
-        config=config_b,
-    )
-    print(f"\n回复: {result['response']}")
+        print("\n=== 线程 B: 跨线程读取偏好 ===\n")
+        config_b = {"configurable": {"thread_id": "thread-B"}}
+        result = await app.ainvoke(
+            {"query": "给我推荐一些内容", "response": "", "user_id": "user-42"},
+            config=config_b,
+        )
+        print(f"\n回复: {result['response']}")
 
-    # ── 直接查看 Store 内容 ──
-    print("\n=== Store 内容检查 ===")
-    items = store.search(("users", "user-42", "preferences"))
-    for item in items:
-        print(f"  {item.key}: {item.value}")
+        print("\n=== Store 内容检查 ===")
+        items = store.search(("users", "user-42", "preferences"))
+        for item in items:
+            print(f"  {item.key}: {item.value}")
+
+    asyncio.run(main())

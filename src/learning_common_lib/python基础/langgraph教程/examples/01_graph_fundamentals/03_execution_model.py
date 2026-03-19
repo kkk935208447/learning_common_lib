@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -76,24 +77,24 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
-    # 使用 stream 观察每个 superstep 的输出
-    print("=== 使用 stream 观察 superstep 执行过程 ===\n")
+    # 使用 astream 观察每个 superstep 的输出
+    print("=== 使用 astream 观察 superstep 执行过程 ===\n")
     superstep = 0
-    for event in app.stream({"value": 5, "log": ["初始化"]}, stream_mode="updates"):
+    async for event in app.astream({"value": 5, "log": ["初始化"]}, stream_mode="updates"):
         superstep += 1
         print(f"\n--- Superstep {superstep} 输出 ---")
         for node_name, output in event.items():
             print(f"  节点 '{node_name}' 返回: {output}")
 
-    # 也可以用 invoke 获取最终结果
-    print("\n=== invoke 最终结果 ===")
-    result = app.invoke({"value": 5, "log": ["初始化"]})
+    # async-first 主线使用 ainvoke 获取最终结果
+    print("\n=== ainvoke 最终结果 ===")
+    result = await app.ainvoke({"value": 5, "log": ["初始化"]})
     print(f"value = {result['value']}")
     print(f"执行轨迹: {result['log']}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

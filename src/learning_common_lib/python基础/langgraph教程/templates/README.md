@@ -22,7 +22,7 @@ from templates import GraphBuilder, AgentState, safe_node
 # 1. 定义节点
 @safe_node(node_name="my_node", timeout_s=10)
 async def my_node(state: dict) -> dict:
-    return {**state, "next_action": "continue"}
+    return {"next_action": "continue"}
 
 # 2. 构建图
 graph = (

@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -50,7 +51,7 @@ def flexible_node(state: FlexibleState) -> dict:
 
 
 # ---------- 构建图 ----------
-def demo_strict() -> None:
+async def demo_strict() -> None:
     """演示 total=True 的严格状态。"""
     print("=== StrictState (total=True) ===")
     graph = StateGraph(StrictState)
@@ -62,11 +63,11 @@ def demo_strict() -> None:
     app = graph.compile()
 
     # 必须提供所有字段
-    result = app.invoke({"name": "测试用户", "score": 0})
+    result = await app.ainvoke({"name": "测试用户", "score": 0})
     print(f"结果: {result}\n")
 
 
-def demo_flexible() -> None:
+async def demo_flexible() -> None:
     """演示 total=False 的灵活状态。"""
     print("=== FlexibleState (total=False) ===")
     graph = StateGraph(FlexibleState)
@@ -76,16 +77,16 @@ def demo_flexible() -> None:
     app = graph.compile()
 
     # 可以只提供部分字段
-    result = app.invoke({"name": "用户A"})
+    result = await app.ainvoke({"name": "用户A"})
     print(f"不传 tag: {result}")
 
-    result = app.invoke({"name": "用户B", "tag": "VIP"})
+    result = await app.ainvoke({"name": "用户B", "tag": "VIP"})
     print(f"传了 tag: {result}\n")
 
 
-def main() -> None:
-    demo_strict()
-    demo_flexible()
+async def main() -> None:
+    await demo_strict()
+    await demo_flexible()
 
     # 演示 last-write-wins
     print("=== Last-Write-Wins 演示 ===")
@@ -94,4 +95,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

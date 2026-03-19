@@ -1,36 +1,37 @@
-"""FastAPI + LangGraph SSE 流式端点
+"""FastAPI + LangGraph SSE 流式端点。
 
 目标：
     演示 FastAPI 集成 LangGraph 的 SSE（Server-Sent Events）流式端点，
-    实现实时 token 级别的流式输出。
+    使用 graph.astream(..., stream_mode="messages") 输出 token 级内容。
 
 关键 API：
     - StreamingResponse —— FastAPI 流式响应
-    - graph.astream_events(version="v2") —— 异步事件流
+    - graph.astream(..., stream_mode="messages") —— 异步消息流
     - lifespan —— 应用生命周期管理
 
 运行命令：
-    # 本文件仅演示代码结构，不直接运行服务器
-    # 生产环境: uvicorn 01_fastapi_sse_integration:app --host 0.0.0.0 --port 8000
-    python 01_fastapi_sse_integration.py
+    uvicorn 01_fastapi_sse_integration:app --host 0.0.0.0 --port 8000
 
 预期现象：
-    打印 FastAPI 应用结构和端点信息，演示 SSE 事件生成器的工作方式。
+    1. 文件内直接定义可运行的 FastAPI app
+    2. `/chat/stream` 以 SSE 方式逐 token 输出内容
+    3. `/chat/invoke` 返回非流式完整结果
 
 生产提醒：
-    - 使用 lifespan 管理图实例的创建和销毁
-    - SSE 连接需要设置合理的超时时间
+    - 面向聊天 UI 的主路径更适合 `stream_mode="messages"`
+    - `astream_events()` 更适合调试和可观测性，不应混写成主流 SSE 模式
     - 并发控制：使用 asyncio.Semaphore 限制同时执行的图数量
-    - 生产环境建议添加认证中间件和速率限制
 """
 from __future__ import annotations
 
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, TypedDict
+from typing import AsyncGenerator
 
-from langchain_community.chat_models import FakeListChatModel
+from fastapi import FastAPI, Query
+from fastapi.responses import StreamingResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.graph import END, MessagesState, StateGraph
 
 
@@ -39,10 +40,12 @@ from langgraph.graph import END, MessagesState, StateGraph
 # ══════════════════════════════════════════════════════════
 
 def build_chat_graph():
-    """构建聊天图"""
-    # 使用 FakeListChatModel 模拟
-    # 生产环境替换为: ChatOpenAI(model="gpt-4o", streaming=True)
-    llm = FakeListChatModel(responses=["这是一个流式回复的模拟内容。"])
+    """构建聊天图。"""
+    llm = FakeListChatModel(
+        responses=[
+            "这是一个流式回复的模拟内容，用于演示 FastAPI SSE 和 LangGraph messages 流。",
+        ]
+    )
 
     def chat_node(state: MessagesState) -> dict:
         result = llm.invoke(state["messages"])
@@ -56,20 +59,17 @@ def build_chat_graph():
 
 
 # ══════════════════════════════════════════════════════════
-# FastAPI 应用（演示结构）
+# FastAPI 应用
 # ══════════════════════════════════════════════════════════
 
-# 并发控制信号量
 MAX_CONCURRENT = 10
 semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-
-# 全局图实例（由 lifespan 管理）
 graph_app = None
 
 
 @asynccontextmanager
-async def lifespan(app):
-    """应用生命周期管理：启动时创建图，关闭时清理资源"""
+async def lifespan(_: FastAPI):
+    """应用生命周期管理。"""
     global graph_app
     print("[lifespan] 初始化 LangGraph 图实例...")
     graph_app = build_chat_graph()
@@ -79,85 +79,73 @@ async def lifespan(app):
 
 
 async def event_generator(query: str) -> AsyncGenerator[str, None]:
-    """SSE 事件生成器
-
-    将 LangGraph 的 astream_events 转换为 SSE 格式。
-    每个 token 作为一个 SSE 事件发送。
-    """
-    async with semaphore:  # 并发控制
+    """将 LangGraph messages 流转换为 SSE。"""
+    async with semaphore:
         try:
-            async for event in graph_app.astream_events(
+            start_payload = json.dumps({"event": "start", "query": query}, ensure_ascii=False)
+            yield f"data: {start_payload}\n\n"
+
+            async for chunk, metadata in graph_app.astream(
                 {"messages": [("human", query)]},
-                version="v2",
+                stream_mode="messages",
             ):
-                if event["event"] == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-                    if hasattr(chunk, "content") and chunk.content:
-                        payload = json.dumps(
-                            {"token": chunk.content},
-                            ensure_ascii=False,
-                        )
-                        yield f"data: {payload}\n\n"
+                content = getattr(chunk, "content", "")
+                if not content:
+                    continue
 
-            # 发送结束标记
+                payload = json.dumps(
+                    {
+                        "event": "token",
+                        "node": metadata.get("langgraph_node"),
+                        "token": content,
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"data: {payload}\n\n"
+
             yield "data: [DONE]\n\n"
-
-        except Exception as e:
-            error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
+        except Exception as exc:
+            error_payload = json.dumps({"event": "error", "error": str(exc)}, ensure_ascii=False)
             yield f"data: {error_payload}\n\n"
 
 
-# ── FastAPI 路由定义（演示代码，需要 fastapi 依赖）──
-def create_app():
-    """创建 FastAPI 应用
-
-    实际使用时取消注释以下代码：
-    ```python
-    from fastapi import FastAPI, Query
-    from fastapi.responses import StreamingResponse
-    from fastapi.middleware.cors import CORSMiddleware
-
+def create_app() -> FastAPI:
+    """创建 FastAPI 应用。"""
     app = FastAPI(title="LangGraph SSE API", lifespan=lifespan)
 
-    # CORS 中间件（允许前端跨域访问）
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     @app.post("/chat/stream")
-    async def chat_stream(query: str = Query(..., description="用户查询")):
+    async def chat_stream(query: str = Query(..., description="用户查询")) -> StreamingResponse:
         return StreamingResponse(
             event_generator(query),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+                "X-Accel-Buffering": "no",
             },
         )
 
     @app.post("/chat/invoke")
-    async def chat_invoke(query: str = Query(...)):
+    async def chat_invoke(query: str = Query(..., description="用户查询")) -> dict[str, str]:
         result = await graph_app.ainvoke({"messages": [("human", query)]})
         return {"response": result["messages"][-1].content}
 
     @app.get("/health")
-    async def health():
+    async def health() -> dict[str, str | bool]:
         return {"status": "ok", "graph_loaded": graph_app is not None}
-    ```
-    """
-    print("FastAPI 应用结构已定义（需要 fastapi + uvicorn 依赖）")
+
+    return app
+
+
+app = create_app()
 
 
 # ══════════════════════════════════════════════════════════
-# 本地演示（不启动服务器）
+# 本地演示
 # ══════════════════════════════════════════════════════════
 
 async def demo_sse_flow() -> None:
-    """演示 SSE 事件流的生成过程"""
+    """演示 SSE 事件流的生成过程。"""
     global graph_app
     graph_app = build_chat_graph()
 
@@ -168,11 +156,9 @@ async def demo_sse_flow() -> None:
 
 if __name__ == "__main__":
     print("=== FastAPI + LangGraph SSE 集成演示 ===\n")
-
-    create_app()
-
+    print("已定义可直接启动的 FastAPI app")
+    print("路由: POST /chat/stream, POST /chat/invoke, GET /health")
     print("\n--- SSE 事件流演示 ---\n")
     asyncio.run(demo_sse_flow())
-
     print("\n生产环境启动命令:")
     print("  uvicorn 01_fastapi_sse_integration:app --host 0.0.0.0 --port 8000")

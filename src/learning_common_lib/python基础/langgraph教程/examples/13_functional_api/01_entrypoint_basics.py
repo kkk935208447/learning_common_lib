@@ -22,7 +22,9 @@
 """
 from __future__ import annotations
 
-from langchain_community.chat_models import FakeListChatModel
+import asyncio
+
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.func import entrypoint
 
@@ -85,18 +87,19 @@ def batch_processor(items: list[str]) -> list[str]:
 
 
 if __name__ == "__main__":
-    # ── 演示 1：分类响应工作流 ──
-    print("=== @entrypoint 分类响应 ===\n")
-    config = {"configurable": {"thread_id": "ep-demo-1"}}
+    async def main() -> None:
+        print("=== @entrypoint 分类响应 ===\n")
+        config = {"configurable": {"thread_id": "ep-demo-1"}}
 
-    queries = ["这个产品多少钱？", "系统报错了怎么办？", "你好"]
-    for q in queries:
-        result = classify_and_respond.invoke(q, config=config)
-        print(f"  结果: {result}\n")
+        queries = ["这个产品多少钱？", "系统报错了怎么办？", "你好"]
+        for q in queries:
+            result = await classify_and_respond.ainvoke(q, config=config)
+            print(f"  结果: {result}\n")
 
-    # ── 演示 2：批处理工作流 ──
-    print("=== @entrypoint 批处理 ===\n")
-    config2 = {"configurable": {"thread_id": "ep-demo-2"}}
-    items = ["任务a", "任务b", "任务c", "任务d"]
-    result = batch_processor.invoke(items, config=config2)
-    print(f"  批处理结果: {result}")
+        print("=== @entrypoint 批处理 ===\n")
+        config2 = {"configurable": {"thread_id": "ep-demo-2"}}
+        items = ["任务a", "任务b", "任务c", "任务d"]
+        result = await batch_processor.ainvoke(items, config=config2)
+        print(f"  批处理结果: {result}")
+
+    asyncio.run(main())

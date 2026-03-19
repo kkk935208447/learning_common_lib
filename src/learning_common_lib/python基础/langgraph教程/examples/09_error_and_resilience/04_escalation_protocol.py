@@ -8,8 +8,7 @@ from __future__ import annotations
 生产提醒: 升级协议是 AgenticRAG 容错的核心，确保子任务失败不会静默丢失
 """
 
-import operator
-from typing import Annotated, Literal, TypedDict
+from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -44,9 +43,11 @@ class SubtaskState(TypedDict, total=False):
 
 class GlobalState(TypedDict, total=False):
     subtasks: list[dict]
-    escalations: Annotated[list[EscalationReport], operator.add]
-    completed: Annotated[list[str], operator.add]
+    escalations: list[EscalationReport]
+    completed: list[str]
     global_action: str
+    replan_count: int
+    max_replans: int
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +99,21 @@ def execute_subtask(state: SubtaskState) -> dict:
 def dispatcher(state: GlobalState) -> dict:
     """分发子任务并收集结果"""
     subtasks = state.get("subtasks", [])
+    replan_count = state.get("replan_count", 0)
     escalations: list[EscalationReport] = []
     completed: list[str] = []
 
     sub_graph = _build_subtask_graph()
 
     for task_def in subtasks:
+        adjusted_quality = task_def.get("quality_score", 0)
+        adjusted_dependency = task_def.get("dependency_met", True)
+
+        # 演示重规划后的修复效果：第二轮修复依赖和质量问题。
+        if replan_count >= 1 and task_def["code"] in {"S4", "S5"}:
+            adjusted_dependency = True
+            adjusted_quality = 0.9
+
         sub_input: SubtaskState = {
             "code": task_def["code"],
             "description": task_def.get("description", ""),
@@ -111,8 +121,8 @@ def dispatcher(state: GlobalState) -> dict:
             "max_retries": task_def.get("max_retries", 3),
             "budget_used": task_def.get("budget_used", 0),
             "budget_limit": task_def.get("budget_limit", 10),
-            "quality_score": task_def.get("quality_score", 0),
-            "dependency_met": task_def.get("dependency_met", True),
+            "quality_score": adjusted_quality,
+            "dependency_met": adjusted_dependency,
         }
         result = sub_graph.invoke(sub_input)
         if result.get("escalation"):
@@ -126,6 +136,8 @@ def dispatcher(state: GlobalState) -> dict:
 def handle_escalations(state: GlobalState) -> dict:
     """处理升级报告"""
     escalations = state.get("escalations", [])
+    replan_count = state.get("replan_count", 0)
+    max_replans = state.get("max_replans", 1)
     if not escalations:
         print("[全局] 无升级，全部完成")
         return {"global_action": "done"}
@@ -135,8 +147,12 @@ def handle_escalations(state: GlobalState) -> dict:
 
     # 根据升级建议决定全局动作
     actions = {e["suggested_action"] for e in escalations}
+    if "replan" in actions and replan_count < max_replans:
+        print(f"[全局] 触发重规划 ({replan_count + 1}/{max_replans})")
+        return {"global_action": "replan", "replan_count": replan_count + 1}
     if "replan" in actions:
-        return {"global_action": "replan"}
+        print("[全局] 已达到最大重规划次数，进入人工处理")
+        return {"global_action": "manual"}
     if "manual" in actions:
         return {"global_action": "manual"}
     return {"global_action": "done"}
@@ -190,6 +206,8 @@ if __name__ == "__main__":
         "escalations": [],
         "completed": [],
         "global_action": "",
+        "replan_count": 0,
+        "max_replans": 1,
     }
     result = graph.invoke(initial)
     print(f"\n完成: {result.get('completed')}")

@@ -5,11 +5,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.graph import END, StateGraph
 
-from .safe_node import safe_node
-from .state_schemas import AgentState
+try:
+    from .safe_node import safe_node
+    from .state_schemas import AgentState
+except ImportError:  # pragma: no cover - 允许直接运行模板文件
+    from safe_node import safe_node
+    from state_schemas import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +54,14 @@ class SupervisorAgent:
             iteration = state.get("iteration", 0)
             max_iter = state.get("max_iterations", 5)
             if iteration >= max_iter:
-                return {**state, "next_action": "__end__"}
+                return {"next_action": "__end__"}
             # 简化：用 LLM 决定下一个 worker
             worker_names = list(self._workers.keys())
             response = self._llm.invoke(f"选择 worker: {worker_names}")
             chosen = response.content.strip()
             if chosen not in self._workers:
                 chosen = worker_names[0]
-            return {**state, "next_action": chosen, "iteration": iteration + 1}
+            return {"next_action": chosen, "iteration": iteration + 1}
 
         builder.add_node("supervisor", supervisor_node)
 
@@ -108,11 +112,11 @@ class Orchestrator:
             iteration = state.get("iteration", 0)
             max_iter = state.get("max_iterations", 3)
             if iteration >= max_iter:
-                return {**state, "next_action": "__end__"}
+                return {"next_action": "__end__"}
             response = self._llm.invoke("是否需要重新规划？")
             if "done" in response.content.lower():
-                return {**state, "next_action": "__end__"}
-            return {**state, "next_action": "planner", "iteration": iteration + 1}
+                return {"next_action": "__end__"}
+            return {"next_action": "planner", "iteration": iteration + 1}
 
         builder.add_node("planner", plan_node)
         builder.add_node("executor", execute_node)
@@ -141,11 +145,11 @@ async def _demo() -> None:
 
     async def worker_a_fn(state: dict) -> dict:
         print(f"  Worker A 执行, iteration={state.get('iteration', 0)}")
-        return {**state, "next_action": "supervisor"}
+        return {"next_action": "supervisor"}
 
     async def worker_b_fn(state: dict) -> dict:
         print(f"  Worker B 执行, iteration={state.get('iteration', 0)}")
-        return {**state, "next_action": "supervisor"}
+        return {"next_action": "supervisor"}
 
     workers = [
         WorkerAgent(name="worker_a", description="工作者A", func=worker_a_fn),
@@ -164,4 +168,3 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(_demo())
-

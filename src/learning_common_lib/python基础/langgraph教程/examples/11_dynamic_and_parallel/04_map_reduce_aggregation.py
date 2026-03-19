@@ -5,9 +5,9 @@
     分发多个并行任务 → 各自独立处理 → 结果自动聚合 → 最终汇总。
 
 关键 API：
-    - Send(node, state) —— 动态分发
+    - Send(node, state) —— 路由函数中动态分发
+    - add_conditional_edges(...) —— 将准备好的任务 fan-out 到 worker
     - Annotated[list, operator.add] —— reducer 自动聚合
-    - 参考 AgenticRAG 的 READY batch dispatch 模式
 
 运行命令：
     python 04_map_reduce_aggregation.py
@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -39,18 +40,26 @@ class DocState(TypedDict):
 class MainState(TypedDict):
     """主状态：documents 待处理，summaries 通过 reducer 聚合"""
     documents: list[dict[str, str]]
+    dispatch_docs: list[dict[str, str]]
+    batch: int
     summaries: Annotated[list[dict], operator.add]
     final_report: str
 
 
 # ── 节点函数 ──────────────────────────────────────────────
-def dispatch_node(state: MainState) -> list[Send]:
-    """READY batch dispatch：将所有文档分发到 worker"""
-    docs = state["documents"]
-    print(f"[dispatch] 分发 {len(docs)} 个文档到并行 worker")
+def dispatch_node(state: MainState) -> dict:
+    """准备一批要 fan-out 的文档。"""
+    docs = list(state["documents"])
+    batch = state.get("batch", 0) + 1
+    print(f"[dispatch] 第 {batch} 批分发 {len(docs)} 个文档到并行 worker")
+    return {"dispatch_docs": docs, "batch": batch}
+
+
+def dispatch_route(state: MainState) -> list[Send]:
+    """基于 dispatch_docs fan-out 到 analyze_worker。"""
     return [
         Send("analyze_worker", {"doc_id": doc["id"], "content": doc["content"]})
-        for doc in docs
+        for doc in state.get("dispatch_docs", [])
     ]
 
 
@@ -100,7 +109,7 @@ def build_map_reduce_graph() -> StateGraph:
     graph.add_node("aggregate", aggregate_node)
 
     graph.set_entry_point("dispatch")
-    graph.add_conditional_edges("dispatch", dispatch_node, ["analyze_worker"])
+    graph.add_conditional_edges("dispatch", dispatch_route, ["analyze_worker"])
     graph.add_edge("analyze_worker", "aggregate")
     graph.add_edge("aggregate", END)
 
@@ -108,19 +117,24 @@ def build_map_reduce_graph() -> StateGraph:
 
 
 if __name__ == "__main__":
-    app = build_map_reduce_graph()
+    async def main() -> None:
+        app = build_map_reduce_graph()
 
-    documents = [
-        {"id": "DOC-001", "content": "LangGraph 是一个用于构建有状态多步骤 AI 应用的框架"},
-        {"id": "DOC-002", "content": "Celery 是 Python 生态中最流行的分布式任务队列"},
-        {"id": "DOC-003", "content": "Redis 既可以作为缓存也可以作为消息代理使用"},
-    ]
+        documents = [
+            {"id": "DOC-001", "content": "LangGraph 是一个用于构建有状态多步骤 AI 应用的框架"},
+            {"id": "DOC-002", "content": "Celery 是 Python 生态中最流行的分布式任务队列"},
+            {"id": "DOC-003", "content": "Redis 既可以作为缓存也可以作为消息代理使用"},
+        ]
 
-    print("=== Map-Reduce 聚合演示 ===\n")
-    result = app.invoke({
-        "documents": documents,
-        "summaries": [],
-        "final_report": "",
-    })
+        print("=== Map-Reduce 聚合演示 ===\n")
+        result = await app.ainvoke({
+            "documents": documents,
+            "dispatch_docs": [],
+            "batch": 0,
+            "summaries": [],
+            "final_report": "",
+        })
 
-    print(f"\n{result['final_report']}")
+        print(f"\n{result['final_report']}")
+
+    asyncio.run(main())

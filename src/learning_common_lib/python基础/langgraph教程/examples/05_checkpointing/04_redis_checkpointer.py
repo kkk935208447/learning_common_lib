@@ -11,6 +11,7 @@ from __future__ import annotations
   4. ResilientCheckpointer 包装器演示：写入失败时降级为日志
 生产提醒：
   - 需要安装: pip install langgraph-checkpoint-redis
+  - 需要带 RediSearch/Redis Stack 能力的 Redis 实例，普通 Redis 可能报 `FT._LIST` 不存在
   - Redis 连接需要配置密码和合适的 DB 编号
   - 建议为不同环境（dev/staging/prod）使用不同的 DB 编号
   - TTL 策略：通过 Redis 的 EXPIRE 或定期清理过期 checkpoint
@@ -92,52 +93,65 @@ async def main() -> None:
         print("\n提示：安装 langgraph-checkpoint-redis 后可体验完整 Redis 功能")
         return
 
-    # 使用 async context manager 管理 Redis 连接
-    async with AsyncRedisSaver.from_conn_string(REDIS_URL) as checkpointer:
-        print("=== Redis Checkpointer 已连接 ===")
+    try:
+        # 使用 async context manager 管理 Redis 连接
+        async with AsyncRedisSaver.from_conn_string(REDIS_URL) as checkpointer:
+            print("=== Redis Checkpointer 已连接 ===")
 
-        # ── 3. 第一个"进程"：创建对话 ───────────────────────
+            # ── 3. 第一个"进程"：创建对话 ───────────────────────
+            graph = build_graph()
+            app = graph.compile(checkpointer=checkpointer)
+            config = {"configurable": {"thread_id": "redis-thread-001"}}
+
+            print("\n--- 进程 A：创建对话 ---")
+            for msg_text in ["你好", "LangGraph 怎么用？"]:
+                result = await app.ainvoke(
+                    {"messages": [HumanMessage(content=msg_text)]}, config=config
+                )
+                print(f"  用户: {msg_text}")
+                print(f"  助手: {result['messages'][-1].content}")
+
+            # ── 4. 模拟"跨进程恢复" ─────────────────────────────
+            print("\n--- 进程 B：从 Redis 恢复状态 ---")
+            graph2 = build_graph()
+            app2 = graph2.compile(checkpointer=checkpointer)
+
+            state = await app2.aget_state(config)
+            if state and state.values:
+                print(f"  恢复成功！消息数: {len(state.values['messages'])}")
+                for msg in state.values["messages"]:
+                    role = "用户" if isinstance(msg, HumanMessage) else "助手"
+                    print(f"    [{role}] {msg.content}")
+
+                result = await app2.ainvoke(
+                    {"messages": [HumanMessage(content="继续上次的话题")]}, config=config
+                )
+                print(f"\n  继续对话后消息数: {len(result['messages'])}")
+
+            # ── 5. DB 隔离策略说明 ──────────────────────────────
+            print("\n=== DB 隔离策略 ===")
+            print("  推荐方案：")
+            print("  - DB 0: 开发环境 checkpoint")
+            print("  - DB 1: 测试环境 checkpoint")
+            print("  - DB 2: 生产环境 checkpoint")
+            print("  - 或通过 key prefix 隔离: env:prod:thread:{id}")
+
+        print("\n=== Redis 连接已关闭 ===")
+    except Exception as exc:
+        print(f"Redis 不可用，降级到 MemorySaver: {type(exc).__name__}: {exc}")
+        if "FT._LIST" in str(exc):
+            print("提示: 当前 Redis 缺少 RediSearch/Redis Stack 能力，无法使用 langgraph-checkpoint-redis")
+        from langgraph.checkpoint.memory import MemorySaver
+
+        checkpointer = MemorySaver()
         graph = build_graph()
         app = graph.compile(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": "redis-thread-001"}}
-
-        print("\n--- 进程 A：创建对话 ---")
-        for msg_text in ["你好", "LangGraph 怎么用？"]:
-            result = await app.ainvoke(
-                {"messages": [HumanMessage(content=msg_text)]}, config=config
-            )
-            print(f"  用户: {msg_text}")
-            print(f"  助手: {result['messages'][-1].content}")
-
-        # ── 4. 模拟"跨进程恢复" ─────────────────────────────
-        print("\n--- 进程 B：从 Redis 恢复状态 ---")
-        # 重新构建图（模拟新进程）
-        graph2 = build_graph()
-        app2 = graph2.compile(checkpointer=checkpointer)
-
-        # 使用相同的 thread_id 恢复
-        state = await app2.aget_state(config)
-        if state and state.values:
-            print(f"  恢复成功！消息数: {len(state.values['messages'])}")
-            for msg in state.values["messages"]:
-                role = "用户" if isinstance(msg, HumanMessage) else "助手"
-                print(f"    [{role}] {msg.content}")
-
-            # 继续对话
-            result = await app2.ainvoke(
-                {"messages": [HumanMessage(content="继续上次的话题")]}, config=config
-            )
-            print(f"\n  继续对话后消息数: {len(result['messages'])}")
-
-        # ── 5. DB 隔离策略说明 ──────────────────────────────
-        print("\n=== DB 隔离策略 ===")
-        print("  推荐方案：")
-        print("  - DB 0: 开发环境 checkpoint")
-        print("  - DB 1: 测试环境 checkpoint")
-        print("  - DB 2: 生产环境 checkpoint")
-        print("  - 或通过 key prefix 隔离: env:prod:thread:{id}")
-
-    print("\n=== Redis 连接已关闭 ===")
+        config = {"configurable": {"thread_id": "redis-demo-degraded"}}
+        result = await app.ainvoke(
+            {"messages": [HumanMessage(content="Redis 不可用时如何处理？")]},
+            config=config,
+        )
+        print(f"  降级模式回复: {result['messages'][-1].content}")
 
 
 if __name__ == "__main__":

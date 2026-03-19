@@ -1,8 +1,10 @@
 # LangGraph 架构全景图
 
+本文件恢复了原始教程中大部分架构图、映射关系和概念说明，同时按当前仓库 `langgraph 1.1.x` 与 async-first 教学口径统一修正。
+
 ## 1. 核心分层架构
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        用户代码层 (User Code)                        │
 │  定义 State、Node 函数、Edge 路由逻辑、工具                            │
@@ -24,83 +26,83 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                   Pregel 执行引擎 (Runtime)                          │
-│  Superstep 循环 → 节点调度 → 并行执行 → Channel 合并                  │
-│  支持: invoke / stream / ainvoke / astream                          │
+│  Superstep 循环 → 节点调度 → 并行执行 → reducer 合并                  │
+│  支持: invoke / ainvoke / stream / astream / astream_events         │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                     ┌──────────┼──────────┐
                     ▼          ▼          ▼
              ┌───────────┐ ┌──────────┐ ┌──────────┐
              │  Channel  │ │Checkpoint│ │  Store   │
-             │  系统      │ │  持久化   │ │ 长期记忆  │
+             │  语义层    │ │  持久化   │ │ 长期记忆  │
              └───────────┘ └──────────┘ └──────────┘
 ```
 
+当前教程建议：
+
+- Graph API 是复杂拓扑、多 Agent、双图架构的主线
+- Functional API 更适合线性 workflow
+- 运行入口默认优先 `ainvoke` / `astream`
+
 ## 2. Pregel 执行模型详细图
 
-```
+```text
                          Superstep N 完整流程
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ① 读取 Channels        ② 确定活跃节点        ③ 并行执行节点         │
-│  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      │
-│  │ 从 checkpoint │  →   │ 根据入边和    │  →   │  node_A()    │      │
-│  │ 恢复 state    │      │ 条件判断哪些  │      │  node_B()    │      │
-│  │              │      │ 节点应执行    │      │  (并行)      │      │
-│  └──────────────┘      └──────────────┘      └──────┬───────┘      │
-│                                                      │              │
-│  ⑧ 确定下一步          ⑦ 保存 checkpoint    ⑥ 写入 Channels        │
-│  ┌──────────────┐      ┌──────────────┐      ┌──────┴───────┐      │
-│  │ 评估条件边    │  ←   │ checkpointer │  ←   │ 通过 reducer  │      │
-│  │ 确定下一轮    │      │ .put(state)  │      │ 合并到 state  │      │
-│  │ 活跃节点     │      │              │      │              │      │
-│  └──────────────┘      └──────────────┘      └──────────────┘      │
+│  ① 读取 state / checkpoint   ② 确定活跃节点   ③ 执行节点             │
+│  ┌──────────────┐          ┌──────────────┐  ┌──────────────┐       │
+│  │ 从 checkpoint │   →      │ 根据边和路由   │  │ node_A()     │       │
+│  │ 恢复上下文     │          │ 判断哪些节点   │  │ node_B()     │       │
+│  │              │          │ 应被激活      │  │ (可并行)     │       │
+│  └──────────────┘          └──────────────┘  └──────┬───────┘       │
+│                                                      │               │
+│  ⑧ 决定下一步             ⑦ 保存 checkpoint    ⑥ reducer 合并       │
+│  ┌──────────────┐         ┌──────────────┐      ┌──────────────┐    │
+│  │ 条件边 / END  │   ←     │ checkpointer │  ←   │ 写入 channel  │    │
+│  │ 下一轮激活集   │         │ / state snap │      │ / state 字段  │    │
+│  └──────────────┘         └──────────────┘      └──────────────┘    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 关键点：
-- 同一 superstep 内的多个节点并行执行，互不可见彼此的输出
-- Reducer 决定状态字段如何合并（追加、覆盖、清除）
-- 每个 superstep 结束后保存 checkpoint，确保可恢复性
+
+- 同一 superstep 内的多个节点共享同一输入快照，互相看不到彼此当前轮的写入
+- reducer 决定状态字段的合并语义
+- checkpoint 保存的是 state 演进，不是你手工维护的中间对象图
 
 ## 3. Channel 系统详图
 
-```
+```text
                         Channel 类型体系
 ┌─────────────────────────────────────────────────────────────────────┐
+│  LastValue（默认）                                                  │
+│    - 语义：后写覆盖（last-write-wins）                              │
+│    - 用途：普通标量字段（status、next_action、error）               │
 │                                                                     │
-│  LastValue Channel（默认）                                           │
-│  ┌─────────────────────────────────────────────────────────┐       │
-│  │  语义：后写覆盖（last-write-wins）                         │       │
-│  │  用途：普通标量字段（status、next_action、error）           │       │
-│  │  行为：节点 A 写 "x"，节点 B 写 "y" → 最终值 = "y"        │       │
-│  └─────────────────────────────────────────────────────────┘       │
+│  BinaryOperatorAggregate（Annotated reducer）                       │
+│    - 语义：f(left, right) → merged                                  │
+│    - 用途：列表追加、计数器累加、集合合并                            │
+│    - 示例：                                                         │
+│      Annotated[list, operator.add]                                  │
+│      Annotated[list, add_messages]                                  │
+│      Annotated[int, lambda a, b: a + b]                             │
 │                                                                     │
-│  BinaryOperatorAggregate Channel（Annotated reducer）               │
-│  ┌─────────────────────────────────────────────────────────┐       │
-│  │  语义：自定义归约函数 f(left, right) → merged              │       │
-│  │  用途：列表追加、计数器累加、集合合并                        │       │
-│  │  示例：                                                    │       │
-│  │    Annotated[list, operator.add]     → 列表追加             │       │
-│  │    Annotated[list, add_messages]     → 按 ID 去重/更新      │       │
-│  │    Annotated[int, lambda a, b: a+b]  → 计数器累加           │       │
-│  └─────────────────────────────────────────────────────────┘       │
-│                                                                     │
-│  EphemeralValue Channel                                             │
-│  ┌─────────────────────────────────────────────────────────┐       │
-│  │  语义：superstep 结束后自动清除                             │       │
-│  │  用途：临时标记、一次性信号（如 "需要人工审核" 标志）        │       │
-│  │  行为：写入 → 当前 superstep 可读 → 下一 superstep 为空    │       │
-│  └─────────────────────────────────────────────────────────┘       │
-│                                                                     │
+│  EphemeralValue（概念层）                                           │
+│    - 语义：一次性信号 / 当前 superstep 可见                         │
+│    - 教程里通过“读取后清空”逻辑近似模拟                             │
 └─────────────────────────────────────────────────────────────────────┘
-
-数据流：节点返回 dict → Channel 接收 → reducer 合并 → 更新 state
 ```
+
+数据流：
+
+- 节点返回 `dict`
+- LangGraph 根据 schema / reducer 写入 channel
+- superstep 边界后对下游可见
 
 ## 4. Checkpoint 流转图
 
-```
-  invoke(input, config={"configurable": {"thread_id": "t1"}})
+```text
+  ainvoke(input, config={"configurable": {"thread_id": "t1"}})
     │
     ▼
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
@@ -110,53 +112,64 @@
 └──────────┘    └──────────┘    └──────────┘    └──────────┘
                       │                               │
                       ▼ 时间旅行                       ▼ 最新状态
-                ┌──────────┐                    graph.get_state(config)
+                ┌──────────┐                    aget_state(config)
                 │ 从 CP-1  │
                 │ 分叉新线  │
                 └──────────┘
+```
 
 存储后端：
-┌──────────────────────────────────────────────────┐
-│  MemorySaver     → 开发/测试（进程内，重启丢失）    │
-│  SqliteSaver     → 单机持久化                      │
-│  AsyncRedisSaver → 生产环境（跨进程、支持 TTL）     │
-│  PostgresSaver   → 生产环境（事务安全）             │
-└──────────────────────────────────────────────────┘
 
-thread_id 命名约定（AgenticRAG）：
-  GlobalGraph:  tenant:{tenant_id}:task:{task_id}
-  SubtaskGraph: tenant:{tid}:task:{tid}:plan:{v}:subtask:{code}:exec:{eid}
+```text
+MemorySaver          → 开发 / 测试（进程内，重启丢失）
+Redis checkpointer   → 跨进程恢复（需要 Redis Stack / RediSearch）
+PostgresSaver        → 事务型生产存储
 ```
+
+thread_id 命名约定（参考 AgenticRAG）：
+
+- `GlobalGraph`: `tenant:{tenant_id}:task:{task_id}`
+- `SubtaskGraph`: `tenant:{tenant_id}:task:{task_id}:plan:{plan_version}:subtask:{subtask_code}:exec:{execution_id}`
 
 ## 5. 流式输出模式对比
 
-```
-                    graph.stream() / graph.astream()
-                              │
-              ┌───────────────┼───────────────┬──────────────┐
-              ▼               ▼               ▼              ▼
-        ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-        │  values  │   │ updates  │   │  events  │   │ messages │
-        │ 完整快照  │   │ 增量更新  │   │ 细粒度   │   │ LLM token│
-        └──────────┘   └──────────┘   └──────────┘   └──────────┘
-              │               │               │              │
-              ▼               ▼               ▼              ▼
-        每步输出完整     只输出变化的      on_chain_*     (chunk, meta)
-        state 字典      字段 dict        on_llm_*       逐 token 推送
-                                         on_tool_*
+### A. 主流业务流：`astream(..., stream_mode=...)`
+
+```text
+graph.astream(..., stream_mode="values")
+graph.astream(..., stream_mode="updates")
+graph.astream(..., stream_mode="messages")
+graph.astream(..., stream_mode="custom")
 ```
 
 | 模式 | 数据粒度 | 适用场景 | 数据量 |
 |------|----------|----------|--------|
 | `values` | 完整 state 快照 | 调试、状态监控 | 大 |
 | `updates` | 节点级增量 | 前端状态同步 | 中 |
-| `events` | 事件级（含子图） | 复杂 UI、可观测性 | 大 |
-| `messages` | LLM token 级 | 聊天界面逐字输出 | 小 |
-| `custom` | 自定义事件 | 进度通知 | 按需 |
+| `messages` | token / message chunk | 聊天 SSE、逐字输出 | 小 |
+| `custom` | 自定义事件 | 进度通知、业务埋点 | 按需 |
+
+### B. 事件观测流：`astream_events(...)`
+
+```text
+graph.astream_events(..., version="v2")
+```
+
+用途：
+
+- 调试
+- trace
+- observability
+- 查看子图、工具、模型事件
+
+说明：
+
+- 旧文档里常把“events”直接和 stream_mode 并列
+- 当前教程明确区分：`astream_events()` 是事件追踪接口，不是默认聊天流式接口
 
 ## 6. 多 Agent 模式架构图
 
-```
+```text
 模式 1: Supervisor（中心调度）
 ┌─────────────────────────────────────────┐
 │              Supervisor                  │
@@ -166,7 +179,7 @@ thread_id 命名约定（AgenticRAG）：
 │         │      │      │                 │
 │         └──────┼──────┘                 │
 │                ▼                         │
-│           共享 State                     │
+│           共享 State / 工件               │
 └─────────────────────────────────────────┘
 
 模式 2: Swarm（去中心化）
@@ -188,110 +201,104 @@ thread_id 命名约定（AgenticRAG）：
 模式 4: 层级 Agent（双图架构）
 ┌─────────────────────────────────────────┐
 │  GlobalGraph（控制平面）                  │
-│  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐   │
-│  │plan │→ │sched│→ │exec │→ │eval │   │
-│  └─────┘  └─────┘  └──┬──┘  └─────┘   │
-│                        │                 │
-│              ┌─────────▼─────────┐       │
-│              │  SubtaskGraph     │       │
-│              │  （数据平面）       │       │
-│              │  retrieve→gen→chk │       │
-│              └───────────────────┘       │
+│                 │                         │
+│                 ▼                         │
+│          SubtaskGraph（执行平面）         │
 └─────────────────────────────────────────┘
 
 模式 5: 黑板模式
 ┌─────────────────────────────────────────┐
 │           Blackboard (共享 State)         │
-│  ┌──────────────────────────────────┐   │
-│  │ field_A: Agent_1 可写             │   │
-│  │ field_B: Agent_2 可写             │   │
-│  │ field_C: Agent_3 可写             │   │
-│  │ shared:  所有 Agent 可读          │   │
-│  └──────────────────────────────────┘   │
+│  每个 Agent 只写自己负责的字段             │
 └─────────────────────────────────────────┘
 ```
 
-## 7. AgenticRAG 双图架构详细图
-详情见: [AgenticRAG Multi-Agent deepsearch架构](../../案例/用户AgenticRAG检索/AI_Agent指令.md)
+当前教程推荐：
 
+- 大多数企业场景优先 `Supervisor` / `GlobalGraph`
+- `Swarm` 作为 handoff 思路补充
+- 双图架构用于复杂 AgenticRAG
+
+## 7. AgenticRAG 双图架构详细图
+
+详情可对照：
+
+- `案例/用户AgenticRAG检索/架构设计规划.md`
+- `案例/用户AgenticRAG检索/技术拆解.md`
+
+```text
+┌────────────────── GlobalGraph（控制平面）──────────────────┐
+│  GlobalState:                                             │
+│    task_id / request_id / waiting_reason / next_action    │
+│                                                           │
+│  planner → clarify → scheduler → finalize → output        │
+│                │                │                         │
+│                │                └─ dispatch / wait / resume│
+└──────────────────────────────┬────────────────────────────┘
+                               │
+                               ▼
+┌────────────────── SubtaskGraph（局部执行平面）──────────────┐
+│  SubtaskState:                                            │
+│    subtask_code / query / retry_count / quality_score     │
+│                                                           │
+│  route → retrieve → evaluate → retry / complete / escalate│
+└───────────────────────────────────────────────────────────┘
 ```
-┌─────────────────── GlobalGraph（控制平面）───────────────────┐
-│                                                              │
-│  GlobalState:                                                │
-│    task_id, tenant_id, plan_version,                         │
-│    subtask_codes, step, status, error                        │
-│                                                              │
-│  ┌──────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
-│  │intake │ →  │ planner  │ →  │scheduler │ →  │evaluator │  │
-│  └──────┘    └──────────┘    └────┬─────┘    └────┬─────┘  │
-│                                    │               │         │
-│                    step_gate_router (五路分发)       │         │
-│              ┌────┬────┬────┬────┐                  │         │
-│              ▼    ▼    ▼    ▼    ▼                  │         │
-│           sched replan eval final fallback          │         │
-│              │                                      │         │
-│              ▼                                      │         │
-│  ┌───────────────────── SubtaskGraph ──────────────┐│         │
-│  │                                                  ││         │
-│  │  SubtaskState:                                   ││         │
-│  │    subtask_code, query, documents,               ││         │
-│  │    iteration, max_iterations, fingerprint        ││         │
-│  │                                                  ││         │
-│  │  retrieve → generate → check_quality             ││         │
-│  │     ↑                       │                    ││         │
-│  │     └── loop_guard_router ──┘                    ││         │
-│  │     (max_iter + fingerprint 检测)                ││         │
-│  └──────────────────────────────────────────────────┘│         │
-│                                                      │         │
-│              ←── 结果回写 GlobalState ───────────────┘         │
-└──────────────────────────────────────────────────────────────┘
-```
+
+关键边界：
+
+- `GlobalGraph` 决定下一步是否 schedule / clarify / finalize
+- `SubtaskGraph` 只负责局部闭环，不直接越权改全局控制流
+- Celery 负责异步卸载，不负责替代 `GlobalGraph` 做推进决策
 
 ## 8. 人机协作流程图
 
-```
-                    正常执行流
-    ┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐
-    │node_A│ →  │node_B│ →  │node_C│ →  │ END  │
-    └──────┘    └──────┘    └──────┘    └──────┘
+### 动态中断 `interrupt()`（推荐主线）
 
-interrupt_before（节点前暂停）:
-    ┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐
-    │node_A│ →  │⏸ 暂停│ →  │node_B│ →  │ END  │
-    └──────┘    └──┬───┘    └──────┘    └──────┘
-                   │ 保存 checkpoint
-                   ▼
-              用户审批/修改
+```text
+正常执行流:
+    node_A → node_B → node_C → END
+
+动态中断:
+    node_B 内部根据状态判断
+        if risk > threshold:
+            interrupt(payload)
+        resume(Command(resume=value))
+```
+
+### interrupt_before（静态节点前断点）
+
+```text
+node_A → [暂停] → node_B → END
+         │
+         └─ 保存 checkpoint
+            用户审批 / 修改
+            Command(resume=value)
+            从 checkpoint 恢复 → node_B
+```
+
+### interrupt_after（静态节点后断点）
+
+```text
+node_A → node_B → [暂停] → END
                    │
-                   ▼ Command(resume=value)
-              从 checkpoint 恢复 → node_B 继续
-
-interrupt_after（节点后暂停）:
-    ┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐
-    │node_A│ →  │node_B│ →  │⏸ 暂停│ →  │ END  │
-    └──────┘    └──────┘    └──┬───┘    └──────┘
-                               │ 保存 checkpoint（含 node_B 输出）
-                               ▼
-                          用户审核结果
-                               │
-                               ▼ Command(resume=value)
-                          恢复 → END
-
-动态中断 interrupt()（条件性暂停）:
-    async def risky_node(state):
-        if state["risk_score"] > 0.8:
-            answer = interrupt("高风险操作，是否继续？")
-            if answer != "yes":
-                return {"status": "cancelled"}
-        return {"status": "executed"}
+                   └─ 保存 checkpoint（含 node_B 输出）
+                      用户审核结果
+                      Command(resume=value)
+                      恢复 → END
 ```
+
+当前口径：
+
+- 动态 `interrupt()` 是生产推荐路径
+- `interrupt_before` / `interrupt_after` 继续保留为教学与调试示例
 
 ## 9. 概念到文件映射表
 
 | 核心概念 | 教程文件 | 模板文件 |
 |----------|----------|----------|
 | StateGraph 基础 | `01_graph_fundamentals/01-04` | `templates/graph_builder.py` |
-| TypedDict 状态 | `02_state_deep_dive/01-05` | `templates/state_schemas.py` |
+| TypedDict / reducer | `02_state_deep_dive/01-05` | `templates/state_schemas.py` |
 | 条件边路由 | `03_edges_and_routing/01-04` | — |
 | 工具调用 | `04_tool_calling/01-04` | — |
 | Checkpoint 持久化 | `05_checkpointing/01-04` | `templates/checkpoint_manager.py` |
@@ -309,27 +316,28 @@ interrupt_after（节点后暂停）:
 
 ## 10. Graph API vs Functional API 对比
 
-```
+```text
 Graph API（StateGraph）                    Functional API（@entrypoint/@task）
 ┌──────────────────────────┐              ┌──────────────────────────┐
 │  builder = StateGraph()  │              │  @entrypoint(checkpointer)│
-│  builder.add_node(...)   │              │  def workflow(inputs):    │
-│  builder.add_edge(...)   │              │      r1 = task_a(inputs)  │
+│  builder.add_node(...)   │              │  async def workflow(...): │
+│  builder.add_edge(...)   │              │      r1 = task_a(...)     │
 │  graph = builder.compile()│             │      if condition:        │
-│  graph.invoke(...)       │              │          r2 = task_b(r1)  │
+│  await graph.ainvoke(...)│              │          r2 = task_b(...) │
 └──────────────────────────┘              └──────────────────────────┘
-
-适用场景对比：
-┌──────────────┬──────────────────┬──────────────────┐
-│ 维度          │ Graph API        │ Functional API   │
-├──────────────┼──────────────────┼──────────────────┤
-│ 控制流        │ 边 + 条件边       │ if/for/while     │
-│ 状态管理      │ Channel + Reducer │ 函数参数          │
-│ 可视化        │ ✅ Mermaid        │ ❌ 不支持         │
-│ 并行执行      │ ✅ 自动并行       │ ❌ 需手动         │
-│ 子图嵌套      │ ✅ 原生支持       │ ❌ 不支持         │
-│ 人机协作      │ ✅ interrupt      │ ✅ interrupt      │
-│ 学习曲线      │ 较陡             │ 平缓              │
-│ 适合场景      │ 复杂拓扑/多Agent  │ 简单线性流程      │
-└──────────────┴──────────────────┴──────────────────┘
 ```
+
+| 维度 | Graph API | Functional API |
+|------|-----------|----------------|
+| 控制流 | 边 + 条件边 | `if` / `for` / `while` |
+| 状态管理 | state + reducer | 函数参数 / task 返回值 |
+| 可视化 | ✅ Mermaid | ❌ 不支持 |
+| 并行执行 | ✅ `Send` 原生支持 | ❌ 需自行组织 |
+| 子图嵌套 | ✅ 原生支持 | ❌ 不适合复杂拓扑 |
+| 学习曲线 | 略陡 | 较平缓 |
+| 适合场景 | 复杂拓扑、多 Agent | 线性流程、轻量 workflow |
+
+当前教程建议：
+
+- 复杂系统优先 Graph API
+- Functional API 作为补充能力而不是默认主线

@@ -8,6 +8,7 @@ from __future__ import annotations
 生产提醒: 控制最大迭代次数防止无限循环，每轮评估应有明确的通过/失败标准
 """
 
+import asyncio
 import operator
 from typing import Annotated, Literal, TypedDict
 
@@ -115,12 +116,15 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    result = graph.invoke({
-        "query": "LangGraph 的 Plan-Execute-Replan 模式",
-        "results": [],
-        "iteration": 0,
-        "max_iterations": 3,
-    })
-    print(f"\n最终迭代次数: {result.get('iteration')}")
-    print(f"评估结果: {result.get('evaluation')}")
-    print(f"累计结果数: {len(result.get('results', []))}")
+    async def main() -> None:
+        result = await graph.ainvoke({
+            "query": "LangGraph 的 Plan-Execute-Replan 模式",
+            "results": [],
+            "iteration": 0,
+            "max_iterations": 3,
+        })
+        print(f"\n最终迭代次数: {result.get('iteration')}")
+        print(f"评估结果: {result.get('evaluation')}")
+        print(f"累计结果数: {len(result.get('results', []))}")
+
+    asyncio.run(main())

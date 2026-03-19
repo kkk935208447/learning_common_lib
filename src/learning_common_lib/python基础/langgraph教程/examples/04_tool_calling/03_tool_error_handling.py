@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 """
-目标：演示工具执行失败时的处理策略——自动重试与错误消息回传
+目标：演示工具执行失败时的处理策略——错误消息回传、LLM 自我纠正与安全退出
 关键 API：ToolNode(handle_tool_errors=True), ToolException
 运行命令：python 03_tool_error_handling.py
 预期现象：
   1. 工具首次调用抛出异常
-  2. ToolNode 捕获异常并将错误信息作为 ToolMessage 回传
+  2. ToolNode 在图内捕获异常并将错误信息作为 ToolMessage 回传
   3. LLM 根据错误信息自我纠正，发起第二次调用
   4. 第二次调用成功，Agent 循环正常结束
 生产提醒：
@@ -15,6 +15,7 @@ from __future__ import annotations
   - 建议设置最大重试次数，防止无限循环
 """
 
+import asyncio
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -45,23 +46,8 @@ def unreliable_api(query: str) -> str:
 tools = [unreliable_api]
 
 
-def main() -> None:
-    # ── 2. 演示 handle_tool_errors=True ──────────────────────
-    print("=== handle_tool_errors=True 演示 ===")
-    tool_node = ToolNode(tools, handle_tool_errors=True)
-
-    # 模拟 LLM 返回的 tool_call
-    ai_msg = AIMessage(
-        content="",
-        tool_calls=[
-            {"id": "call_err_1", "name": "unreliable_api", "args": {"query": "test_basic"}},
-        ],
-    )
-    result = tool_node.invoke({"messages": [ai_msg]})
-    error_msg = result["messages"][0]
-    print(f"  错误回传: status={error_msg.status} content={error_msg.content}")
-
-    # ── 3. 完整 Agent 循环：LLM 自我纠正 ────────────────────
+async def main() -> None:
+    # ── 2. 完整 Agent 循环：ToolNode 回传错误，LLM 自我纠正 ──
     print("\n=== 完整 Agent 自我纠正循环 ===")
     call_counter.clear()  # 重置计数器
     round_count = 0
@@ -124,7 +110,15 @@ def main() -> None:
     graph.add_edge("tools", "llm")
 
     app = graph.compile()
-    result = app.invoke({"messages": [HumanMessage(content="查询 langgraph 信息")]})
+    result = await app.ainvoke({"messages": [HumanMessage(content="查询 langgraph 信息")]})
+
+    tool_messages = [msg for msg in result["messages"] if isinstance(msg, ToolMessage)]
+    error_messages = [msg for msg in tool_messages if msg.status == "error"]
+
+    print(f"\n错误 ToolMessage 数量: {len(error_messages)}")
+    if error_messages:
+        first_error = error_messages[0]
+        print(f"首个错误回传: status={first_error.status} content={first_error.content}")
 
     print("\n=== 消息流 ===")
     for msg in result["messages"]:
@@ -135,4 +129,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

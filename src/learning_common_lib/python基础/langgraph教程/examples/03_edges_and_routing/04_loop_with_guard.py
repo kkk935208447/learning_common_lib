@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import operator
 from typing import Annotated, TypedDict
@@ -93,12 +94,12 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
     # 演示 1：达到最大迭代次数退出
     print("=== 演示 1: 最大迭代次数守卫 (max=3) ===")
-    result = app.invoke({
+    result = await app.ainvoke({
         "data": "初始",
         "iteration": 0,
         "max_iterations": 3,
@@ -109,16 +110,15 @@ def main() -> None:
     print(f"执行轨迹: {result['log']}")
     print(f"最终数据: {result['data']}\n")
 
-    # 演示 2：收敛检测退出（模拟 fingerprint 重复）
+    # 演示 2：收敛检测退出（预置相同 fingerprint，模拟状态收敛）
     print("=== 演示 2: 收敛检测守卫 ===")
-    # 设置较大的 max_iterations，让收敛检测先触发
-    result = app.invoke({
+    first_iteration_fp = hashlib.md5("初始[iter1]".encode()).hexdigest()[:8]
+    result = await app.ainvoke({
         "data": "初始",
         "iteration": 0,
-        "max_iterations": 100,
-        "fingerprint": "",
-        # 预置一个 fingerprint，当 process 产生相同 fp 时触发收敛
-        "historical_fingerprints": [],
+        "max_iterations": 100,  # 给足上限，让收敛检测优先生效
+        "fingerprint": first_iteration_fp,
+        "historical_fingerprints": [first_iteration_fp],
         "log": [],
     })
     print(f"执行轨迹: {result['log']}")
@@ -126,4 +126,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

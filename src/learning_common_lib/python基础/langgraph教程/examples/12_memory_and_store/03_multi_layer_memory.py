@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -185,18 +186,21 @@ def build_multi_layer_graph():
 
 
 if __name__ == "__main__":
-    app = build_multi_layer_graph()
+    async def main() -> None:
+        app = build_multi_layer_graph()
 
-    print("=== 五层记忆系统演示 ===\n")
-    config = {"configurable": {"thread_id": "demo-thread"}}
-    result = app.invoke(
-        {
-            "user_id": "user-42",
-            "query": "LangGraph 的记忆系统怎么设计？",
-            "l1_context": "", "l2_history": "", "l3_preferences": "",
-            "l4_knowledge": "", "l5_trends": "", "response": "",
-        },
-        config=config,
-    )
+        print("=== 五层记忆系统演示 ===\n")
+        config = {"configurable": {"thread_id": "demo-thread"}}
+        result = await app.ainvoke(
+            {
+                "user_id": "user-42",
+                "query": "LangGraph 的记忆系统怎么设计？",
+                "l1_context": "", "l2_history": "", "l3_preferences": "",
+                "l4_knowledge": "", "l5_trends": "", "response": "",
+            },
+            config=config,
+        )
 
-    print(f"\n{result['response']}")
+        print(f"\n{result['response']}")
+
+    asyncio.run(main())

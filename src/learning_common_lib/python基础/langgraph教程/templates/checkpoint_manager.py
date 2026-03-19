@@ -39,23 +39,43 @@ class CheckpointManager:
 
         mgr = CheckpointManager(redis_url="redis://:123456@localhost:6379/0")
         checkpointer = await mgr.get_checkpointer()
+
+    说明：
+        `langgraph-checkpoint-redis` 依赖带 RediSearch 能力的 Redis/Redis Stack。
+        如果只是普通 Redis 实例，初始化时可能因 `FT._LIST` 等命令缺失而自动降级。
     """
 
     def __init__(self, redis_url: str | None = None) -> None:
         self._redis_url = redis_url
+        self._checkpointer_cm: Any | None = None
+        self._checkpointer: Any | None = None
 
     async def get_checkpointer(self) -> Any:
         """获取 checkpointer 实例，Redis 不可用时自动降级为内存。"""
+        if self._checkpointer is not None:
+            return self._checkpointer
+
         if self._redis_url:
             try:
                 from langgraph.checkpoint.redis.aio import AsyncRedisSaver  # type: ignore[import-untyped]
 
-                saver = AsyncRedisSaver(self._redis_url)
+                self._checkpointer_cm = AsyncRedisSaver.from_conn_string(self._redis_url)
+                saver = await self._checkpointer_cm.__aenter__()
+                await saver.asetup()
                 logger.info("使用 Redis checkpointer: %s", self._redis_url)
-                return ResilientCheckpointer(saver)
+                self._checkpointer = ResilientCheckpointer(saver)
+                return self._checkpointer
             except Exception:
                 logger.warning("Redis 不可用，降级为内存 checkpointer")
-        return MemorySaver()
+        self._checkpointer = MemorySaver()
+        return self._checkpointer
+
+    async def aclose(self) -> None:
+        """关闭内部维护的异步 checkpointer 资源。"""
+        if self._checkpointer_cm is not None:
+            await self._checkpointer_cm.__aexit__(None, None, None)
+            self._checkpointer_cm = None
+        self._checkpointer = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +105,7 @@ async def _demo() -> None:
     mgr_redis = CheckpointManager(redis_url=_DEFAULT_REDIS_URL)
     cp_redis = await mgr_redis.get_checkpointer()
     print(f"Redis checkpointer: {type(cp_redis).__name__}")
+    await mgr_redis.aclose()
 
 
 if __name__ == "__main__":

@@ -8,11 +8,11 @@ from __future__ import annotations
 生产提醒: 双图架构是复杂 Agent 系统的核心模式，注意控制全局迭代次数防止无限循环
 """
 
+import asyncio
 import operator
 from typing import Annotated, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
 
 # ---------------------------------------------------------------------------
 # 全局状态
@@ -99,7 +99,7 @@ def planner(state: GlobalState) -> dict:
     return {"global_iteration": iteration, "next_action": "execute_subtasks"}
 
 
-def executor(state: GlobalState) -> dict:
+async def executor(state: GlobalState) -> dict:
     """全局执行器：依次运行子任务图"""
     results: list[dict] = []
     for task in TASK_PLAN:
@@ -110,7 +110,7 @@ def executor(state: GlobalState) -> dict:
             "max_iterations": 3,
             "next_action": "execute",
         }
-        sub_result = subtask_graph.invoke(sub_input)
+        sub_result = await subtask_graph.ainvoke(sub_input)
         if sub_result.get("result"):
             results.append(sub_result["result"])
     return {"subtask_results": results}
@@ -159,17 +159,20 @@ global_graph = global_builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    initial_state: GlobalState = {
-        "task_id": 1,
-        "original_query": "帮我分析 LangGraph 的双图架构",
-        "global_iteration": 0,
-        "max_iterations": 2,
-        "next_action": "plan",
-        "subtask_results": [],
-    }
-    result = global_graph.invoke(initial_state)
-    print(f"\n最终结果:")
-    print(f"  全局迭代次数: {result.get('global_iteration')}")
-    print(f"  子任务结果数: {len(result.get('subtask_results', []))}")
-    for r in result.get("subtask_results", []):
-        print(f"    - {r}")
+    async def main() -> None:
+        initial_state: GlobalState = {
+            "task_id": 1,
+            "original_query": "帮我分析 LangGraph 的双图架构",
+            "global_iteration": 0,
+            "max_iterations": 2,
+            "next_action": "plan",
+            "subtask_results": [],
+        }
+        result = await global_graph.ainvoke(initial_state)
+        print(f"\n最终结果:")
+        print(f"  全局迭代次数: {result.get('global_iteration')}")
+        print(f"  子任务结果数: {len(result.get('subtask_results', []))}")
+        for r in result.get("subtask_results", []):
+            print(f"    - {r}")
+
+    asyncio.run(main())

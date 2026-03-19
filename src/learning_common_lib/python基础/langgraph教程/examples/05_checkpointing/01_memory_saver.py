@@ -14,6 +14,8 @@ from __future__ import annotations
   - thread_id 是字符串，建议使用有意义的命名（如 user:123:session:456）
 """
 
+import asyncio
+
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import MessagesState, StateGraph
@@ -29,7 +31,7 @@ def chatbot(state: MessagesState) -> dict:
     }
 
 
-def main() -> None:
+async def main() -> None:
     # ── 1. 创建带 MemorySaver 的图 ──────────────────────────
     graph = StateGraph(MessagesState)
     graph.add_node("chatbot", chatbot)
@@ -42,10 +44,10 @@ def main() -> None:
     thread_config = {"configurable": {"thread_id": "thread-001"}}
 
     print("=== 同一线程多轮对话 ===")
-    r1 = app.invoke({"messages": [HumanMessage(content="你好")]}, config=thread_config)
+    r1 = await app.ainvoke({"messages": [HumanMessage(content="你好")]}, config=thread_config)
     print(f"  第1轮: {r1['messages'][-1].content}")
 
-    r2 = app.invoke({"messages": [HumanMessage(content="今天天气如何？")]}, config=thread_config)
+    r2 = await app.ainvoke({"messages": [HumanMessage(content="今天天气如何？")]}, config=thread_config)
     print(f"  第2轮: {r2['messages'][-1].content}")
     print(f"  消息总数: {len(r2['messages'])}")
 
@@ -53,21 +55,21 @@ def main() -> None:
     other_config = {"configurable": {"thread_id": "thread-002"}}
 
     print("\n=== 不同线程状态隔离 ===")
-    r3 = app.invoke({"messages": [HumanMessage(content="新对话")]}, config=other_config)
+    r3 = await app.ainvoke({"messages": [HumanMessage(content="新对话")]}, config=other_config)
     print(f"  thread-002 第1轮: {r3['messages'][-1].content}")
     print(f"  thread-002 消息数: {len(r3['messages'])}")
 
     # 验证 thread-001 不受影响
-    state_001 = app.get_state(thread_config)
+    state_001 = await app.aget_state(thread_config)
     print(f"  thread-001 消息数: {len(state_001.values['messages'])}（未受影响）")
 
     # ── 4. 查看 checkpoint 信息 ──────────────────────────────
     print("\n=== Checkpoint 信息 ===")
-    state = app.get_state(thread_config)
+    state = await app.aget_state(thread_config)
     print(f"  checkpoint_id: {state.config['configurable'].get('checkpoint_id', 'N/A')}")
     print(f"  checkpoint_ns: {state.config['configurable'].get('checkpoint_ns', '')}")
     print(f"  消息数: {len(state.values['messages'])}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

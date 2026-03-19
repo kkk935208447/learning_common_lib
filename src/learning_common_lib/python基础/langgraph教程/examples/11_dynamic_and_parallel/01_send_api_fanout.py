@@ -4,7 +4,8 @@
     演示 Send API 实现 map-reduce 模式，将不同输入动态分发到多个 worker 并行处理。
 
 关键 API：
-    - Send(node_name, state) —— 动态创建并行分支
+    - Send(node_name, state) —— 路由函数中动态创建并行分支
+    - add_conditional_edges(...) —— 将 dispatch 结果 fan-out 到 worker
     - reducer（Annotated list）—— 聚合并行结果
 
 运行命令：
@@ -21,6 +22,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -37,18 +39,23 @@ class WorkerState(TypedDict):
 class MainState(TypedDict):
     """主图状态：tasks 是待处理列表，results 通过 reducer 聚合"""
     tasks: list[str]
+    queued_tasks: list[str]
+    batch: int
     results: Annotated[list[str], operator.add]  # 多个 worker 的结果自动合并
 
 
 # ── 节点函数 ──────────────────────────────────────────────
-def scatter_node(state: MainState) -> list[Send]:
-    """根据任务列表动态分发到 worker 节点
+def scatter_node(state: MainState) -> dict:
+    """准备 fan-out 所需的批次信息。"""
+    batch = state.get("batch", 0) + 1
+    queued_tasks = list(state["tasks"])
+    print(f"[scatter] 第 {batch} 批收到 {len(queued_tasks)} 个任务，开始分发...")
+    return {"queued_tasks": queued_tasks, "batch": batch}
 
-    返回 list[Send] 时，LangGraph 会为每个 Send 创建一个并行分支。
-    每个分支独立执行，互不干扰。
-    """
-    print(f"[scatter] 收到 {len(state['tasks'])} 个任务，开始分发...")
-    return [Send("worker", {"task": task}) for task in state["tasks"]]
+
+def scatter_route(state: MainState) -> list[Send]:
+    """将 queued_tasks 动态 fan-out 到 worker。"""
+    return [Send("worker", {"task": task}) for task in state.get("queued_tasks", [])]
 
 
 def worker_node(state: WorkerState) -> dict:
@@ -74,8 +81,7 @@ def build_fanout_graph() -> StateGraph:
     graph.add_node("gather", gather_node)
 
     graph.set_entry_point("scatter")
-    # scatter 返回 list[Send]，LangGraph 自动处理并行分发
-    graph.add_conditional_edges("scatter", scatter_node, ["worker"])
+    graph.add_conditional_edges("scatter", scatter_route, ["worker"])
     graph.add_edge("worker", "gather")
     graph.add_edge("gather", END)
 
@@ -84,15 +90,19 @@ def build_fanout_graph() -> StateGraph:
 
 # ── 入口 ──────────────────────────────────────────────
 if __name__ == "__main__":
-    app = build_fanout_graph()
+    async def main() -> None:
+        app = build_fanout_graph()
 
-    initial_state: MainState = {
-        "tasks": ["翻译文档", "生成摘要", "提取关键词"],
-        "results": [],
-    }
+        initial_state: MainState = {
+            "tasks": ["翻译文档", "生成摘要", "提取关键词"],
+            "queued_tasks": [],
+            "batch": 0,
+            "results": [],
+        }
 
-    print("=== Send API Fan-out 演示 ===\n")
-    result = app.invoke(initial_state)
+        print("=== Send API Fan-out 演示 ===\n")
+        result = await app.ainvoke(initial_state)
 
-    print(f"\n最终结果: {result['results']}")
-    # 预期输出: ['已完成: 翻译文档', '已完成: 生成摘要', '已完成: 提取关键词']
+        print(f"\n最终结果: {result['results']}")
+
+    asyncio.run(main())

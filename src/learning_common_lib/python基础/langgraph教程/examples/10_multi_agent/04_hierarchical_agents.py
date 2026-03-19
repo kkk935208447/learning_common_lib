@@ -8,6 +8,7 @@ from __future__ import annotations
 生产提醒: 层级 Agent 适合任务可分解的场景，注意子任务间的依赖关系
 """
 
+import asyncio
 import operator
 from typing import Annotated, Literal, TypedDict
 
@@ -68,12 +69,12 @@ def decompose(state: GlobalState) -> dict:
     return {"subtasks": subtasks, "iteration": iteration}
 
 
-def dispatch(state: GlobalState) -> dict:
+async def dispatch(state: GlobalState) -> dict:
     """分发子任务到子 Agent"""
     subtasks = state.get("subtasks", [])
     results: list[str] = []
     for st in subtasks:
-        sub_result = sub_agent_graph.invoke(st)
+        sub_result = await sub_agent_graph.ainvoke(st)
         results.append(sub_result.get("result", ""))
     return {"results": results}
 
@@ -107,12 +108,15 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    result = graph.invoke({
-        "query": "LangGraph 层级 Agent 架构",
-        "results": [],
-        "iteration": 0,
-    })
-    print(f"\n状态: {result.get('status')}")
-    print(f"结果:")
-    for r in result.get("results", []):
-        print(f"  - {r}")
+    async def main() -> None:
+        result = await graph.ainvoke({
+            "query": "LangGraph 层级 Agent 架构",
+            "results": [],
+            "iteration": 0,
+        })
+        print(f"\n状态: {result.get('status')}")
+        print(f"结果:")
+        for r in result.get("results", []):
+            print(f"  - {r}")
+
+    asyncio.run(main())

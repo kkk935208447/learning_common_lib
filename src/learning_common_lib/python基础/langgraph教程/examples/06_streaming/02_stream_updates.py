@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 """
 目标：演示 stream(mode="updates") 模式——每步只输出增量更新
 关键 API：graph.stream(inputs, mode="updates")
@@ -56,7 +58,7 @@ def answer_node(state: PipelineState) -> dict:
     return {"final_answer": f"最终回答: {state.get('analysis', '')}"}
 
 
-def main() -> None:
+async def main() -> None:
     # ── MessagesState 版本 ──────────────────────────────────
     print("=== stream(mode='updates') - MessagesState ===\n")
     graph1 = StateGraph(MessagesState)
@@ -69,7 +71,7 @@ def main() -> None:
     graph1.add_edge("writer", END)
     app1 = graph1.compile()
 
-    for update in app1.stream(
+    async for update in app1.astream(
         {"messages": [HumanMessage(content="介绍 LangGraph")]},
         stream_mode="updates",
     ):
@@ -92,7 +94,7 @@ def main() -> None:
     graph2.add_edge("answer", END)
     app2 = graph2.compile()
 
-    for update in app2.stream(
+    async for update in app2.astream(
         {"query": "LangGraph 流式输出"},
         stream_mode="updates",
     ):
@@ -105,4 +107,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

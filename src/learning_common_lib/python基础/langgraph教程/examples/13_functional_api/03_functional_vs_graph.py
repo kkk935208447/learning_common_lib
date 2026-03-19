@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -134,23 +135,24 @@ COMPARISON = """
 
 
 if __name__ == "__main__":
-    test_text = "  Hello World hello LangGraph world  "
+    async def main() -> None:
+        test_text = "  Hello World hello LangGraph world  "
 
-    # ── Functional API ──
-    print("=== 方案 A: Functional API ===\n")
-    config_f = {"configurable": {"thread_id": "func-1"}}
-    result_f = functional_pipeline.invoke(test_text, config=config_f)
-    print(f"  结果: {result_f}\n")
+        print("=== 方案 A: Functional API ===\n")
+        config_f = {"configurable": {"thread_id": "func-1"}}
+        result_f = await functional_pipeline.ainvoke(test_text, config=config_f)
+        print(f"  结果: {result_f}\n")
 
-    # ── Graph API ──
-    print("=== 方案 B: Graph API ===\n")
-    graph_app = build_graph_pipeline()
-    config_g = {"configurable": {"thread_id": "graph-1"}}
-    result_g = graph_app.invoke(
-        {"text": test_text, "cleaned": "", "tokens": [], "freq": {}},
-        config=config_g,
-    )
-    print(f"  结果: {result_g['freq']}\n")
+        print("=== 方案 B: Graph API ===\n")
+        graph_app = build_graph_pipeline()
+        config_g = {"configurable": {"thread_id": "graph-1"}}
+        result_g = await graph_app.ainvoke(
+            {"text": test_text, "cleaned": "", "tokens": [], "freq": {}},
+            config=config_g,
+        )
+        print(f"  结果: {result_g['freq']}\n")
 
-    print(COMPARISON)
-    print("建议：简单流程用 Functional，复杂拓扑用 Graph，两者可混用。")
+        print(COMPARISON)
+        print("建议：简单流程用 Functional，复杂拓扑用 Graph，两者可混用。")
+
+    asyncio.run(main())

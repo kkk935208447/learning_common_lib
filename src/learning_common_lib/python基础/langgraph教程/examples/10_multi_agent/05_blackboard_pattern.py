@@ -8,6 +8,7 @@ from __future__ import annotations
 生产提醒: 黑板模式的核心是状态隔离 — 每个 Agent 只写自己的 key，通过 reducer 合并
 """
 
+import asyncio
 import operator
 from typing import Annotated, Literal, TypedDict
 
@@ -113,16 +114,19 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    result = graph.invoke({
-        "query": "LangGraph 黑板模式",
-        "research_notes": [],
-        "code_snippets": [],
-        "review_comments": [],
-        "phase": "research",
-        "iteration": 0,
-    })
-    print(f"\n黑板最终状态:")
-    print(f"  研究笔记: {result.get('research_notes')}")
-    print(f"  代码片段: {result.get('code_snippets')}")
-    print(f"  审核意见: {result.get('review_comments')}")
-    print(f"  迭代次数: {result.get('iteration')}")
+    async def main() -> None:
+        result = await graph.ainvoke({
+            "query": "LangGraph 黑板模式",
+            "research_notes": [],
+            "code_snippets": [],
+            "review_comments": [],
+            "phase": "research",
+            "iteration": 0,
+        })
+        print(f"\n黑板最终状态:")
+        print(f"  研究笔记: {result.get('research_notes')}")
+        print(f"  代码片段: {result.get('code_snippets')}")
+        print(f"  审核意见: {result.get('review_comments')}")
+        print(f"  迭代次数: {result.get('iteration')}")
+
+    asyncio.run(main())

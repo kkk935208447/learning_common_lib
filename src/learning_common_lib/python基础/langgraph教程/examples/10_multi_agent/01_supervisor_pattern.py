@@ -8,9 +8,10 @@ from __future__ import annotations
 生产提醒: Supervisor 是单控制平面原则的体现，所有决策由一个节点统一管理
 """
 
+import asyncio
 from typing import Literal, TypedDict
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.graph import END, START, StateGraph
 
 # ---------------------------------------------------------------------------
@@ -41,15 +42,11 @@ def supervisor(state: State) -> dict:
     """Supervisor：决定下一个 Worker 或结束"""
     query = state.get("query", "")
     iteration = state.get("iteration", 0)
-    results = state.get("results", [])
-
-    # 简单路由逻辑（生产环境用 LLM 决策）
-    if iteration == 0:
-        next_w = "researcher"
-    elif iteration == 1:
-        next_w = "coder"
-    else:
+    if iteration >= 2:
         next_w = "FINISH"
+    else:
+        candidate = llm.invoke(f"为任务选择 worker: {query}").content.strip()
+        next_w = candidate if candidate in {"researcher", "coder"} else "FINISH"
 
     print(f"[Supervisor] iteration={iteration}, 分配给: {next_w}")
     return {"next_worker": next_w, "iteration": iteration + 1}
@@ -106,7 +103,10 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    result = graph.invoke({"query": "实现一个 RAG 系统", "results": [], "iteration": 0})
-    print(f"\n最终结果:")
-    for r in result.get("results", []):
-        print(f"  - {r}")
+    async def main() -> None:
+        result = await graph.ainvoke({"query": "实现一个 RAG 系统", "results": [], "iteration": 0})
+        print(f"\n最终结果:")
+        for r in result.get("results", []):
+            print(f"  - {r}")
+
+    asyncio.run(main())

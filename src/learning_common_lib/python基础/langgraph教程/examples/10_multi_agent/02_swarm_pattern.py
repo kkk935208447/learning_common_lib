@@ -8,6 +8,7 @@ from __future__ import annotations
 生产提醒: Swarm 适合 Agent 能力互补且交互模式明确的场景，注意防止循环移交
 """
 
+import asyncio
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -112,14 +113,17 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    queries = [
-        "我想购买企业版",
-        "我想购买但有技术问题",
-        "系统故障无法登录",
-        "你好，随便聊聊",
-    ]
-    for q in queries:
-        print(f"\n{'='*50}")
-        print(f"查询: {q}")
-        result = graph.invoke({"query": q, "messages": [], "handoff_count": 0, "max_handoffs": 5})
-        print(f"移交次数: {result.get('handoff_count', 0)}")
+    async def main() -> None:
+        queries = [
+            "我想购买企业版",
+            "我想购买但有技术问题",
+            "系统故障无法登录",
+            "你好，随便聊聊",
+        ]
+        for q in queries:
+            print(f"\n{'='*50}")
+            print(f"查询: {q}")
+            result = await graph.ainvoke({"query": q, "messages": [], "handoff_count": 0, "max_handoffs": 5})
+            print(f"移交次数: {result.get('handoff_count', 0)}")
+
+    asyncio.run(main())

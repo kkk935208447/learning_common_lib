@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -121,7 +122,7 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
     test_queries = [
@@ -134,7 +135,7 @@ def main() -> None:
     ]
     for query in test_queries:
         print(f"\n--- 查询: '{query}' ---")
-        result = app.invoke({
+        result = await app.ainvoke({
             "query": query, "next_action": "", "response": "", "log": [],
         })
         print(f"路径: {result['log']}")
@@ -142,4 +143,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

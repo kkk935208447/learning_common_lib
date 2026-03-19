@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, MessagesState, StateGraph
 

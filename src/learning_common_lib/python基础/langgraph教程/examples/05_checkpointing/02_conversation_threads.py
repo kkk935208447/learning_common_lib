@@ -14,6 +14,8 @@ from __future__ import annotations
   - 可通过 get_state 检查任意线程的当前状态
 """
 
+import asyncio
+
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import MessagesState, StateGraph
@@ -33,7 +35,7 @@ def assistant(state: MessagesState) -> dict:
     }
 
 
-def main() -> None:
+async def main() -> None:
     graph = StateGraph(MessagesState)
     graph.add_node("assistant", assistant)
     graph.set_entry_point("assistant")
@@ -49,21 +51,21 @@ def main() -> None:
     print("=== 用户 Alice 的对话 ===")
     conversations_a = ["你好，我想了解 LangGraph", "它和 LangChain 有什么区别？", "如何部署到生产环境？"]
     for msg in conversations_a:
-        result = app.invoke({"messages": [HumanMessage(content=msg)]}, config=user_a_thread)
+        result = await app.ainvoke({"messages": [HumanMessage(content=msg)]}, config=user_a_thread)
         print(f"  Alice: {msg}")
         print(f"  Bot:   {result['messages'][-1].content}")
 
     print("\n=== 用户 Bob 的对话 ===")
     conversations_b = ["帮我写一个 Python 脚本", "加上错误处理"]
     for msg in conversations_b:
-        result = app.invoke({"messages": [HumanMessage(content=msg)]}, config=user_b_thread)
+        result = await app.ainvoke({"messages": [HumanMessage(content=msg)]}, config=user_b_thread)
         print(f"  Bob:   {msg}")
         print(f"  Bot:   {result['messages'][-1].content}")
 
     # ── 2. 验证线程隔离 ─────────────────────────────────────
     print("\n=== 线程状态对比 ===")
-    state_a = app.get_state(user_a_thread)
-    state_b = app.get_state(user_b_thread)
+    state_a = await app.aget_state(user_a_thread)
+    state_b = await app.aget_state(user_b_thread)
     print(f"  Alice 线程消息数: {len(state_a.values['messages'])}")
     print(f"  Bob   线程消息数: {len(state_b.values['messages'])}")
 
@@ -75,4 +77,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -34,6 +35,8 @@ from langgraph.types import Command, Send
 
 class SendState(TypedDict):
     items: list[str]
+    batch: int
+    dispatched_items: list[str]
     results: Annotated[list[str], operator.add]
 
 
@@ -41,10 +44,17 @@ class ItemState(TypedDict):
     item: str
 
 
-def send_dispatcher(state: SendState) -> list[Send]:
-    """一次性分发所有 item 到 worker，并行执行"""
-    print(f"[Send 模式] 并行分发 {len(state['items'])} 个任务")
-    return [Send("send_worker", {"item": item}) for item in state["items"]]
+def send_dispatcher(state: SendState) -> dict:
+    """准备一批要 fan-out 的任务。"""
+    batch = state.get("batch", 0) + 1
+    dispatched_items = list(state["items"])
+    print(f"[Send 模式] 第 {batch} 批并行分发 {len(dispatched_items)} 个任务")
+    return {"batch": batch, "dispatched_items": dispatched_items}
+
+
+def send_route(state: SendState) -> list[Send]:
+    """通过路由函数 fan-out 到 worker。"""
+    return [Send("send_worker", {"item": item}) for item in state.get("dispatched_items", [])]
 
 
 def send_worker(state: ItemState) -> dict:
@@ -58,7 +68,7 @@ def build_send_graph() -> StateGraph:
     g.add_node("dispatcher", send_dispatcher)
     g.add_node("send_worker", send_worker)
     g.set_entry_point("dispatcher")
-    g.add_conditional_edges("dispatcher", send_dispatcher, ["send_worker"])
+    g.add_conditional_edges("dispatcher", send_route, ["send_worker"])
     g.add_edge("send_worker", END)
     return g.compile()
 
@@ -131,18 +141,26 @@ COMPARISON = """
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("方案 A: Send 并行 fan-out")
-    print("=" * 50)
-    send_app = build_send_graph()
-    r1 = send_app.invoke({"items": ["任务A", "任务B", "任务C"], "results": []})
-    print(f"结果: {r1['results']}\n")
+    async def main() -> None:
+        print("=" * 50)
+        print("方案 A: Send 并行 fan-out")
+        print("=" * 50)
+        send_app = build_send_graph()
+        r1 = await send_app.ainvoke({
+            "items": ["任务A", "任务B", "任务C"],
+            "batch": 0,
+            "dispatched_items": [],
+            "results": [],
+        })
+        print(f"结果: {r1['results']}\n")
 
-    print("=" * 50)
-    print("方案 B: Command 单路由 handoff")
-    print("=" * 50)
-    cmd_app = build_command_graph()
-    r2 = cmd_app.invoke({"query": "这个产品多少钱？", "category": "", "answer": ""})
-    print(f"结果: {r2['answer']}\n")
+        print("=" * 50)
+        print("方案 B: Command 单路由 handoff")
+        print("=" * 50)
+        cmd_app = build_command_graph()
+        r2 = await cmd_app.ainvoke({"query": "这个产品多少钱？", "category": "", "answer": ""})
+        print(f"结果: {r2['answer']}\n")
 
-    print(COMPARISON)
+        print(COMPARISON)
+
+    asyncio.run(main())

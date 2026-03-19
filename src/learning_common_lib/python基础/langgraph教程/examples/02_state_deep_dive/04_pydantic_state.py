@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated
 
@@ -68,12 +69,12 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
     # 演示 1：正常执行
     print("=== 正常执行 ===")
-    result = app.invoke({
+    result = await app.ainvoke({
         "user": {"name": "张三", "level": 5},
         "score": 0,
     })
@@ -82,22 +83,24 @@ def main() -> None:
 
     # 演示 2：默认值生效
     print("\n=== 默认值 ===")
-    result = app.invoke({
-        "user": {"name": "李四"},  # level 默认为 1
-    })
-    print(f"user.level 默认值: {result['user']['level']}")
+    result = await app.ainvoke(
+        PydanticState(
+            user=UserProfile(name="李四"),  # level 默认为 1
+        )
+    )
+    print(f"user.level 默认值: {result['user'].level}")
 
     # 演示 3：验证失败
     print("\n=== 验证失败演示 ===")
     try:
-        app.invoke({
+        await app.ainvoke({
             "user": {"name": "王五", "level": 200},  # 超出范围
         })
     except Exception as e:
         print(f"验证错误（level 超范围）: {type(e).__name__}")
 
     try:
-        app.invoke({
+        await app.ainvoke({
             "user": {"name": "赵六"},
             "score": -10,  # 负数
         })
@@ -106,4 +109,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

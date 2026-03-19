@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from enum import Enum
 from functools import wraps
@@ -52,21 +53,27 @@ def safe_node(*, node_name: str, timeout_s: float = 30) -> Callable:
         @wraps(func)
         async def wrapper(state: dict[str, Any]) -> dict[str, Any]:
             try:
-                result = await asyncio.wait_for(func(state), timeout=timeout_s)
+                maybe_result = func(state)
+                if inspect.isawaitable(maybe_result):
+                    result = await asyncio.wait_for(maybe_result, timeout=timeout_s)
+                else:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(func, state),
+                        timeout=timeout_s,
+                    )
                 return result
             except asyncio.TimeoutError:
                 logger.error("[%s] 超时 %ss", node_name, timeout_s)
-                return {**state, "error": f"{node_name}_timeout", "next_action": "fallback"}
+                return {"error": f"{node_name}_timeout", "next_action": "fallback"}
             except NodeError as exc:
                 logger.error(
                     "[%s] 业务错误: %s (severity=%s)",
                     node_name, exc, exc.severity.value,
                 )
-                return {**state, "error": f"{node_name}: {exc}", "next_action": "fallback"}
+                return {"error": f"{node_name}: {exc}", "next_action": "fallback"}
             except Exception as exc:
                 logger.exception("[%s] 未处理异常", node_name)
                 return {
-                    **state,
                     "error": f"{node_name}_error: {type(exc).__name__}",
                     "next_action": "fallback",
                 }
@@ -86,7 +93,7 @@ async def _demo() -> None:
     @safe_node(node_name="demo_node", timeout_s=5)
     async def my_node(state: dict[str, Any]) -> dict[str, Any]:
         print(f"  节点收到状态: {state}")
-        return {**state, "next_action": "continue"}
+        return {"next_action": "continue"}
 
     # 正常执行
     result = await my_node({"messages": [], "iteration": 0})
@@ -108,6 +115,14 @@ async def _demo() -> None:
 
     result = await bad_node({"messages": []})
     print(f"  异常结果: {result}")
+
+    # 模拟同步节点
+    @safe_node(node_name="sync_node", timeout_s=5)
+    def sync_node(state: dict[str, Any]) -> dict[str, Any]:
+        return {"next_action": "continue", "value": state.get("value", 0) + 1}
+
+    result = await sync_node({"value": 1})
+    print(f"  同步节点结果: {result}")
 
 
 if __name__ == "__main__":

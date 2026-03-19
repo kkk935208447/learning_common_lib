@@ -22,7 +22,9 @@
 """
 from __future__ import annotations
 
-from langchain_community.chat_models import FakeListChatModel
+import asyncio
+
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.func import entrypoint, task
 
@@ -98,14 +100,17 @@ def analyze_document(text: str) -> dict:
 
 
 if __name__ == "__main__":
-    print("=== @task 子任务演示 ===\n")
+    async def main() -> None:
+        print("=== @task 子任务演示 ===\n")
 
-    text = "LangGraph 是一个非常好的框架 用于构建有状态的 AI 应用程序"
-    config = {"configurable": {"thread_id": "task-demo-1"}}
+        text = "LangGraph 是一个非常好的框架 用于构建有状态的 AI 应用程序"
+        config = {"configurable": {"thread_id": "task-demo-1"}}
 
-    result = analyze_document.invoke(text, config=config)
+        result = await analyze_document.ainvoke(text, config=config)
 
-    print(f"\n最终结果:")
-    print(f"  关键词: {result['keywords']}")
-    print(f"  摘要: {result['summary']}")
-    print(f"  情感: {result['sentiment']}")
+        print(f"\n最终结果:")
+        print(f"  关键词: {result['keywords']}")
+        print(f"  摘要: {result['summary']}")
+        print(f"  情感: {result['sentiment']}")
+
+    asyncio.run(main())

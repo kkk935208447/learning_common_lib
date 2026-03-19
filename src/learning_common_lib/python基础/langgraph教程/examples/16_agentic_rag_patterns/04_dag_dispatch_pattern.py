@@ -7,7 +7,7 @@
 关键 API：
     - compute_ready_codes —— 计算 READY 状态的节点
     - claim —— 认领节点（防止重复执行）
-    - Send API —— 并行分发 READY 节点
+    - Send API —— 由路由函数并行分发 READY 节点
 
 运行命令：
     python 04_dag_dispatch_pattern.py
@@ -131,8 +131,9 @@ class DAGScheduler:
 
 class DispatchState(TypedDict):
     batch: int
+    ready_codes: list[str]
     results: Annotated[list[str], operator.add]
-    completed_codes: list[str]
+    completed_codes: Annotated[list[str], operator.add]
 
 
 class WorkerInput(TypedDict):
@@ -140,56 +141,54 @@ class WorkerInput(TypedDict):
     batch: int
 
 
-# 全局调度器实例
-scheduler: DAGScheduler | None = None
+def build_dag_dispatch_graph(scheduler: DAGScheduler):
+    def dispatch_node(state: DispatchState) -> dict:
+        """计算 READY 节点并完成 claim。"""
+        ready_codes = scheduler.compute_ready_codes()
+        batch = state.get("batch", 0) + 1
 
+        if not ready_codes:
+            print(f"[dispatch] 批次 {batch}: 无可执行节点")
+            return {"batch": batch, "ready_codes": []}
 
-def dispatch_node(state: DispatchState) -> list[Send]:
-    """计算 READY 节点并分发"""
-    ready_codes = scheduler.compute_ready_codes()
-    batch = state.get("batch", 0) + 1
+        print(f"[dispatch] 批次 {batch}: 分发 {len(ready_codes)} 个节点 {ready_codes}")
 
-    if not ready_codes:
-        print(f"[dispatch] 批次 {batch}: 无可执行节点")
-        return []
+        claimed_codes: list[str] = []
+        for code in ready_codes:
+            if scheduler.claim(code):
+                claimed_codes.append(code)
 
-    print(f"[dispatch] 批次 {batch}: 分发 {len(ready_codes)} 个节点 {ready_codes}")
+        return {"batch": batch, "ready_codes": claimed_codes}
 
-    # claim + dispatch
-    sends = []
-    for code in ready_codes:
-        if scheduler.claim(code):
-            sends.append(Send("worker", {"code": code, "batch": batch}))
+    def dispatch_route(state: DispatchState) -> list[Send]:
+        """根据 ready_codes fan-out 到 worker。"""
+        return [
+            Send("worker", {"code": code, "batch": state["batch"]})
+            for code in state.get("ready_codes", [])
+        ]
 
-    return sends
+    def worker_node(state: WorkerInput) -> dict:
+        """执行单个 DAG 节点。"""
+        code = state["code"]
+        result = f"{code}_result"
+        scheduler.complete(code, result)
+        return {"results": [result], "completed_codes": [code]}
 
+    def check_and_continue(state: DispatchState) -> str:
+        """检查是否所有节点完成。"""
+        if scheduler.all_completed():
+            print("[check] 所有节点已完成")
+            return "done"
+        print("[check] 还有未完成节点，继续调度")
+        return "dispatch"
 
-def worker_node(state: WorkerInput) -> dict:
-    """执行单个 DAG 节点"""
-    code = state["code"]
-    # 模拟执行
-    result = f"{code}_result"
-    scheduler.complete(code, result)
-    return {"results": [result]}
-
-
-def check_and_continue(state: DispatchState) -> str:
-    """检查是否所有节点完成"""
-    if scheduler.all_completed():
-        print("[check] 所有节点已完成")
-        return "done"
-    print("[check] 还有未完成节点，继续调度")
-    return "dispatch"
-
-
-def build_dag_dispatch_graph():
     graph = StateGraph(DispatchState)
     graph.add_node("dispatch", dispatch_node)
     graph.add_node("worker", worker_node)
-    graph.add_node("check", lambda s: {})
+    graph.add_node("check", lambda s: {"ready_codes": []})
 
     graph.set_entry_point("dispatch")
-    graph.add_conditional_edges("dispatch", dispatch_node, ["worker"])
+    graph.add_conditional_edges("dispatch", dispatch_route, ["worker"])
     graph.add_edge("worker", "check")
     graph.add_conditional_edges("check", check_and_continue, {
         "dispatch": "dispatch",
@@ -218,8 +217,29 @@ if __name__ == "__main__":
     print()
 
     # 使用 LangGraph 执行 DAG 调度
-    app = build_dag_dispatch_graph()
-    result = app.invoke({"batch": 0, "results": [], "completed_codes": []})
+    app = build_dag_dispatch_graph(scheduler)
+    result = app.invoke({
+        "batch": 0,
+        "ready_codes": [],
+        "results": [],
+        "completed_codes": [],
+    })
 
     print(f"\n最终 {scheduler.summary()}")
     print(f"\n所有结果: {result['results']}")
+
+    # 再次构建一份新的 DAG，验证不会被上一次运行污染。
+    dag_nodes_2 = [
+        DAGNode("A", deps=[]),
+        DAGNode("B", deps=[]),
+        DAGNode("C", deps=["A", "B"]),
+    ]
+    scheduler_2 = DAGScheduler(dag_nodes_2)
+    app_2 = build_dag_dispatch_graph(scheduler_2)
+    result_2 = app_2.invoke({
+        "batch": 0,
+        "ready_codes": [],
+        "results": [],
+        "completed_codes": [],
+    })
+    print(f"\n二次运行结果: {result_2['results']}")

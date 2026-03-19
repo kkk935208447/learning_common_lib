@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, TypedDict
 
@@ -87,9 +88,9 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
-    result = app.invoke({
+    result = await app.ainvoke({
         "messages": ["初始消息"],
         "count": 0,
         "unique_tags": [],
@@ -104,4 +105,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

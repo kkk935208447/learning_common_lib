@@ -23,7 +23,9 @@
 """
 from __future__ import annotations
 
-from langchain_community.chat_models import FakeListChatModel
+import asyncio
+
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, MessagesState, StateGraph
@@ -74,39 +76,39 @@ def build_memory_graph():
 
 
 if __name__ == "__main__":
-    app = build_memory_graph()
+    async def main() -> None:
+        app = build_memory_graph()
 
-    # ── 同一线程多轮对话（短期记忆生效）──
-    thread_config = {"configurable": {"thread_id": "user-001"}}
+        thread_config = {"configurable": {"thread_id": "user-001"}}
 
-    print("=== 线程 user-001: 多轮对话 ===\n")
+        print("=== 线程 user-001: 多轮对话 ===\n")
 
-    conversations = [
-        "你好，我叫小明",
-        "我喜欢 Python 编程",
-        "你还记得我叫什么吗？",
-    ]
+        conversations = [
+            "你好，我叫小明",
+            "我喜欢 Python 编程",
+            "你还记得我叫什么吗？",
+        ]
 
-    for i, msg in enumerate(conversations, 1):
-        print(f"[轮次 {i}] 用户: {msg}")
-        result = app.invoke(
-            {"messages": [HumanMessage(content=msg)]},
-            config=thread_config,
+        for i, msg in enumerate(conversations, 1):
+            print(f"[轮次 {i}] 用户: {msg}")
+            result = await app.ainvoke(
+                {"messages": [HumanMessage(content=msg)]},
+                config=thread_config,
+            )
+            ai_msg = result["messages"][-1]
+            print(f"[轮次 {i}] AI: {ai_msg.content}\n")
+
+        state = await app.aget_state(thread_config)
+        print(f"线程 user-001 中的消息数: {len(state.values['messages'])}")
+
+        print("\n=== 线程 user-002: 新对话（无记忆）===\n")
+        thread_config_2 = {"configurable": {"thread_id": "user-002"}}
+        result2 = await app.ainvoke(
+            {"messages": [HumanMessage(content="你知道我是谁吗？")]},
+            config=thread_config_2,
         )
-        ai_msg = result["messages"][-1]
-        print(f"[轮次 {i}] AI: {ai_msg.content}\n")
+        print(f"AI: {result2['messages'][-1].content}")
+        state2 = await app.aget_state(thread_config_2)
+        print(f"线程 user-002 中的消息数: {len(state2.values['messages'])}")
 
-    # ── 查看 checkpoint 中的消息数量 ──
-    state = app.get_state(thread_config)
-    print(f"线程 user-001 中的消息数: {len(state.values['messages'])}")
-
-    # ── 切换线程（记忆隔离）──
-    print("\n=== 线程 user-002: 新对话（无记忆）===\n")
-    thread_config_2 = {"configurable": {"thread_id": "user-002"}}
-    result2 = app.invoke(
-        {"messages": [HumanMessage(content="你知道我是谁吗？")]},
-        config=thread_config_2,
-    )
-    print(f"AI: {result2['messages'][-1].content}")
-    state2 = app.get_state(thread_config_2)
-    print(f"线程 user-002 中的消息数: {len(state2.values['messages'])}")
+    asyncio.run(main())

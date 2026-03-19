@@ -7,7 +7,10 @@ from typing import Any, Callable
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from .safe_node import safe_node
+try:
+    from .safe_node import safe_node
+except ImportError:  # pragma: no cover - 允许直接运行模板文件
+    from safe_node import safe_node
 
 logger = logging.getLogger(__name__)
 

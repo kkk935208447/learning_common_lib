@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 """
 目标：演示 stream(mode="values") 模式——每步输出完整状态快照
 关键 API：graph.stream(inputs, mode="values")
@@ -34,7 +36,7 @@ def node_c(state: MessagesState) -> dict:
     return {"messages": [AIMessage(content=f"[节点C] 最终回复，共处理 {msg_count} 条消息")]}
 
 
-def main() -> None:
+async def main() -> None:
     graph = StateGraph(MessagesState)
     graph.add_node("a", node_a)
     graph.add_node("b", node_b)
@@ -51,7 +53,7 @@ def main() -> None:
     print("每步输出完整的 messages 列表:\n")
 
     step = 0
-    for state_snapshot in app.stream(
+    async for state_snapshot in app.astream(
         {"messages": [HumanMessage(content="你好，请帮我分析一下")]},
         stream_mode="values",
     ):
@@ -68,4 +70,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

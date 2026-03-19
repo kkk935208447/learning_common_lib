@@ -6,7 +6,7 @@
 
 关键 API：
     - RunnableConfig["configurable"] —— 运行时配置字典
-    - graph.invoke(state, config={"configurable": {...}})
+    - graph.ainvoke(state, config={"configurable": {...}})
 
 运行命令：
     python 03_configurable_graph.py
@@ -21,21 +21,20 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 
-# ── 状态定义 ──────────────────────────────────────────────
 class State(TypedDict):
     query: str
     response: str
     style: str
 
 
-# ── 节点函数 ──────────────────────────────────────────────
 def analyze_node(state: State, config: RunnableConfig) -> dict:
     """从 config 中读取运行时配置"""
     cfg = config.get("configurable", {})
@@ -47,11 +46,8 @@ def analyze_node(state: State, config: RunnableConfig) -> dict:
 
 def generate_node(state: State, config: RunnableConfig) -> dict:
     """根据配置生成不同风格的回复"""
-    cfg = config.get("configurable", {})
     style = state["style"]
 
-    # 使用 FakeListChatModel 模拟 LLM
-    # 生产环境替换为: ChatOpenAI(model=cfg.get("model_name", "gpt-4o"))
     if style == "简洁":
         fake_responses = ["Python 是一种编程语言。"]
     else:
@@ -67,7 +63,6 @@ def generate_node(state: State, config: RunnableConfig) -> dict:
     return {"response": result.content}
 
 
-# ── 构建图 ──────────────────────────────────────────────
 def build_configurable_graph() -> StateGraph:
     graph = StateGraph(State)
     graph.add_node("analyze", analyze_node)
@@ -79,19 +74,20 @@ def build_configurable_graph() -> StateGraph:
 
 
 if __name__ == "__main__":
-    app = build_configurable_graph()
-    query = "什么是 Python？"
+    async def main() -> None:
+        app = build_configurable_graph()
+        query = "什么是 Python？"
 
-    # ── 配置 A：详细模式 ──
-    print("=== 配置 A: 详细模式 ===")
-    config_a = {"configurable": {"response_style": "详细", "model_name": "gpt-4o"}}
-    result_a = app.invoke({"query": query, "response": "", "style": ""}, config=config_a)
-    print(f"回复: {result_a['response']}\n")
+        print("=== 配置 A: 详细模式 ===")
+        config_a = {"configurable": {"response_style": "详细", "model_name": "gpt-4o"}}
+        result_a = await app.ainvoke({"query": query, "response": "", "style": ""}, config=config_a)
+        print(f"回复: {result_a['response']}\n")
 
-    # ── 配置 B：简洁模式 ──
-    print("=== 配置 B: 简洁模式 ===")
-    config_b = {"configurable": {"response_style": "简洁", "model_name": "gpt-4o-mini"}}
-    result_b = app.invoke({"query": query, "response": "", "style": ""}, config=config_b)
-    print(f"回复: {result_b['response']}\n")
+        print("=== 配置 B: 简洁模式 ===")
+        config_b = {"configurable": {"response_style": "简洁", "model_name": "gpt-4o-mini"}}
+        result_b = await app.ainvoke({"query": query, "response": "", "style": ""}, config=config_b)
+        print(f"回复: {result_b['response']}\n")
 
-    print("同一张图，不同配置，不同行为 —— 这就是 configurable 的威力")
+        print("同一张图，不同配置，不同行为 —— 这就是 configurable 的威力")
+
+    asyncio.run(main())

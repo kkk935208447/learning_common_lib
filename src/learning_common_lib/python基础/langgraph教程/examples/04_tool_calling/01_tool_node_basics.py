@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 """
-目标：演示 @tool 定义 + bind_tools + ToolNode 的基本用法
+目标：演示 @tool 定义、手动执行 tool_call，以及在 StateGraph 中集成 ToolNode
 关键 API：@tool, ChatModel.bind_tools, ToolNode
 运行命令：python 01_tool_node_basics.py
 预期现象：
   1. 打印工具 schema（JSON 格式）
   2. FakeLLM 返回带 tool_calls 的 AIMessage
-  3. ToolNode 自动路由并执行对应工具，返回 ToolMessage
+  3. 手动执行 tool_call，理解底层消息结构
+  4. 在 StateGraph 中集成 ToolNode，展示生产中的常见写法
 生产提醒：
   - 真实场景请替换 FakeListChatModel 为 ChatOpenAI / ChatAnthropic
   - @tool 的 docstring 会作为工具描述传给 LLM，务必写清楚
 """
 
+import asyncio
 import json
+import ast
 from typing import Literal
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -32,14 +35,43 @@ def search(query: str) -> str:
 @tool
 def calculator(expression: str) -> str:
     """计算器工具：计算数学表达式并返回结果"""
-    # 生产环境应使用安全的表达式解析器，此处仅做演示
-    return str(eval(expression))  # noqa: S307
+    allowed_binops = {
+        ast.Add: lambda a, b: a + b,
+        ast.Sub: lambda a, b: a - b,
+        ast.Mult: lambda a, b: a * b,
+        ast.Div: lambda a, b: a / b,
+    }
+    allowed_unary = {
+        ast.UAdd: lambda a: a,
+        ast.USub: lambda a: -a,
+    }
+
+    def eval_node(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return eval_node(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in allowed_binops:
+            left = eval_node(node.left)
+            right = eval_node(node.right)
+            return allowed_binops[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in allowed_unary:
+            operand = eval_node(node.operand)
+            return allowed_unary[type(node.op)](operand)
+        raise ValueError("仅支持加减乘除和数字常量")
+
+    parsed = ast.parse(expression, mode="eval")
+    result = eval_node(parsed)
+    if result.is_integer():
+        return str(int(result))
+    return str(result)
 
 
 tools = [search, calculator]
+tool_map = {tool_.name: tool_ for tool_ in tools}
 
 
-def main() -> None:
+async def main() -> None:
     # ── 2. 查看自动生成的工具 schema ─────────────────────────
     print("=== 工具 Schema ===")
     for t in tools:
@@ -68,15 +100,19 @@ def main() -> None:
     for tc in fake_ai_message.tool_calls:
         print(f"  - {tc['name']}({tc['args']})")
 
-    # ── 4. ToolNode 自动路由执行 ─────────────────────────────
-    tool_node = ToolNode(tools)
-    # ToolNode 接收 MessagesState，自动根据最后一条 AIMessage 的 tool_calls 执行
-    result = tool_node.invoke({"messages": [fake_ai_message]})
-
-    print("\n=== ToolNode 执行结果 ===")
-    for msg in result["messages"]:
-        assert isinstance(msg, ToolMessage)
-        print(f"  工具: {msg.name} | 结果: {msg.content}")
+    # ── 4. 手动执行 tool_calls，理解底层消息结构 ──────────────
+    print("\n=== 手动执行 tool_calls ===")
+    manual_tool_messages: list[ToolMessage] = []
+    for tool_call in fake_ai_message.tool_calls:
+        tool_ = tool_map[tool_call["name"]]
+        content = tool_.invoke(tool_call["args"])
+        tool_message = ToolMessage(
+            content=str(content),
+            name=tool_.name,
+            tool_call_id=tool_call["id"],
+        )
+        manual_tool_messages.append(tool_message)
+        print(f"  工具: {tool_message.name} | 结果: {tool_message.content}")
 
     # ── 5. 在 StateGraph 中使用 ToolNode ─────────────────────
     print("\n=== 在 StateGraph 中集成 ToolNode ===")
@@ -112,10 +148,11 @@ def main() -> None:
     graph.add_edge("tools", END)
 
     app = graph.compile()
-    output = app.invoke({"messages": []})
+    output = await app.ainvoke({"messages": []})
     for msg in output["messages"]:
-        print(f"  [{type(msg).__name__}] {msg.content or msg.tool_calls}")
+        payload = msg.content or msg.tool_calls
+        print(f"  [{type(msg).__name__}] {payload}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

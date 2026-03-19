@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 

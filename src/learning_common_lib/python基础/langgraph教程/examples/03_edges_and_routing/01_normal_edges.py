@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -32,7 +33,7 @@ def step_c(state: State) -> dict:
     return {"value": state["value"] + " -> C"}
 
 
-def demo_new_api() -> None:
+async def demo_new_api() -> None:
     """新 API：使用 START/END 常量（推荐）。"""
     print("=== 新 API (START/END 常量) ===")
     graph = StateGraph(State)
@@ -47,11 +48,11 @@ def demo_new_api() -> None:
     graph.add_edge("c", END)   # 终止边：c → END
 
     app = graph.compile()
-    result = app.invoke({"value": "开始"})
+    result = await app.ainvoke({"value": "开始"})
     print(f"结果: {result['value']}\n")
 
 
-def demo_old_api() -> None:
+async def demo_old_api() -> None:
     """旧 API：使用 set_entry_point / set_finish_point。"""
     print("=== 旧 API (set_entry_point/set_finish_point) ===")
     graph = StateGraph(State)
@@ -66,15 +67,15 @@ def demo_old_api() -> None:
     graph.set_finish_point("c")  # 等价于 add_edge("c", END)
 
     app = graph.compile()
-    result = app.invoke({"value": "开始"})
+    result = await app.ainvoke({"value": "开始"})
     print(f"结果: {result['value']}\n")
 
 
-def main() -> None:
-    demo_new_api()
-    demo_old_api()
+async def main() -> None:
+    await demo_new_api()
+    await demo_old_api()
     print("两种 API 产生相同的拓扑结构和执行结果")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

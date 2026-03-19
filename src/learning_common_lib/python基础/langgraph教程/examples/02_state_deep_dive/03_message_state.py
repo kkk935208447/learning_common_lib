@@ -8,7 +8,9 @@
 """
 from __future__ import annotations
 
-from langchain_community.chat_models import FakeListChatModel
+import asyncio
+
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
@@ -49,12 +51,12 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+async def main() -> None:
     app = build_graph().compile()
 
     # 演示 1：基本对话
     print("=== 基本对话 ===")
-    result = app.invoke({"messages": [
+    result = await app.ainvoke({"messages": [
         SystemMessage(content="你是一个友好的 AI 助手"),
         HumanMessage(content="你好！"),
     ]})
@@ -79,4 +81,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
