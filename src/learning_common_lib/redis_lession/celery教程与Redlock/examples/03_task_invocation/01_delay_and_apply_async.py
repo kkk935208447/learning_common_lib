@@ -23,6 +23,7 @@
   - delay() 与 apply_async(args=..., kwargs=...) 在基础调用上效果一致
   - 一旦需要调度或路由，必须切到 apply_async()
   - queue/countdown/eta/expires 等能力构成了 apply_async 的完整价值
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
 """
 
 from __future__ import annotations
@@ -95,17 +96,17 @@ async def main() -> None:
     print("  结论: 在基础调用层面，delay() 只是 apply_async(args=..., kwargs=...) 的语法糖。\n")
 
     print_section("场景 C: 一旦需要调度能力，delay() 就不够了")
-    countdown_result = await asyncio.to_thread(add.apply_async, args=(100, 200), countdown=2)
+    countdown_result = await asyncio.to_thread(add.apply_async, args=(100, 200), countdown=2)  # 设置任务延迟执行的秒数。任务提交后不会立即执行，而是等待指定的秒数后再由 worker 处理。
     await wait_result("countdown=2", countdown_result)
 
     eta_time = datetime.now(tz=timezone.utc) + timedelta(seconds=3)
-    eta_result = await asyncio.to_thread(add.apply_async, args=(10, 20), eta=eta_time)
+    eta_result = await asyncio.to_thread(add.apply_async, args=(10, 20), eta=eta_time)   # 指定任务的具体执行时间点（Exact Time of Arrival）。接收一个带时区的 datetime 对象，任务会在该时间点后开始执行。
     await wait_result("eta=future_time", eta_result)
 
     expires_result = await asyncio.to_thread(
         add.apply_async,
         args=(6, 6),
-        expires=datetime.now(tz=timezone.utc) + timedelta(minutes=5),
+        expires=datetime.now(tz=timezone.utc) + timedelta(minutes=5),  # 设置任务的过期时间。如果任务在指定时间内未被执行（例如 worker 繁忙或系统故障），则会被自动丢弃，不再执行。
     )
     await wait_result("expires=datetime", expires_result)
     print("  结论: countdown / eta / expires 都属于 apply_async 的专属能力。\n")
@@ -116,7 +117,7 @@ async def main() -> None:
         args=("Bob",),
         kwargs={"greeting": "Hi"},
         countdown=1,
-        queue="greetings",
+        queue="greetings",   # 指定任务发送到的队列名称。表示任务会被发送到名为 "greetings" 的队列，只有监听该队列的 worker 会处理它。
         expires=120,
     )
     await wait_result("queue=greetings + countdown + expires", route_result)

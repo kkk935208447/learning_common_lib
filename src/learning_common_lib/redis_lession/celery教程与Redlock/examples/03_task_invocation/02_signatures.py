@@ -7,6 +7,7 @@ Python 版本: 3.11+
   终端2 (client):  cd src/learning_common_lib/redis_lession/celery教程与Redlock && uv run python examples/03_task_invocation/02_signatures.py
 预期现象: 展示签名的创建、调用、偏函数绑定、不可变签名及克隆
 生产提醒: 签名是 workflow (chain/group/chord) 的基础，务必理解 immutable 的含义
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
 """
 
 from __future__ import annotations

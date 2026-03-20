@@ -82,6 +82,7 @@ def demo_config_from_envvar() -> Celery:
 
     # 写入临时 Python 模块
     tmp_dir = tempfile.mkdtemp()
+    print(f"临时配置文件路径: {tmp_dir}")
     config_path = os.path.join(tmp_dir, "celery_settings.py")
     with open(config_path, "w") as f:
         f.write(config_content)
