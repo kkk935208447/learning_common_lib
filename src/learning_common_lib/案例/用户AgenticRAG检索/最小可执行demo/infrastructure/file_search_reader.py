@@ -7,15 +7,15 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from ..config import get_settings
     from ..ports.search_read_port import SearchReadPort
     from ..ports.vector_read_port import RetrievalHit
     from ._projection_utils import bm25_lite_score, load_json_records
+    from .settings import get_settings
 except ImportError:
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.ports.search_read_port import SearchReadPort
     from 最小可执行demo.ports.vector_read_port import RetrievalHit
     from 最小可执行demo.infrastructure._projection_utils import bm25_lite_score, load_json_records
+    from 最小可执行demo.infrastructure.settings import get_settings
 
 
 class FileSearchReader(SearchReadPort):

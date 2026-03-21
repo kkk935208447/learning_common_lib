@@ -1,0 +1,19 @@
+{
+  "id": "offline_step_gate_clarify",
+  "mode": "offline",
+  "llm_backend": "scripted",
+  "llm_script": {
+    "responses": {}
+  },
+  "retrieval_script": {},
+  "input": {
+    "session_id": "sess_test_offline_step_gate_clarify",
+    "query": "请按你认为更合适的口径整理公司近 90 天差旅报销规则的变化",
+    "kb_code": "default"
+  },
+  "fault_injection": {},
+  "expected": {
+    "clarification_source": "STEP_GATE",
+    "final_status": "COMPLETED"
+  }
+}

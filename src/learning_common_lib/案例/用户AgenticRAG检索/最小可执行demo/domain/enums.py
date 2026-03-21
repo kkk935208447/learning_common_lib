@@ -125,10 +125,12 @@ class WaitingReason(str, Enum):
 
 class TaskEventType(str, Enum):
     TASK_SUBMITTED = "task_submitted"
+    TASK_PLANNING_STARTED = "task_planning_started"
     PLAN_ACTIVATED = "plan_activated"
     SUBTASK_CLAIMED = "subtask_claimed"
     SUBTASK_DISPATCHED = "subtask_dispatched"
     SUBTASK_DISPATCH_FAILED = "subtask_dispatch_failed"
+    SUBTASK_RUN_REAPED = "subtask_run_reaped"
     SUBTASK_STARTED = "subtask_started"
     SUBTASK_COMPLETED = "subtask_completed"
     SUBTASK_FAILED = "subtask_failed"
@@ -139,6 +141,7 @@ class TaskEventType(str, Enum):
     CLARIFICATION_REQUESTED = "clarification_requested"
     CLARIFICATION_RECEIVED = "clarification_received"
     CLARIFICATION_DEFAULT_APPLIED = "clarification_default_applied"
+    TASK_RECOVERY_SCHEDULED = "task_recovery_scheduled"
     TASK_REPLANNED = "task_replanned"
     TASK_COMPLETED = "task_completed"
     TASK_DEGRADED = "task_degraded"

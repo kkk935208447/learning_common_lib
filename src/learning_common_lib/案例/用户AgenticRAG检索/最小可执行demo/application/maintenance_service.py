@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.enums import QueueName, TaskName
+from ..infrastructure.settings import get_settings
 from .common import json_safe, parse_utc_datetime, utcnow, value_of
 from .progress_service import ProgressService
 from .session_service import SessionService
@@ -19,6 +20,9 @@ try:
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskEvent
     from 最小可执行demo.ports.task_queue_port import TaskDispatchError
+
+
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceService:
@@ -115,10 +119,17 @@ class MaintenanceService:
                         subtask_code=run.subtask_code,
                         execution_id=run.execution_id,
                     )
-                    resume_payloads.append({"task_id": task.id, "entry_action": "step_gate"})
+                    resume_payloads.append(
+                        {
+                            "task_id": task.id,
+                            "entry_action": "step_gate",
+                            "prefer_checkpoint": True,
+                        }
+                    )
                     reaped += 1
         for payload in resume_payloads:
             await self._dispatch_or_resume(payload)
+        logger.info("reaped stuck runs count=%s", reaped)
         return reaped
 
     async def apply_clarification_defaults(self) -> int:
@@ -184,6 +195,7 @@ class MaintenanceService:
                     applied += 1
         for payload in resume_payloads:
             await self._dispatch_or_resume(payload)
+        logger.info("applied clarify defaults count=%s", applied)
         return applied
 
     async def recover_orchestration_gaps(self, stall_seconds: int | None = None) -> dict[str, int]:
@@ -214,13 +226,25 @@ class MaintenanceService:
                     control_json = json_safe(task.control_json or {})
                     status = value_of(task.status)
                     if status == "PENDING" and int(task.active_plan_version or 0) == 0:
-                        start_payloads.append({"task_id": task.id})
+                        start_payloads.append({"task_id": task.id, "prefer_checkpoint": True})
                         recovered_start += 1
                     elif status == "PLANNING":
-                        resume_payloads.append({"task_id": task.id, "entry_action": "planner"})
+                        resume_payloads.append(
+                            {
+                                "task_id": task.id,
+                                "entry_action": "planner",
+                                "prefer_checkpoint": True,
+                            }
+                        )
                         recovered_resume += 1
                     elif status == "FINALIZING" and int(task.active_plan_version or 0) > 0:
-                        resume_payloads.append({"task_id": task.id, "entry_action": "finalize"})
+                        resume_payloads.append(
+                            {
+                                "task_id": task.id,
+                                "entry_action": "finalize",
+                                "prefer_checkpoint": True,
+                            }
+                        )
                         recovered_resume += 1
                     elif control_json.get("clarification_reply_selected"):
                         clarification_source = control_json.get("clarification_source") or "PREPLAN"
@@ -228,6 +252,7 @@ class MaintenanceService:
                             {
                                 "task_id": task.id,
                                 "entry_action": "planner" if clarification_source == "PREPLAN" else "step_gate",
+                                "prefer_checkpoint": True,
                             }
                         )
                         recovered_resume += 1
@@ -247,7 +272,13 @@ class MaintenanceService:
                             or "PENDING" in states
                             or states.issubset({"COMPLETED", "FAILED", "SKIPPED"})
                         ):
-                            resume_payloads.append({"task_id": task.id, "entry_action": "step_gate"})
+                            resume_payloads.append(
+                                {
+                                    "task_id": task.id,
+                                    "entry_action": "step_gate",
+                                    "prefer_checkpoint": True,
+                                }
+                            )
                             recovered_resume += 1
 
                 for payload in start_payloads:
@@ -281,6 +312,12 @@ class MaintenanceService:
             await self._dispatch_or_start(payload)
         for payload in resume_payloads:
             await self._dispatch_or_resume(payload)
+        logger.info(
+            "recovered orchestration gaps started=%s resumed=%s redispatched=%s",
+            recovered_start,
+            recovered_resume,
+            redispatched,
+        )
         return {"started": recovered_start, "resumed": recovered_resume, "redispatched": redispatched}
 
     async def recover_dispatch_gaps(self, stall_seconds: int | None = None) -> int:
@@ -354,6 +391,7 @@ class MaintenanceService:
                     from 最小可执行demo.workers.subtask_tasks import execute_subtask_async
 
                 await execute_subtask_async(**payload)
+        logger.info("recovered dispatch gaps count=%s", recovered)
         return recovered
 
     async def rebuild_runtime_cache(self) -> dict[str, int | str]:
@@ -415,6 +453,7 @@ class MaintenanceService:
             {"ts": utcnow().isoformat()},
             ttl_seconds=600,
         )
+        logger.info("rebuilt runtime cache synced=%s primed_events=%s", synced, primed_events)
         return {
             "status": "ok",
             "synced_evidence_pools": synced,

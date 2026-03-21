@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain.contracts import ClarificationRequest
-from ..errors import ConflictError, ValidationError
 from .common import json_safe, normalize_utc_datetime, utcnow
+from .errors import ConflictError, ValidationError
 
 try:
     from ..infrastructure.models import Session, SessionTurn

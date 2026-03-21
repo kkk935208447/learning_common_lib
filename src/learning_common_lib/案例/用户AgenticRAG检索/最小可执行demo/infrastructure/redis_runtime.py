@@ -10,11 +10,11 @@ from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 
 try:
-    from ..config import get_settings
     from ..ports.session_store_port import SessionStorePort
+    from .settings import get_settings
 except ImportError:
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.ports.session_store_port import SessionStorePort
+    from 最小可执行demo.infrastructure.settings import get_settings
 
 
 class RedisDistributedLock:

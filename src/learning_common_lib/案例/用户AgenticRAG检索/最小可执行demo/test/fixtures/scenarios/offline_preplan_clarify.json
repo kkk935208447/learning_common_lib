@@ -1,0 +1,19 @@
+{
+  "id": "offline_preplan_clarify",
+  "mode": "offline",
+  "llm_backend": "scripted",
+  "llm_script": {
+    "responses": {}
+  },
+  "retrieval_script": {},
+  "input": {
+    "session_id": "sess_test_offline_preplan_clarify",
+    "query": "请帮我整理差旅报销规则的变化",
+    "kb_code": "default"
+  },
+  "fault_injection": {},
+  "expected": {
+    "clarification_source": "PREPLAN",
+    "final_status": "COMPLETED"
+  }
+}

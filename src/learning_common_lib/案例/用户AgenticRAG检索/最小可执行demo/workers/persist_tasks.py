@@ -7,9 +7,12 @@ import logging
 from typing import Any
 
 try:
-    from ..service_runtime import build_runtime_bundle, close_runtime_bundle
+    from ..infrastructure.runtime_bundle import build_runtime_bundle, close_runtime_bundle
 except ImportError:
-    from 最小可执行demo.service_runtime import build_runtime_bundle, close_runtime_bundle
+    from 最小可执行demo.infrastructure.runtime_bundle import (
+        build_runtime_bundle,
+        close_runtime_bundle,
+    )
 
 
 logger = logging.getLogger(__name__)

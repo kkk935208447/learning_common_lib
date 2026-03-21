@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, FinalAnswerInput, KnowledgeChunkHit
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:

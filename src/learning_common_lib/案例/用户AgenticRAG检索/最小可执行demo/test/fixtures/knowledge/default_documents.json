@@ -1,0 +1,16 @@
+{
+  "documents": [
+    {
+      "external_doc_key": "travel_policy_v1",
+      "title": "差旅报销制度",
+      "file_name": "travel_policy_v1.txt",
+      "mime_type": "text/plain"
+    },
+    {
+      "external_doc_key": "travel_policy_compare",
+      "title": "差旅补充说明",
+      "file_name": "travel_policy_compare.txt",
+      "mime_type": "text/plain"
+    }
+  ]
+}

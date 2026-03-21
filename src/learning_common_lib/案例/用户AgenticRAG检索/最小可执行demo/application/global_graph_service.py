@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -10,16 +11,19 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.clarify_rules import apply_clarification_to_query
 from ..domain.contracts import ClarificationOption, ClarificationRequest
 from ..domain.state_machine import GlobalState
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
     from ..infrastructure.models import SearchTask, Subtask
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask
+
+
+logger = logging.getLogger(__name__)
 
 
 class GlobalGraphService:
@@ -83,7 +87,7 @@ class GlobalGraphService:
 
     async def _run_eager_claimed_batch(self, task_id: int) -> None:
         try:
-            from ..service_runtime import (
+            from ..infrastructure.runtime_bundle import (
                 build_runtime_bundle,
                 build_subtask_graph_service_from_bundle,
                 close_runtime_bundle,
@@ -91,7 +95,7 @@ class GlobalGraphService:
             from ..infrastructure.models import SubtaskRun
             from ..workers.persist_tasks import flush_data_plane_async
         except ImportError:
-            from 最小可执行demo.service_runtime import (
+            from 最小可执行demo.infrastructure.runtime_bundle import (
                 build_runtime_bundle,
                 build_subtask_graph_service_from_bundle,
                 close_runtime_bundle,
@@ -134,16 +138,39 @@ class GlobalGraphService:
         finally:
             await close_runtime_bundle(runtime)
 
+    async def _load_checkpoint_snapshot(self, config: dict[str, Any]) -> Any | None:
+        if self.graph is None or not hasattr(self.graph, "aget_state"):
+            return None
+        try:
+            snapshot = await self.graph.aget_state(config)
+        except ValueError:
+            return None
+        if snapshot is None:
+            return None
+        return snapshot
+
+    @staticmethod
+    def _has_pending_checkpoint(snapshot: Any | None) -> bool:
+        if snapshot is None:
+            return False
+        pending = tuple(getattr(snapshot, "next", ()) or ())
+        return bool(pending)
+
     async def run(
         self,
         task_id: int,
         *,
         entry_action: str | None = None,
         result_envelope: dict[str, Any] | None = None,
+        prefer_checkpoint: bool = False,
     ) -> dict[str, Any]:
         envelope_applied = True
         if result_envelope is not None:
             envelope_applied = await self._apply_result_envelope(result_envelope)
+        config = {"configurable": {"thread_id": f"deepsearch-task-{task_id}"}}
+        checkpoint_snapshot = None
+        if prefer_checkpoint and result_envelope is None:
+            checkpoint_snapshot = await self._load_checkpoint_snapshot(config)
         async with self.session_factory() as session:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is None:
@@ -154,8 +181,22 @@ class GlobalGraphService:
             if runtime_cache is not None:
                 await runtime_cache.store_global_state(task_id, json_safe(initial_state))
             return initial_state
-        config = {"configurable": {"thread_id": f"deepsearch-task-{task_id}"}}
-        result = await self.graph.ainvoke(initial_state, config=config)
+        if self._has_pending_checkpoint(checkpoint_snapshot):
+            # 恢复只继续当前 graph 的下一跳，不等待任何 Celery 结果。
+            logger.info(
+                "resuming task_id=%s from checkpoint next=%s",
+                task_id,
+                list(getattr(checkpoint_snapshot, "next", ()) or ()),
+            )
+            result = await self.graph.ainvoke(None, config=config)
+        else:
+            logger.info(
+                "running task_id=%s from initial_state entry_action=%s prefer_checkpoint=%s",
+                task_id,
+                initial_state.get("entry_action"),
+                prefer_checkpoint,
+            )
+            result = await self.graph.ainvoke(initial_state, config=config)
         runtime_cache = getattr(self.progress_service, "runtime_cache", None)
         if runtime_cache is not None:
             await runtime_cache.store_global_state(task_id, json_safe(result))

@@ -6,7 +6,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from .contracts import PlanDependency, PlanNodeSpec
+try:
+    from .contracts import PlanDependency, PlanNodeSpec
+except ImportError:
+    from 最小可执行demo.domain.contracts import PlanDependency, PlanNodeSpec
 
 
 @dataclass(slots=True)

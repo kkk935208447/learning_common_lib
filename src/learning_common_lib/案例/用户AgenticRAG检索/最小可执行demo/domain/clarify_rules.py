@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from .contracts import ClarificationOption, ClarificationRequest
-from .dag import QueryProfile
-from ..application.common import utcnow
+try:
+    from .contracts import ClarificationOption, ClarificationRequest
+    from .dag import QueryProfile
+    from ..application.common import utcnow
+except ImportError:
+    from 最小可执行demo.domain.contracts import ClarificationOption, ClarificationRequest
+    from 最小可执行demo.domain.dag import QueryProfile
+    from 最小可执行demo.application.common import utcnow
 
 
 def maybe_build_preplan_clarification(query: str, profile: QueryProfile) -> ClarificationRequest | None:

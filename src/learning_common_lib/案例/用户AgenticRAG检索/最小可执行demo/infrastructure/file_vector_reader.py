@@ -9,9 +9,9 @@ from typing import Any
 
 try:
     from ....实现AgenticRAG数据库管理.最小可执行demo.embedding import DeterministicEmbeddingProvider
-    from ..config import get_settings
     from ..ports.vector_read_port import RetrievalHit, VectorReadPort
     from ._projection_utils import cosine_similarity, load_json_records
+    from .settings import get_settings
 except ImportError:
     cases_root = Path(__file__).resolve().parent.parent.parent.parent
     if str(cases_root) not in sys.path:
@@ -19,9 +19,9 @@ except ImportError:
     from 实现AgenticRAG数据库管理.最小可执行demo.embedding import (
         DeterministicEmbeddingProvider,
     )
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.ports.vector_read_port import RetrievalHit, VectorReadPort
     from 最小可执行demo.infrastructure._projection_utils import cosine_similarity, load_json_records
+    from 最小可执行demo.infrastructure.settings import get_settings
 
 
 class FileVectorReader(VectorReadPort):

@@ -9,15 +9,15 @@ try:
         CheckpointManager as TemplateCheckpointManager,
         RedisRuntimeSettings,
     )
-    from ..config import get_settings
     from ..ports.checkpoint_port import CheckpointPort
+    from .settings import get_settings
 except ImportError:
     from 最小可执行demo.infrastructure.langgraph_checkpoint_support import (
         CheckpointManager as TemplateCheckpointManager,
         RedisRuntimeSettings,
     )
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.ports.checkpoint_port import CheckpointPort
+    from 最小可执行demo.infrastructure.settings import get_settings
 
 
 class LangGraphCheckpointAdapter(CheckpointPort):

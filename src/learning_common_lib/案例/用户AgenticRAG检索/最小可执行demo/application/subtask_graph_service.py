@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, KnowledgeChunkHit, SubtaskResultEnvelope
 from ..domain.scoring import passes_threshold, score_evidence_cards
 from ..domain.state_machine import SubtaskState
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 from .progress_service import ProgressService
 
@@ -19,6 +20,9 @@ try:
     from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
+
+
+logger = logging.getLogger(__name__)
 
 
 class SubtaskGraphService:
@@ -283,6 +287,12 @@ class SubtaskGraphService:
 
             run.status = "RUNNING"
             run.started_at = utcnow()
+            logger.info(
+                "subtask execution started task_id=%s execution_id=%s subtask_code=%s",
+                run.task_id,
+                execution_id,
+                run.subtask_code,
+            )
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
@@ -451,4 +461,11 @@ class SubtaskGraphService:
                 subtask_code=run.subtask_code,
                 drafts=evidence_drafts,
             )
+        logger.info(
+            "subtask execution finished task_id=%s execution_id=%s status=%s evidence_refs=%s",
+            run.task_id,
+            execution_id,
+            envelope.status,
+            len(envelope.evidence_card_refs),
+        )
         return envelope

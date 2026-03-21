@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings
+from ..infrastructure.settings import get_settings
 from ..ports.task_queue_port import TaskDispatchError
 from .common import build_execution_id, json_safe, utcnow, value_of
 from .progress_service import ProgressService
@@ -19,6 +20,9 @@ except ImportError:
 
 
 TERMINAL_RUN_STATUSES = {"COMPLETED", "FAILED", "ESCALATED", "STALE_IGNORED"}
+
+
+logger = logging.getLogger(__name__)
 
 
 class RunService:
@@ -104,6 +108,13 @@ class RunService:
                 "dag_fingerprint": dag_fingerprint,
             },
             plan_version=new_version,
+        )
+        logger.info(
+            "activated plan task_id=%s version=%s previous=%s replan_reason=%s",
+            task.id,
+            new_version,
+            previous_version,
+            replan_reason,
         )
         return new_version
 
@@ -213,6 +224,13 @@ class RunService:
             )
 
         await session.flush()
+        if claimed:
+            logger.info(
+                "claimed subtasks task_id=%s plan_version=%s claimed=%s",
+                task.id,
+                task.active_plan_version,
+                [item["execution_id"] for item in claimed],
+            )
         return claimed
 
     async def mark_waiting_subtasks(
@@ -355,6 +373,13 @@ class RunService:
         if int(task.active_plan_version or 0) != envelope.plan_version or subtask.current_execution_id != envelope.execution_id:
             run.status = "STALE_IGNORED"
             run.finished_at = utcnow()
+            logger.info(
+                "stale subtask result ignored task_id=%s execution_id=%s active_plan_version=%s envelope_plan_version=%s",
+                task.id,
+                envelope.execution_id,
+                task.active_plan_version,
+                envelope.plan_version,
+            )
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
@@ -441,6 +466,12 @@ class RunService:
             plan_version=envelope.plan_version,
             subtask_code=envelope.subtask_code,
             execution_id=envelope.execution_id,
+        )
+        logger.info(
+            "applied subtask result task_id=%s execution_id=%s status=%s",
+            task.id,
+            envelope.execution_id,
+            envelope.status,
         )
         await session.flush()
         return True
