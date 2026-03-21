@@ -242,7 +242,11 @@ class MaintenanceService:
                             ).all()
                         )
                         states = {value_of(item.status) for item in subtasks}
-                        if subtasks and states.issubset({"COMPLETED", "FAILED", "SKIPPED"}):
+                        if subtasks and (
+                            "READY" in states
+                            or "PENDING" in states
+                            or states.issubset({"COMPLETED", "FAILED", "SKIPPED"})
+                        ):
                             resume_payloads.append({"task_id": task.id, "entry_action": "step_gate"})
                             recovered_resume += 1
 

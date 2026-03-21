@@ -148,6 +148,20 @@ class SearchCommandService:
                 if task is None:
                     raise NotFoundError(f"request_id={request_id} 不存在")
                 if value_of(task.status) != "WAITING_CLARIFICATION":
+                    latest_request = await self.session_service.get_latest_clarification_request(
+                        session,
+                        task_id=task.id,
+                    )
+                    latest_reply = await self.session_service.get_latest_clarification_reply(
+                        session,
+                        task_id=task.id,
+                    )
+                    if (
+                        latest_request is not None
+                        and latest_reply is not None
+                        and int(latest_reply.id) > int(latest_request.id)
+                    ):
+                        return await self.progress_service.build_snapshot(session, request_id)
                     raise ConflictError("任务当前不处于 WAITING_CLARIFICATION")
 
                 control_json = json_safe(task.control_json or {})

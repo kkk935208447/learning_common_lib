@@ -471,6 +471,8 @@ class RunService:
             task.control_json = {**control_json, "waiting_reason": "SUBTASKS"}
             await session.flush()
             return "output"
+        if control_json.get("postexec_focus") and all(state in {"COMPLETED", "FAILED", "SKIPPED"} for state in states):
+            return "finalize"
         if all(state in {"COMPLETED", "SKIPPED"} for state in states):
             return "finalize"
         if latest_escalation and latest_escalation.get("suggested_global_action") == "clarify" and int(task.postexec_clarification_used or 0) < 1:

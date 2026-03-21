@@ -102,10 +102,16 @@ class MockLLM(LLMPort):
             findings = raw_prompt.get("findings", []) if isinstance(raw_prompt, dict) else []
             citations = raw_prompt.get("citations", []) if isinstance(raw_prompt, dict) else []
             uncovered = raw_prompt.get("uncovered", []) if isinstance(raw_prompt, dict) else []
+            focus = raw_prompt.get("focus") if isinstance(raw_prompt, dict) else None
             body = "\n".join(f"- {item}" for item in findings) or "- 未产出稳定结论"
             if uncovered:
                 body += "\n\n未覆盖信息点：\n" + "\n".join(f"- {item}" for item in uncovered)
-            return {"answer": f"最终汇总如下：\n{body}", "citations": citations}
+            prefix = ""
+            if focus == "opt_policy":
+                prefix = "回答口径：制度解释优先\n"
+            elif focus == "opt_change":
+                prefix = "回答口径：变更摘要优先\n"
+            return {"answer": f"{prefix}最终汇总如下：\n{body}", "citations": citations}
 
         if kind == "session_summary":
             turns = raw_prompt.get("turns", []) if isinstance(raw_prompt, dict) else []

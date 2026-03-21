@@ -137,6 +137,21 @@ class SessionService:
         )
         return await session.scalar(stmt)
 
+    async def get_latest_clarification_reply(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+    ) -> SessionTurn | None:
+        stmt = (
+            select(SessionTurn)
+            .where(SessionTurn.task_id == task_id)
+            .where(SessionTurn.turn_type == "CLARIFY_REPLY")
+            .order_by(SessionTurn.id.desc())
+            .limit(1)
+        )
+        return await session.scalar(stmt)
+
     async def validate_clarification_answer(
         self,
         session: AsyncSession,

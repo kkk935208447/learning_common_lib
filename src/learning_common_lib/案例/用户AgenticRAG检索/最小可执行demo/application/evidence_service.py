@@ -403,6 +403,8 @@ class EvidenceService:
             }
 
         final_input = await self.build_final_answer_input(session, task_id, plan_version)
+        control_json = json_safe(task.control_json or {})
+        postexec_focus = str(control_json.get("postexec_focus") or "")
         subtasks = list(
             (
                 await session.scalars(
@@ -451,11 +453,21 @@ class EvidenceService:
             "findings": findings,
             "citations": [str(item["card_uid"]) for item in records[:6]],
             "uncovered": final_input.uncovered_points,
+            "focus": postexec_focus or None,
         }
         llm_response = await self.llm.generate(prompt, structured_schema="final_answer")
         structured_output = llm_response.get("structured_output") or {}
         answer = structured_output.get("answer") or "\n".join(findings) or "未产出稳定结论"
-        citations = structured_output.get("citations") or [str(item["card_uid"]) for item in records[:6]]
+        if postexec_focus == "opt_policy" and not answer.startswith("回答口径：制度解释优先"):
+            answer = f"回答口径：制度解释优先\n{answer}"
+        elif postexec_focus == "opt_change" and not answer.startswith("回答口径：变更摘要优先"):
+            answer = f"回答口径：变更摘要优先\n{answer}"
+        valid_citations = [str(item["card_uid"]) for item in records[:6]]
+        valid_citation_set = set(valid_citations)
+        raw_citations = list(structured_output.get("citations") or valid_citations)
+        citations = [citation for citation in raw_citations if citation in valid_citation_set]
+        if not citations:
+            citations = valid_citations
         return {
             "answer": answer,
             "citations": citations,
