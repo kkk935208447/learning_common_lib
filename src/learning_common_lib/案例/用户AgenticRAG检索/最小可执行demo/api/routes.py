@@ -7,17 +7,17 @@ from typing import Any
 from fastapi import APIRouter, Header, Request
 
 try:
+    from ..application.errors import ValidationError
     from ..domain.contracts import ClarificationAnswerRequest, SearchSubmitRequest
-    from ..errors import ValidationError
-    from ..service_runtime import build_search_command_service
+    from ..infrastructure.runtime_bundle import build_search_command_service
     from .sse import build_sse_response
 except ImportError:
+    from 最小可执行demo.application.errors import ValidationError
     from 最小可执行demo.domain.contracts import (
         ClarificationAnswerRequest,
         SearchSubmitRequest,
     )
-    from 最小可执行demo.errors import ValidationError
-    from 最小可执行demo.service_runtime import (
+    from 最小可执行demo.infrastructure.runtime_bundle import (
         build_search_command_service,
     )
     from 最小可执行demo.api.sse import (

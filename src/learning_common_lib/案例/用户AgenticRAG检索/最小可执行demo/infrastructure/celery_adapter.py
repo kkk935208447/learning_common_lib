@@ -21,9 +21,9 @@ class CeleryTaskQueueAdapter(TaskQueuePort):
         countdown: int | None = None,
     ) -> str | None:
         try:
-            from ..celery_app import celery_app
+            from ..workers.celery_app import celery_app
         except ImportError:
-            from 最小可执行demo.celery_app import celery_app
+            from 最小可执行demo.workers.celery_app import celery_app
         try:
             result = celery_app.send_task(task_name, kwargs=payload, queue=queue_name, countdown=countdown)
         except Exception as exc:
@@ -51,6 +51,7 @@ class InMemoryTaskQueueAdapter(TaskQueuePort):
             from ..workers.maintenance_tasks import (
                 apply_clarify_defaults_async,
                 reap_stuck_runs_async,
+                recover_orchestration_gaps_async,
                 rebuild_runtime_cache_async,
             )
             from ..workers.orchestrate_tasks import resume_search_async, start_search_async
@@ -60,6 +61,7 @@ class InMemoryTaskQueueAdapter(TaskQueuePort):
             from 最小可执行demo.workers.maintenance_tasks import (
                 apply_clarify_defaults_async,
                 reap_stuck_runs_async,
+                recover_orchestration_gaps_async,
                 rebuild_runtime_cache_async,
             )
             from 最小可执行demo.workers.orchestrate_tasks import resume_search_async, start_search_async
@@ -74,6 +76,7 @@ class InMemoryTaskQueueAdapter(TaskQueuePort):
             "deepsearch.reap_stuck_runs": lambda: reap_stuck_runs_async(),
             "deepsearch.apply_clarify_defaults": lambda: apply_clarify_defaults_async(),
             "deepsearch.rebuild_runtime_cache": lambda: rebuild_runtime_cache_async(),
+            "deepsearch.recover_orchestration_gaps": lambda: recover_orchestration_gaps_async(),
         }
         factory = task_map.get(task_name)
         if factory is None:

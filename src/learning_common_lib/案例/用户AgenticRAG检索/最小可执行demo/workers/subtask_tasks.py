@@ -3,37 +3,43 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 try:
-    from ..config import get_settings
     from ..domain.enums import QueueName, TaskName
-    from ..ports.task_queue_port import TaskDispatchError
-    from ..service_runtime import (
+    from ..infrastructure.runtime_bundle import (
         build_runtime_bundle,
         build_subtask_graph_service_from_bundle,
         close_runtime_bundle,
     )
+    from ..infrastructure.settings import get_settings
+    from ..ports.task_queue_port import TaskDispatchError
     from .orchestrate_tasks import resume_search_async
     from .persist_tasks import flush_data_plane_async
 except ImportError:
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.domain.enums import QueueName, TaskName
-    from 最小可执行demo.ports.task_queue_port import TaskDispatchError
-    from 最小可执行demo.service_runtime import (
+    from 最小可执行demo.infrastructure.runtime_bundle import (
         build_runtime_bundle,
         build_subtask_graph_service_from_bundle,
         close_runtime_bundle,
     )
+    from 最小可执行demo.infrastructure.settings import get_settings
+    from 最小可执行demo.ports.task_queue_port import TaskDispatchError
     from 最小可执行demo.workers.orchestrate_tasks import resume_search_async
     from 最小可执行demo.workers.persist_tasks import flush_data_plane_async
 
 
+logger = logging.getLogger(__name__)
+
+
 async def execute_subtask_async(*, execution_id: str, **_: object) -> dict:
+    logger.info("worker execute_subtask start execution_id=%s", execution_id)
     runtime = build_runtime_bundle(use_task_engine=True)
     try:
         service = build_subtask_graph_service_from_bundle(runtime)
         envelope = await service.execute(execution_id=execution_id)
         if envelope is None:
+            logger.info("worker execute_subtask ignored execution_id=%s", execution_id)
             return {"status": "ignored"}
 
         settings = get_settings()
@@ -75,6 +81,11 @@ async def execute_subtask_async(*, execution_id: str, **_: object) -> dict:
                     await flush_data_plane_async(**flush_payload)
 
             await asyncio.gather(_resume_or_run_locally(), _flush_or_run_locally())
+        logger.info(
+            "worker execute_subtask finished execution_id=%s status=%s",
+            execution_id,
+            envelope.status,
+        )
         return envelope.model_dump(mode="json")
     finally:
         await close_runtime_bundle(runtime)

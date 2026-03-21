@@ -21,7 +21,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 try:
-    from ..config import get_settings
     from ..domain.enums import (
         AnswerOrigin,
         ClaimType,
@@ -38,8 +37,8 @@ try:
         SubtaskStatus,
         TaskType,
     )
+    from .settings import get_settings
 except ImportError:
-    from 最小可执行demo.config import get_settings
     from 最小可执行demo.domain.enums import (
         AnswerOrigin,
         ClaimType,
@@ -56,6 +55,7 @@ except ImportError:
         SubtaskStatus,
         TaskType,
     )
+    from 最小可执行demo.infrastructure.settings import get_settings
 
 
 TABLE_PREFIX = get_settings().table_prefix

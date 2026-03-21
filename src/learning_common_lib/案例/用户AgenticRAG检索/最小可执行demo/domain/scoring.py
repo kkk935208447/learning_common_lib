@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .contracts import EvidenceCardDraft
+try:
+    from .contracts import EvidenceCardDraft
+except ImportError:
+    from 最小可执行demo.domain.contracts import EvidenceCardDraft
 
 
 def score_evidence_cards(cards: list[EvidenceCardDraft]) -> dict[str, float | str]:
@@ -44,4 +47,3 @@ def passes_threshold(eval_summary: dict[str, float | str], min_sources: int, evi
         and float(eval_summary["confidence"]) >= 0.55
         and float(eval_summary["conflict"]) <= 0.4
     )
-

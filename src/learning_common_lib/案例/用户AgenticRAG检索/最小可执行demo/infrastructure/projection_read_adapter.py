@@ -7,16 +7,16 @@ from typing import Any
 from sqlalchemy import bindparam, select, text
 
 try:
-    from ..db import task_session_scope
     from ..domain.enums import SearchTaskStatus
     from ..ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from ..ports.object_storage_port import ObjectStorageReadPort
+    from .database import task_session_scope
     from .models import SearchTask
 except ImportError:
-    from 最小可执行demo.db import task_session_scope
     from 最小可执行demo.domain.enums import SearchTaskStatus
     from 最小可执行demo.ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from 最小可执行demo.ports.object_storage_port import ObjectStorageReadPort
+    from 最小可执行demo.infrastructure.database import task_session_scope
     from 最小可执行demo.infrastructure.models import SearchTask
 
 

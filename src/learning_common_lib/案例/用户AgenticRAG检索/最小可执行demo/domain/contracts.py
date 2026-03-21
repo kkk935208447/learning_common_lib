@@ -167,9 +167,11 @@ class ProgressSummary(BaseModel):
 
 
 class TaskEventData(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     request_id: str
-    status: str
-    message: str
+    status: str | None = None
+    message: str | None = None
     ts: datetime
     plan_version: int | None = None
     subtask_code: str | None = None

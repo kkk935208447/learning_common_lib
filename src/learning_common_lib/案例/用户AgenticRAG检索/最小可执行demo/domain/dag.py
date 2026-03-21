@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 
-from .contracts import PlanDependency, PlanNodeSpec
+try:
+    from .contracts import PlanDependency, PlanNodeSpec
+except ImportError:
+    from 最小可执行demo.domain.contracts import PlanDependency, PlanNodeSpec
 
 
 @dataclass(slots=True)
@@ -93,8 +97,10 @@ def build_plan_nodes(resolved_query: str, profile: QueryProfile) -> list[PlanNod
 
 
 def build_dag_fingerprint(plan_nodes: list[PlanNodeSpec]) -> str:
-    raw = "|".join(
-        f"{node.subtask_code}:{node.task_type}:{','.join(dep.code for dep in node.depends_on)}"
-        for node in plan_nodes
+    raw = json.dumps(
+        [node.model_dump(mode="json") for node in plan_nodes],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

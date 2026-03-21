@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -10,16 +11,19 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.clarify_rules import apply_clarification_to_query
 from ..domain.contracts import ClarificationOption, ClarificationRequest
 from ..domain.state_machine import GlobalState
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
     from ..infrastructure.models import SearchTask, Subtask
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask
+
+
+logger = logging.getLogger(__name__)
 
 
 class GlobalGraphService:
@@ -70,7 +74,7 @@ class GlobalGraphService:
         graph.add_edge("output", END)
         return graph.compile(checkpointer=checkpointer)
 
-    async def _apply_result_envelope(self, result_envelope: dict[str, Any]) -> None:
+    async def _apply_result_envelope(self, result_envelope: dict[str, Any]) -> bool:
         try:
             from ..domain.contracts import SubtaskResultEnvelope
         except ImportError:
@@ -79,11 +83,11 @@ class GlobalGraphService:
         envelope = SubtaskResultEnvelope.model_validate(result_envelope)
         async with self.session_factory() as session:
             async with session.begin():
-                await self.run_service.apply_subtask_result(session, envelope)
+                return await self.run_service.apply_subtask_result(session, envelope)
 
     async def _run_eager_claimed_batch(self, task_id: int) -> None:
         try:
-            from ..service_runtime import (
+            from ..infrastructure.runtime_bundle import (
                 build_runtime_bundle,
                 build_subtask_graph_service_from_bundle,
                 close_runtime_bundle,
@@ -91,7 +95,7 @@ class GlobalGraphService:
             from ..infrastructure.models import SubtaskRun
             from ..workers.persist_tasks import flush_data_plane_async
         except ImportError:
-            from 最小可执行demo.service_runtime import (
+            from 最小可执行demo.infrastructure.runtime_bundle import (
                 build_runtime_bundle,
                 build_subtask_graph_service_from_bundle,
                 close_runtime_bundle,
@@ -134,22 +138,65 @@ class GlobalGraphService:
         finally:
             await close_runtime_bundle(runtime)
 
+    async def _load_checkpoint_snapshot(self, config: dict[str, Any]) -> Any | None:
+        if self.graph is None or not hasattr(self.graph, "aget_state"):
+            return None
+        try:
+            snapshot = await self.graph.aget_state(config)
+        except ValueError:
+            return None
+        if snapshot is None:
+            return None
+        return snapshot
+
+    @staticmethod
+    def _has_pending_checkpoint(snapshot: Any | None) -> bool:
+        if snapshot is None:
+            return False
+        pending = tuple(getattr(snapshot, "next", ()) or ())
+        return bool(pending)
+
     async def run(
         self,
         task_id: int,
         *,
         entry_action: str | None = None,
         result_envelope: dict[str, Any] | None = None,
+        prefer_checkpoint: bool = False,
     ) -> dict[str, Any]:
+        envelope_applied = True
         if result_envelope is not None:
-            await self._apply_result_envelope(result_envelope)
+            envelope_applied = await self._apply_result_envelope(result_envelope)
+        config = {"configurable": {"thread_id": f"deepsearch-task-{task_id}"}}
+        checkpoint_snapshot = None
+        if prefer_checkpoint and result_envelope is None:
+            checkpoint_snapshot = await self._load_checkpoint_snapshot(config)
         async with self.session_factory() as session:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is None:
                 raise ValueError(f"task_id={task_id} 不存在")
             initial_state = self._build_initial_state(task, entry_action=entry_action)
-        config = {"configurable": {"thread_id": f"deepsearch-task-{task_id}"}}
-        result = await self.graph.ainvoke(initial_state, config=config)
+        if result_envelope is not None and not envelope_applied:
+            runtime_cache = getattr(self.progress_service, "runtime_cache", None)
+            if runtime_cache is not None:
+                await runtime_cache.store_global_state(task_id, json_safe(initial_state))
+            return initial_state
+        if self._has_pending_checkpoint(checkpoint_snapshot):
+            # 恢复只继续当前 graph 的下一跳，不等待任何 Celery 结果。
+            logger.info(
+                "resuming task_id=%s from checkpoint next=%s",
+                task_id,
+                list(getattr(checkpoint_snapshot, "next", ()) or ()),
+            )
+            result = await self.graph.ainvoke(None, config=config)
+        else:
+            logger.info(
+                "running task_id=%s from initial_state entry_action=%s prefer_checkpoint=%s",
+                task_id,
+                initial_state.get("entry_action"),
+                prefer_checkpoint,
+            )
+            result = await self.graph.ainvoke(initial_state, config=config)
         runtime_cache = getattr(self.progress_service, "runtime_cache", None)
         if runtime_cache is not None:
             await runtime_cache.store_global_state(task_id, json_safe(result))
@@ -407,9 +454,27 @@ class GlobalGraphService:
                 return {"next_action": "fallback"}
             control_json = json_safe(task.control_json or {})
             if control_json.get("clarification_reply_selected") and control_json.get("clarification_source") == "STEP_GATE":
-                control_json.pop("clarification_reply_selected", None)
+                selected_option_id = str(control_json.get("clarification_reply_selected") or "")
+                control_json["postexec_focus"] = selected_option_id
+                control_json["latest_escalation"] = None
                 control_json["clarification_request"] = None
+                control_json.pop("clarification_reply_selected", None)
                 task.control_json = control_json
+                subtasks = list(
+                    (
+                        await session.scalars(
+                            select(Subtask)
+                            .where(Subtask.task_id == task.id)
+                            .where(Subtask.plan_version == task.active_plan_version)
+                        )
+                    ).all()
+                )
+                for item in subtasks:
+                    if value_of(item.status) == "FAILED" and item.last_error_code == "ESCALATED":
+                        item.status = "SKIPPED"
+                        item.last_error_code = None
+                        item.last_error_message = "已根据用户选择的最终回答口径跳过该升级节点。"
+                        item.updated_at = utcnow()
             next_action = await self.run_service.decide_next_action(session, task=task)
             if next_action == "clarify":
                 control_json["pending_generated_clarification"] = ClarificationRequest(
@@ -525,16 +590,36 @@ class GlobalGraphService:
                         item.status = "FAILED"
                         item.last_error_code = "FALLBACK_UNFINISHED"
                         item.last_error_message = "任务进入降级输出，节点未继续执行。"
+                coverage_summary = {"covered": [], "uncovered": ["全部任务"]}
+                citations: list[str] = []
+                answer = "当前无法稳定完成全部深搜步骤。"
+                if int(task.active_plan_version or 0) > 0:
+                    assembled = await self.evidence_service.assemble_final_answer(
+                        session,
+                        task_id=task.id,
+                        plan_version=task.active_plan_version,
+                    )
+                    coverage_summary = assembled["coverage_summary"]
+                    citations = list(assembled["citations"])
+                    answer = assembled["answer"]
+                degraded_reason = task.last_error_message or state.get("error") or "系统未能完成全部预期步骤。"
+                next_step = "建议补充关键信息后重试，或稍后重新提交以获取更完整结果。"
                 task.status = "DEGRADED"
-                task.final_answer = "当前无法稳定完成全部深搜步骤，已返回可用的部分结果。"
-                task.final_citations_json = []
-                task.coverage_summary_json = {"covered": [], "uncovered": ["全部任务"]}
+                task.final_answer = (
+                    f"{answer}\n\n"
+                    f"不确定性说明：{degraded_reason}\n"
+                    f"下一步建议：{next_step}"
+                )
+                task.final_citations_json = citations
+                task.coverage_summary_json = coverage_summary
                 task.completed_at = utcnow()
                 task.control_json = {
                     **json_safe(task.control_json or {}),
                     "waiting_reason": "NONE",
-                    "coverage_summary": {"covered": [], "uncovered": ["全部任务"]},
-                    "final_citations": [],
+                    "coverage_summary": coverage_summary,
+                    "final_citations": citations,
+                    "degraded_reason": degraded_reason,
+                    "next_step": next_step,
                 }
                 await self.progress_service.append_event(
                     session,

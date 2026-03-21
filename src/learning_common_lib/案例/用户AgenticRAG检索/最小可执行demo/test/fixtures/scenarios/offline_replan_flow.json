@@ -1,0 +1,198 @@
+{
+  "id": "offline_replan_flow",
+  "mode": "offline",
+  "llm_backend": "langchain_fake",
+  "llm_script": {
+    "responses": {
+      "final_answer": [
+        {
+          "text": "",
+          "structured_output": {
+            "answer": "最终汇总如下：\n- 近 90 天差旅规则在住宿上限和高铁审批上都有收口。",
+            "citations": [
+              "EC-exec_1_1_ST-001_1-scenario:travel:vector:1"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "retrieval_script": {
+    "vector": {
+      "sequence": [
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {
+          "hits": [
+            {
+              "chunk_uid": "scenario:travel:vector:1",
+              "version_id": 1,
+              "document_id": 1,
+              "external_doc_key": "travel_policy_v1",
+              "source_type": "VECTOR_DB",
+              "score": 0.96,
+              "content": "一线城市住宿标准由 450 元调整为 500 元，高铁商务座必须由总监审批。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 1,
+                "version_id": 1,
+                "chunk_uid": "scenario:travel:vector:1"
+              }
+            },
+            {
+              "chunk_uid": "scenario:travel:vector:2",
+              "version_id": 2,
+              "document_id": 2,
+              "external_doc_key": "travel_policy_compare",
+              "source_type": "VECTOR_DB",
+              "score": 0.94,
+              "content": "对比上一版，住宿标准有所上调，并对高铁商务座增加了审批要求。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 2,
+                "version_id": 2,
+                "chunk_uid": "scenario:travel:vector:2"
+              }
+            }
+          ]
+        },
+        {
+          "hits": [
+            {
+              "chunk_uid": "scenario:travel:vector:1",
+              "version_id": 1,
+              "document_id": 1,
+              "external_doc_key": "travel_policy_v1",
+              "source_type": "VECTOR_DB",
+              "score": 0.96,
+              "content": "一线城市住宿标准由 450 元调整为 500 元，高铁商务座必须由总监审批。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 1,
+                "version_id": 1,
+                "chunk_uid": "scenario:travel:vector:1"
+              }
+            },
+            {
+              "chunk_uid": "scenario:travel:vector:2",
+              "version_id": 2,
+              "document_id": 2,
+              "external_doc_key": "travel_policy_compare",
+              "source_type": "VECTOR_DB",
+              "score": 0.94,
+              "content": "对比上一版，住宿标准有所上调，并对高铁商务座增加了审批要求。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 2,
+                "version_id": 2,
+                "chunk_uid": "scenario:travel:vector:2"
+              }
+            }
+          ]
+        },
+        {
+          "hits": [
+            {
+              "chunk_uid": "scenario:travel:vector:1",
+              "version_id": 1,
+              "document_id": 1,
+              "external_doc_key": "travel_policy_v1",
+              "source_type": "VECTOR_DB",
+              "score": 0.96,
+              "content": "一线城市住宿标准由 450 元调整为 500 元，高铁商务座必须由总监审批。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 1,
+                "version_id": 1,
+                "chunk_uid": "scenario:travel:vector:1"
+              }
+            },
+            {
+              "chunk_uid": "scenario:travel:vector:2",
+              "version_id": 2,
+              "document_id": 2,
+              "external_doc_key": "travel_policy_compare",
+              "source_type": "VECTOR_DB",
+              "score": 0.94,
+              "content": "对比上一版，住宿标准有所上调，并对高铁商务座增加了审批要求。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 2,
+                "version_id": 2,
+                "chunk_uid": "scenario:travel:vector:2"
+              }
+            }
+          ]
+        },
+        {
+          "hits": [
+            {
+              "chunk_uid": "scenario:travel:vector:1",
+              "version_id": 1,
+              "document_id": 1,
+              "external_doc_key": "travel_policy_v1",
+              "source_type": "VECTOR_DB",
+              "score": 0.96,
+              "content": "一线城市住宿标准由 450 元调整为 500 元，高铁商务座必须由总监审批。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 1,
+                "version_id": 1,
+                "chunk_uid": "scenario:travel:vector:1"
+              }
+            },
+            {
+              "chunk_uid": "scenario:travel:vector:2",
+              "version_id": 2,
+              "document_id": 2,
+              "external_doc_key": "travel_policy_compare",
+              "source_type": "VECTOR_DB",
+              "score": 0.94,
+              "content": "对比上一版，住宿标准有所上调，并对高铁商务座增加了审批要求。",
+              "metadata": {},
+              "locator": {
+                "kb_code": "default",
+                "document_id": 2,
+                "version_id": 2,
+                "chunk_uid": "scenario:travel:vector:2"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "search": {
+      "sequence": [
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []},
+        {"hits": []}
+      ]
+    }
+  },
+  "input": {
+    "session_id": "sess_test_offline_replan_flow",
+    "query": "请帮我整理公司近 90 天差旅报销规则的变化",
+    "kb_code": "default"
+  },
+  "fault_injection": {
+    "force_replan_count": 1
+  },
+  "expected": {
+    "final_status": "DEGRADED",
+    "replan_count": 1
+  }
+}

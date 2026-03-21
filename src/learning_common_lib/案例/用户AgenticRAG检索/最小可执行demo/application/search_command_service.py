@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Awaitable, Callable
 
 from sqlalchemy import select
@@ -9,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..domain.contracts import SearchAcceptedResponse, SearchSubmitRequest, TaskSnapshotResponse
 from ..domain.enums import QueueName, TaskName
-from ..errors import ConflictError, NotFoundError, ValidationError
 from .common import build_request_id, json_safe, utcnow, value_of
+from .errors import ConflictError, NotFoundError, ValidationError
 from .progress_service import ProgressService
 from .session_service import SessionService
 
@@ -20,6 +21,10 @@ try:
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask
     from 最小可执行demo.ports.task_queue_port import TaskDispatchError
+
+
+logger = logging.getLogger(__name__)
+
 
 class SearchCommandService:
     def __init__(
@@ -54,6 +59,7 @@ class SearchCommandService:
                 queue_name=queue_name,
             )
         except TaskDispatchError:
+            logger.warning("queue dispatch failed task_name=%s queue=%s, falling back to local runner", task_name, queue_name)
             await local_runner()
 
     async def submit_search(self, request: SearchSubmitRequest) -> SearchAcceptedResponse:
@@ -64,6 +70,7 @@ class SearchCommandService:
         scope_json = request.scope_json.model_dump(mode="json", exclude_none=True) if request.scope_json is not None else None
 
         request_id = build_request_id(request.session_id, request.query)
+        logger.info("submit search session_id=%s request_id=%s kb_code=%s", request.session_id, request_id, request.kb_code)
         async with self.session_factory() as session:
             async with session.begin():
                 await self.session_service.ensure_session(
@@ -123,6 +130,7 @@ class SearchCommandService:
             queue_name=QueueName.ORCHESTRATE.value,
             local_runner=lambda: start_search_async(task_id=task_id, drain_eager=False),
         )
+        logger.info("search accepted request_id=%s task_id=%s", request_id, task_id)
 
         return SearchAcceptedResponse(
             request_id=request_id,
@@ -148,6 +156,20 @@ class SearchCommandService:
                 if task is None:
                     raise NotFoundError(f"request_id={request_id} 不存在")
                 if value_of(task.status) != "WAITING_CLARIFICATION":
+                    latest_request = await self.session_service.get_latest_clarification_request(
+                        session,
+                        task_id=task.id,
+                    )
+                    latest_reply = await self.session_service.get_latest_clarification_reply(
+                        session,
+                        task_id=task.id,
+                    )
+                    if (
+                        latest_request is not None
+                        and latest_reply is not None
+                        and int(latest_reply.id) > int(latest_request.id)
+                    ):
+                        return await self.progress_service.build_snapshot(session, request_id)
                     raise ConflictError("任务当前不处于 WAITING_CLARIFICATION")
 
                 control_json = json_safe(task.control_json or {})
@@ -192,6 +214,14 @@ class SearchCommandService:
                     event_type=event_type,
                     payload_json={"status": "EXECUTING", "message": event_message},
                     plan_version=task.active_plan_version,
+                )
+                logger.info(
+                    "clarification accepted request_id=%s task_id=%s option=%s source=%s expired=%s",
+                    request_id,
+                    task_id,
+                    applied_option_id,
+                    clarification_source,
+                    expired_conflict,
                 )
 
         entry_action = "planner" if clarification_source == "PREPLAN" else "step_gate"

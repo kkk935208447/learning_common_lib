@@ -1,0 +1,18 @@
+{
+  "id": "offline_happy_path",
+  "mode": "offline",
+  "llm_backend": "scripted",
+  "llm_script": {
+    "responses": {}
+  },
+  "retrieval_script": {},
+  "input": {
+    "session_id": "sess_test_offline_happy_path",
+    "query": "请帮我整理公司近 90 天差旅报销规则的变化",
+    "kb_code": "default"
+  },
+  "fault_injection": {},
+  "expected": {
+    "final_status": "COMPLETED"
+  }
+}

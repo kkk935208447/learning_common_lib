@@ -9,13 +9,13 @@ from collections.abc import AsyncIterator
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.contracts import (
     ProgressSummary,
     TaskEventData,
     TaskEventEnvelope,
     TaskSnapshotResponse,
 )
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
@@ -193,6 +193,11 @@ class ProgressService:
 
     def _event_to_envelope(self, *, request_id: str, task_status: str, event: TaskEvent) -> TaskEventEnvelope:
         payload = json_safe(event.payload_json or {})
+        extra_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"request_id", "status", "message", "ts", "plan_version", "subtask_code", "execution_id"}
+        }
         return TaskEventEnvelope(
             id=int(event.id),
             event=event.event_type,
@@ -204,6 +209,7 @@ class ProgressService:
                 plan_version=event.plan_version,
                 subtask_code=event.subtask_code,
                 execution_id=event.execution_id,
+                **extra_payload,
             ),
         )
 
@@ -265,10 +271,7 @@ class ProgressService:
                         event="heartbeat",
                         data=TaskEventData(
                             request_id=request_id,
-                            status=value_of(task.status),
-                            message="heartbeat",
                             ts=utcnow(),
-                            plan_version=task.active_plan_version,
                         ),
                     )
                     if value_of(task.status) in {"COMPLETED", "FAILED", "DEGRADED"}:
@@ -309,10 +312,11 @@ class ProgressService:
         return {"events": len(events)}
 
     def format_sse(self, event: TaskEventEnvelope) -> str:
+        payload = event.data.model_dump(mode="json", exclude_none=True)
         return (
             f"id: {event.id}\n"
             f"event: {event.event}\n"
-            f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
         )
 
 

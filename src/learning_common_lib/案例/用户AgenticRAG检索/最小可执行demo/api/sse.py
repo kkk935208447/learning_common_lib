@@ -6,11 +6,11 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 try:
-    from ..config import get_settings
-    from ..service_runtime import build_runtime_bundle
+    from ..infrastructure.settings import get_settings
+    from ..infrastructure.runtime_bundle import build_runtime_bundle
 except ImportError:
-    from 最小可执行demo.config import get_settings
-    from 最小可执行demo.service_runtime import (
+    from 最小可执行demo.infrastructure.settings import get_settings
+    from 最小可执行demo.infrastructure.runtime_bundle import (
         build_runtime_bundle,
     )
 

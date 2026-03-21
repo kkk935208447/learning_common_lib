@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, KnowledgeChunkHit, SubtaskResultEnvelope
 from ..domain.scoring import passes_threshold, score_evidence_cards
 from ..domain.state_machine import SubtaskState
+from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 from .progress_service import ProgressService
 
@@ -19,6 +20,9 @@ try:
     from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
+
+
+logger = logging.getLogger(__name__)
 
 
 class SubtaskGraphService:
@@ -230,6 +234,21 @@ class SubtaskGraphService:
             return "retry_answer"
         return "escalate"
 
+    @staticmethod
+    def _should_request_step_gate_clarification(
+        *,
+        task: SearchTask,
+        subtask: Subtask,
+        global_evidence_refs: list[str],
+    ) -> bool:
+        if value_of(subtask.task_type) != "REASONING" or len(global_evidence_refs) < 2:
+            return False
+        control_json = json_safe(task.control_json or {})
+        if control_json.get("postexec_focus"):
+            return False
+        query_text = f"{task.resolved_query or task.original_query}".strip()
+        return any(token in query_text for token in ("口径", "优先", "侧重", "重点", "更关注"))
+
     async def execute(self, *, execution_id: str) -> SubtaskResultEnvelope | None:
         async with self.session_factory() as session:
             run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id).with_for_update())
@@ -268,6 +287,12 @@ class SubtaskGraphService:
 
             run.status = "RUNNING"
             run.started_at = utcnow()
+            logger.info(
+                "subtask execution started task_id=%s execution_id=%s subtask_code=%s",
+                run.task_id,
+                execution_id,
+                run.subtask_code,
+            )
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
@@ -333,8 +358,51 @@ class SubtaskGraphService:
         evidence_drafts = json_safe(memory.get("evidence_drafts", []))
         draft_text = str(memory.get("draft_text") or "")
         evidence_card_refs = list(global_evidence_refs) if reuse_global_evidence else [f"EC-{execution_id}-{item['chunk_uid']}" for item in evidence_drafts]
-
-        if result.get("status") == "COMPLETED":
+        if self._should_request_step_gate_clarification(
+            task=task,
+            subtask=subtask,
+            global_evidence_refs=global_evidence_refs,
+        ):
+            if not eval_summary:
+                eval_summary = {
+                    "coverage": 1.0 if global_evidence_refs else 0.0,
+                    "confidence": 0.7,
+                    "conflict": 0.0,
+                    "total_score": 0.7,
+                    "gap_type": "user_input_gap",
+                }
+            else:
+                eval_summary = {
+                    **eval_summary,
+                    "gap_type": "user_input_gap",
+                }
+            envelope = SubtaskResultEnvelope(
+                task_id=run.task_id,
+                plan_version=run.plan_version,
+                subtask_code=run.subtask_code,
+                execution_id=execution_id,
+                status="ESCALATED",
+                result_ref={"execution_id": execution_id},
+                evidence_card_refs=evidence_card_refs,
+                output_text=draft_text,
+                verify_summary=verify_summary,
+                eval_summary=eval_summary,
+                usage_stats={
+                    "llm_tokens": max(1, len((draft_text or "").split())) * 8,
+                    "retrieval_calls": 0,
+                    "elapsed_ms": 200,
+                    "cache_hits": 0,
+                },
+                escalation_report={
+                    "reason": "needs_user_input",
+                    "suggested_global_action": "clarify",
+                    "best_score": float(eval_summary.get("total_score", 0.0)),
+                    "gap_type": "user_input_gap",
+                    "message": "已有足够证据，但需要用户指定最终回答的呈现口径。",
+                    "evidence_card_refs": evidence_card_refs[:6],
+                },
+            )
+        elif result.get("status") == "COMPLETED":
             envelope = SubtaskResultEnvelope(
                 task_id=run.task_id,
                 plan_version=run.plan_version,
@@ -393,4 +461,11 @@ class SubtaskGraphService:
                 subtask_code=run.subtask_code,
                 drafts=evidence_drafts,
             )
+        logger.info(
+            "subtask execution finished task_id=%s execution_id=%s status=%s evidence_refs=%s",
+            run.task_id,
+            execution_id,
+            envelope.status,
+            len(envelope.evidence_card_refs),
+        )
         return envelope

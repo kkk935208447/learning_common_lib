@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain.contracts import ClarificationRequest
-from ..errors import ConflictError, ValidationError
 from .common import json_safe, normalize_utc_datetime, utcnow
+from .errors import ConflictError, ValidationError
 
 try:
     from ..infrastructure.models import Session, SessionTurn
@@ -132,6 +132,21 @@ class SessionService:
             select(SessionTurn)
             .where(SessionTurn.task_id == task_id)
             .where(SessionTurn.turn_type == "CLARIFY_REQUEST")
+            .order_by(SessionTurn.id.desc())
+            .limit(1)
+        )
+        return await session.scalar(stmt)
+
+    async def get_latest_clarification_reply(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+    ) -> SessionTurn | None:
+        stmt = (
+            select(SessionTurn)
+            .where(SessionTurn.task_id == task_id)
+            .where(SessionTurn.turn_type == "CLARIFY_REPLY")
             .order_by(SessionTurn.id.desc())
             .limit(1)
         )
