@@ -37,17 +37,15 @@ async def execute_subtask_async(*, execution_id: str, **_: object) -> dict:
         runtime = build_runtime_bundle(use_task_engine=True)
         runtime.task_queue.dispatch(
             task_name=TaskName.FLUSH_DATA_PLANE.value,
-            payload={"execution_id": execution_id},
-            queue_name=QueueName.PERSIST.value,
-        )
-        runtime.task_queue.dispatch(
-            task_name=TaskName.RESUME_SEARCH.value,
             payload={
-                "task_id": envelope.task_id,
-                "entry_action": "step_gate",
-                "result_envelope": envelope.model_dump(mode="json"),
+                "execution_id": execution_id,
+                "resume_payload": {
+                    "task_id": envelope.task_id,
+                    "entry_action": "step_gate",
+                    "result_envelope": envelope.model_dump(mode="json"),
+                },
             },
-            queue_name=QueueName.ORCHESTRATE.value,
+            queue_name=QueueName.PERSIST.value,
         )
     return envelope.model_dump(mode="json")
 

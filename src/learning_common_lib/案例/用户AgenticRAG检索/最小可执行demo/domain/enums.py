@@ -56,23 +56,11 @@ class SubtaskRunStatus(str, Enum):
 RunStatus = SubtaskRunStatus
 
 
-class PlanStatus(str, Enum):
-    ACTIVE = "ACTIVE"
-    SUPERSEDED = "SUPERSEDED"
-    ABANDONED = "ABANDONED"
-
-
 class DataPlaneFlushStatus(str, Enum):
     PENDING = "PENDING"
     FLUSHING = "FLUSHING"
     FLUSHED = "FLUSHED"
     FAILED = "FAILED"
-
-
-class TaskType(str, Enum):
-    RETRIEVAL = "RETRIEVAL"
-    REASONING = "REASONING"
-    REFLECTION = "REFLECTION"
 
 
 class SourceType(str, Enum):
@@ -124,35 +112,15 @@ class AnswerOrigin(str, Enum):
     DEFAULT_APPLIED = "DEFAULT_APPLIED"
 
 
-SubtaskRunStatus = RunStatus
+class ClarificationSource(str, Enum):
+    PREPLAN = "PREPLAN"
+    STEP_GATE = "STEP_GATE"
 
 
-class DataPlaneFlushStatus(str, Enum):
-    PENDING = "PENDING"
-    FLUSHING = "FLUSHING"
-    FLUSHED = "FLUSHED"
-    FAILED = "FAILED"
-
-
-class ClaimType(str, Enum):
-    NUMERIC = "NUMERIC"
-    CAUSAL = "CAUSAL"
-    DESCRIPTIVE = "DESCRIPTIVE"
-    TEMPORAL = "TEMPORAL"
-
-
-class SourceType(str, Enum):
-    VECTOR_DB = "VECTOR_DB"
-    ES = "ES"
-    SQL_DB = "SQL_DB"
-    KNOWLEDGE_GRAPH = "KNOWLEDGE_GRAPH"
-    WEB = "WEB"
-
-
-class ReliabilityTier(str, Enum):
-    T1 = "T1"
-    T2 = "T2"
-    T3 = "T3"
+class WaitingReason(str, Enum):
+    NONE = "NONE"
+    SUBTASKS = "SUBTASKS"
+    CLARIFICATION = "CLARIFICATION"
 
 
 class TaskEventType(str, Enum):
@@ -193,42 +161,3 @@ class QueueName(str, Enum):
     SUBTASK = "subtask_jobs"
     PERSIST = "persist_jobs"
     MAINTENANCE = "maintenance_jobs"
-
-
-class SessionStatus(str, Enum):
-    ACTIVE = "ACTIVE"
-    ARCHIVED = "ARCHIVED"
-
-
-class SessionRole(str, Enum):
-    USER = "USER"
-    ASSISTANT = "ASSISTANT"
-    SYSTEM = "SYSTEM"
-
-
-class SessionTurnType(str, Enum):
-    QUERY = "QUERY"
-    CLARIFY_REQUEST = "CLARIFY_REQUEST"
-    CLARIFY_REPLY = "CLARIFY_REPLY"
-    SUMMARY = "SUMMARY"
-    ANSWER = "ANSWER"
-
-
-class AnswerOrigin(str, Enum):
-    USER = "USER"
-    DEFAULT_APPLIED = "DEFAULT_APPLIED"
-
-
-class ClarificationSource(str, Enum):
-    PREPLAN = "PREPLAN"
-    STEP_GATE = "STEP_GATE"
-
-
-class QuestionType(str, Enum):
-    SINGLE_SELECT = "SINGLE_SELECT"
-
-
-class WaitingReason(str, Enum):
-    NONE = "NONE"
-    SUBTASKS = "SUBTASKS"
-    CLARIFICATION = "CLARIFICATION"

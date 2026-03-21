@@ -34,21 +34,38 @@ class MaintenanceService:
         self.session_service = session_service
         self.redis_runtime = redis_runtime
 
+    async def _dispatch_or_resume(self, payload: dict[str, object]) -> None:
+        try:
+            self.task_queue.dispatch(
+                task_name=TaskName.RESUME_SEARCH.value,
+                payload=payload,
+                queue_name=QueueName.ORCHESTRATE.value,
+            )
+        except Exception:
+            try:
+                from ..workers.orchestrate_tasks import resume_search_async
+            except ImportError:
+                from 最小可执行demo.workers.orchestrate_tasks import resume_search_async
+
+            await resume_search_async(**payload)
+
     async def reap_stuck_runs(self, timeout_seconds: int = 90) -> int:
         cutoff = utcnow() - timedelta(seconds=timeout_seconds)
         reaped = 0
+        resume_payloads: list[dict[str, object]] = []
         async with self.session_factory() as session:
             async with session.begin():
                 runs = list(
                     (
                         await session.scalars(
-                            select(SubtaskRun)
-                            .where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED", "RUNNING")))
-                            .where(SubtaskRun.created_at < cutoff)
+                            select(SubtaskRun).where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED", "RUNNING")))
                         )
                     ).all()
                 )
                 for run in runs:
+                    compare_at = run.started_at or run.created_at
+                    if compare_at is None or compare_at >= cutoff:
+                        continue
                     task = await session.scalar(select(SearchTask).where(SearchTask.id == run.task_id))
                     subtask = await session.scalar(
                         select(Subtask)
@@ -78,16 +95,15 @@ class MaintenanceService:
                         subtask_code=run.subtask_code,
                         execution_id=run.execution_id,
                     )
-                    self.task_queue.dispatch(
-                        task_name=TaskName.RESUME_SEARCH.value,
-                        payload={"task_id": task.id, "entry_action": "step_gate"},
-                        queue_name=QueueName.ORCHESTRATE.value,
-                    )
+                    resume_payloads.append({"task_id": task.id, "entry_action": "step_gate"})
                     reaped += 1
+        for payload in resume_payloads:
+            await self._dispatch_or_resume(payload)
         return reaped
 
     async def apply_clarification_defaults(self) -> int:
         applied = 0
+        resume_payloads: list[dict[str, object]] = []
         async with self.session_factory() as session:
             async with session.begin():
                 tasks = list(
@@ -111,6 +127,7 @@ class MaintenanceService:
                     if control_json.get("clarification_reply_selected"):
                         continue
                     selected_option_id = clarification_request["default_option_id"]
+                    clarification_source = control_json.get("clarification_source") or "PREPLAN"
                     await self.session_service.record_clarification_reply(
                         session,
                         session_id=task.session_id,
@@ -118,9 +135,12 @@ class MaintenanceService:
                         selected_option_id=selected_option_id,
                         answer_origin="DEFAULT_APPLIED",
                     )
+                    task.status = "EXECUTING"
                     task.control_json = {
                         **control_json,
                         "clarification_reply_selected": selected_option_id,
+                        "clarification_source": clarification_source,
+                        "clarification_request": None,
                         "waiting_reason": "NONE",
                     }
                     await self.progress_service.append_event(
@@ -134,19 +154,22 @@ class MaintenanceService:
                         },
                         plan_version=task.active_plan_version,
                     )
-                    self.task_queue.dispatch(
-                        task_name=TaskName.RESUME_SEARCH.value,
-                        payload={
+                    resume_payloads.append(
+                        {
                             "task_id": task.id,
-                            "entry_action": "planner"
-                            if control_json.get("clarification_source") == "PREPLAN"
-                            else "step_gate",
-                        },
-                        queue_name=QueueName.ORCHESTRATE.value,
+                            "entry_action": "planner" if clarification_source == "PREPLAN" else "step_gate",
+                        }
                     )
                     applied += 1
+        for payload in resume_payloads:
+            await self._dispatch_or_resume(payload)
         return applied
 
     async def rebuild_runtime_cache(self) -> dict[str, str]:
-        await self.redis_runtime.save_json("maintenance", "last_rebuild", {"ts": utcnow().isoformat()}, ttl_seconds=600)
+        await self.redis_runtime.save_json(
+            "maintenance",
+            "last_rebuild",
+            {"ts": utcnow().isoformat()},
+            ttl_seconds=600,
+        )
         return {"status": "ok"}

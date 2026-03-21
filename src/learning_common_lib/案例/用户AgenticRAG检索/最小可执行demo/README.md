@@ -22,7 +22,14 @@
 1. DeepSearch 使用 `DEEPSEARCH_DEMO_` 前缀环境变量
 2. 上游数据库管理 demo 使用 `MIN_RAG_` 前缀环境变量
 3. DeepSearch 默认端口 `8092`
-4. DeepSearch 表名前缀 `rag_search_demo`
+4. DeepSearch 默认 MySQL: `127.0.0.1:3306`，账号 `root`，密码 `123456`
+5. DeepSearch 默认 Redis: `127.0.0.1:6379`，密码 `123456`
+6. DeepSearch 表名前缀 `rag_search_demo`
+
+说明：
+
+1. 普通 Redis 也可以运行当前 demo。
+2. 如果 Redis 缺少 RediSearch / Redis Stack 能力，checkpoint 会自动降级，不影响最小链路演示。
 
 ## 当前目录
 
@@ -30,6 +37,32 @@
 
 ```bash
 cd src/learning_common_lib/案例/用户AgenticRAG检索/最小可执行demo
+```
+
+## 快速开始
+
+先同步依赖：
+
+```bash
+uv sync
+```
+
+如果你需要覆盖默认连接参数，常见环境变量如下：
+
+```bash
+export DEEPSEARCH_DEMO_MYSQL_HOST=127.0.0.1
+export DEEPSEARCH_DEMO_MYSQL_PORT=3306
+export DEEPSEARCH_DEMO_MYSQL_USER=root
+export DEEPSEARCH_DEMO_MYSQL_PASSWORD=123456
+export DEEPSEARCH_DEMO_REDIS_HOST=127.0.0.1
+export DEEPSEARCH_DEMO_REDIS_PORT=6379
+export DEEPSEARCH_DEMO_REDIS_PASSWORD=123456
+```
+
+如果你在离线或受限网络环境中运行 `uv run`，可以额外指定缓存目录：
+
+```bash
+export UV_CACHE_DIR=/tmp/uv-cache-deepsearch
 ```
 
 ## 目录里的关键入口
@@ -104,7 +137,7 @@ uv run celery -A celery_app:celery_app purge -f
 
 ### 1. 单进程 eager 演示
 
-这个脚本不依赖外部 worker，适合快速验证从提交到最终汇总的完整链路：
+这个脚本不依赖外部 worker / beat / FastAPI，但仍然依赖 MySQL、Redis 和上游知识库 demo：
 
 ```bash
 uv run python demo_flow.py
@@ -130,6 +163,12 @@ uv run python client_demo.py
 DEEPSEARCH_DEMO_API_PORT=8094 uv run python client_demo.py
 ```
 
+说明：
+
+1. 这个脚本只演示 `submit + immediate snapshot`。
+2. 它不会轮询到终态，也不会演示 SSE。
+3. 如果快照里看到 `PENDING / PLANNING / EXECUTING`，这通常是正常现象，不表示 API 异常。
+
 ### 3. 离线提交演示
 
 这个脚本不经过 FastAPI，直接通过服务层写 MySQL 并把任务投递到 Celery。要求 worker 已启动：
@@ -141,8 +180,9 @@ uv run python offline_submit_demo.py
 当前预期：
 
 1. `submit` 返回 `request_id`
-2. 轮询会从 `PENDING` 进入 `COMPLETED`
-3. 最终快照和 HTTP 提交的输出结构一致
+2. 当前示例查询通常会从 `PENDING` 进入 `COMPLETED`
+3. 一般流程也可能进入 `WAITING_CLARIFICATION`
+4. 最终快照和 HTTP 提交的输出结构一致
 
 ### 4. 生产式集成测试总控脚本
 
@@ -164,6 +204,12 @@ uv run python offline_submit_demo.py
 ```bash
 uv run python integration_test_production_stack.py
 ```
+
+说明：
+
+1. 这个脚本会重建 demo 数据，不适合拿现有数据做增量验证。
+2. 它固定把 API 端口覆盖到 `8097`。
+3. 它会继承外部的 `UV_CACHE_DIR`；如果不传，默认使用 `/tmp/uv-cache`。
 
 脚本成功时会打印类似结果：
 
@@ -195,6 +241,15 @@ uv run python integration_test_production_stack.py
 2. 非 eager 模式下，`FastAPI + Celery worker + Celery beat + MySQL + Redis` 的组合已联调通过
 3. 非 eager 模式下，HTTP 提交、离线提交、SSE 事件流、`Last-Event-ID` 回放都已跑通
 4. `ST-003` 已不再输出占位文本，而会基于已有 evidence cards 生成结构化 reasoning 汇总
+5. 数据面 flush 与控制面 resume 已做顺序屏障，避免非 eager 下先汇总后落库
+
+## 常见失败
+
+1. `uv run` 报依赖或缓存错误：先执行 `uv sync`，必要时更换 `UV_CACHE_DIR`
+2. MySQL 认证失败：检查 `DEEPSEARCH_DEMO_MYSQL_*` 与 `MIN_RAG_*` 环境变量
+3. Redis 认证或连接失败：检查 `DEEPSEARCH_DEMO_REDIS_*` 环境变量
+4. 表不存在：先执行上游 `init_db.py`、`seed_demo_kb.py` 和当前目录 `init_db.py`
+5. `client_demo.py` 看到非终态：它只看即时快照，不会自动轮询
 
 ## 当前限制
 
@@ -202,4 +257,5 @@ uv run python integration_test_production_stack.py
 2. Clarify 只支持单选
 3. `KnowledgeProjectionReader` 当前只支持 `document_ids / external_doc_keys / version_ids`
 4. `FileVectorReader` 与 `FileSearchReader` 仍然是 demo 级实现，不是生产级召回
-5. `ST-003` 虽然已经会做结构化汇总，但仍然基于 mock LLM 和 mock scoring，不是生产级推理质量
+5. 当前全局控制面虽然保留了 `GlobalGraph` 边界，但执行推进仍然是受控手工驱动版本，不是完全依赖 checkpoint 恢复的图运行时
+6. `ST-003` 虽然已经会做结构化汇总，但仍然基于 mock LLM 和 mock scoring，不是生产级推理质量

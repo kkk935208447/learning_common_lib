@@ -74,7 +74,8 @@ class ProgressService:
             waiting_subtasks=int(waiting or 0),
             current_phase=value_of(task.status),
         )
-        clarification_request = control_json.get("clarification_request")
+        clarification_request = control_json.get("clarification_request") if value_of(task.status) == "WAITING_CLARIFICATION" else None
+        final_citations = task.final_citations_json if isinstance(task.final_citations_json, list) else control_json.get("final_citations", [])
         return TaskSnapshotResponse(
             request_id=task.request_id,
             status=value_of(task.status),
@@ -82,8 +83,8 @@ class ProgressService:
             active_plan_version=int(task.active_plan_version or 0),
             progress_summary=progress,
             final_answer=task.final_answer,
-            final_citations=control_json.get("final_citations", []),
-            coverage_summary=control_json.get("coverage_summary"),
+            final_citations=final_citations,
+            coverage_summary=task.coverage_summary_json or control_json.get("coverage_summary"),
             clarification_request=clarification_request,
             error_code=task.last_error_code,
             error_message=task.last_error_message,

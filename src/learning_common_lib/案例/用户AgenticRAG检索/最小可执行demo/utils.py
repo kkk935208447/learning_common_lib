@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
-from uuid import uuid4
 
-
-def utcnow() -> datetime:
-    return datetime.utcnow()
+try:
+    from .application.common import build_execution_id, build_request_id, utcnow
+except ImportError:
+    from 最小可执行demo.application.common import build_execution_id, build_request_id, utcnow
 
 
 def new_request_id() -> str:
-    return f"req_{uuid4().hex[:16]}"
+    return build_request_id("compat", "compat")
 
 
 def new_execution_id(*, task_id: int, plan_version: int, subtask_code: str) -> str:
-    return f"exec:{task_id}:{plan_version}:{subtask_code}:{uuid4().hex[:12]}"
+    return build_execution_id(task_id, plan_version, subtask_code, 0)
 
 
 def hash_json(payload: dict) -> str:

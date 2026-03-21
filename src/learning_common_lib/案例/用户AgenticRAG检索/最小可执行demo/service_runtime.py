@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -44,37 +45,21 @@ except ImportError:
         build_vector_reader,
     )
     from 最小可执行demo.config import get_settings
-    from 最小可执行demo.db import (
-        build_engine,
-        get_session_factory,
-    )
-    from 最小可执行demo.application.evidence_service import (
-        EvidenceService,
-    )
-    from 最小可执行demo.application.global_graph_service import (
-        GlobalGraphService,
-    )
-    from 最小可执行demo.application.plan_service import (
-        PlanService,
-    )
-    from 最小可执行demo.application.progress_service import (
-        ProgressService,
-    )
-    from 最小可执行demo.application.run_service import (
-        RunService,
-    )
-    from 最小可执行demo.application.search_command_service import (
-        SearchCommandService,
-    )
-    from 最小可执行demo.application.session_service import (
-        SessionService,
-    )
-    from 最小可执行demo.application.subtask_graph_service import (
-        SubtaskGraphService,
-    )
-    from 最小可执行demo.application.maintenance_service import (
-        MaintenanceService,
-    )
+    from 最小可执行demo.db import build_engine, get_session_factory
+    from 最小可执行demo.application.evidence_service import EvidenceService
+    from 最小可执行demo.application.global_graph_service import GlobalGraphService
+    from 最小可执行demo.application.plan_service import PlanService
+    from 最小可执行demo.application.progress_service import ProgressService
+    from 最小可执行demo.application.run_service import RunService
+    from 最小可执行demo.application.search_command_service import SearchCommandService
+    from 最小可执行demo.application.session_service import SessionService
+    from 最小可执行demo.application.subtask_graph_service import SubtaskGraphService
+    from 最小可执行demo.application.maintenance_service import MaintenanceService
+
+
+_RUNTIME_BUNDLES: dict[bool, "RuntimeBundle"] = {}
+_CHECKPOINT_ADAPTER: object | None = None
+_CHECKPOINTER: Any | None = None
 
 
 @dataclass(slots=True)
@@ -94,6 +79,10 @@ class RuntimeBundle:
 
 
 def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
+    cached = _RUNTIME_BUNDLES.get(use_task_engine) if not use_task_engine else None
+    if cached is not None:
+        return cached
+
     session_factory = (
         async_sessionmaker(build_engine(), expire_on_commit=False)
         if use_task_engine
@@ -110,7 +99,7 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     projection_reader = build_knowledge_projection_port()
     vector_reader = build_vector_reader()
     search_reader = build_search_reader()
-    return RuntimeBundle(
+    bundle = RuntimeBundle(
         session_factory=session_factory,
         llm=llm,
         redis_runtime=redis_runtime,
@@ -124,14 +113,40 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
         vector_reader=vector_reader,
         search_reader=search_reader,
     )
+    if not use_task_engine:
+        _RUNTIME_BUNDLES[use_task_engine] = bundle
+    return bundle
+
+
+async def _get_checkpointer() -> Any:
+    global _CHECKPOINT_ADAPTER, _CHECKPOINTER
+    if _CHECKPOINTER is not None:
+        return _CHECKPOINTER
+    adapter = build_checkpoint_manager()
+    _CHECKPOINT_ADAPTER = adapter
+    _CHECKPOINTER = await adapter.get_checkpointer()
+    return _CHECKPOINTER
+
+
+async def close_runtime_resources() -> None:
+    global _CHECKPOINT_ADAPTER, _CHECKPOINTER
+    for bundle in _RUNTIME_BUNDLES.values():
+        aclose = getattr(bundle.redis_runtime, "aclose", None)
+        if callable(aclose):
+            await aclose()
+    _RUNTIME_BUNDLES.clear()
+    if _CHECKPOINT_ADAPTER is not None:
+        await _CHECKPOINT_ADAPTER.aclose()
+    _CHECKPOINT_ADAPTER = None
+    _CHECKPOINTER = None
 
 
 async def build_global_graph_service(*, use_task_engine: bool = False) -> GlobalGraphService:
     bundle = build_runtime_bundle(use_task_engine=use_task_engine)
     settings = get_settings()
     checkpointer = None
-    if not settings.celery_eager:
-        checkpointer = await build_checkpoint_manager().get_checkpointer()
+    if not settings.celery_eager and not use_task_engine:
+        checkpointer = await _get_checkpointer()
     return GlobalGraphService(
         bundle.session_factory,
         plan_service=bundle.plan_service,

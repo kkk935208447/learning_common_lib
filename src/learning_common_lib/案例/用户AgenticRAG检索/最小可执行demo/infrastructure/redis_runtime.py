@@ -35,6 +35,9 @@ class RedisDistributedLock:
         """
         self.client.eval(script, 1, key, token)
 
+    def close(self) -> None:
+        self.client.close()
+
 
 class RedisSessionStore(SessionStorePort):
     """Thin JSON store for session summaries, L2 staging, and runtime cache."""
@@ -90,3 +93,7 @@ class RedisRuntime:
 
     async def delete_json(self, namespace: str, key: str) -> None:
         await self.session_store.delete_namespace(namespace, key)
+
+    async def aclose(self) -> None:
+        await self.session_store.aclose()
+        self.lock.close()

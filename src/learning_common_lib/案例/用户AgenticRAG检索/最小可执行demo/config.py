@@ -41,10 +41,11 @@ class Settings(BaseSettings):
     runtime_dir: Path = BASE_DIR / ".runtime"
     upstream_demo_dir: Path = UPSTREAM_DEMO_DIR
     upstream_runtime_dir: Path = UPSTREAM_DEMO_DIR / ".runtime"
+
     table_prefix: str = "rag_search_demo"
-    cache_prefix: str = "rag:search:demo"
     checkpoint_prefix: str = "rag_search_demo_cp"
     checkpoint_write_prefix: str = "rag_search_demo_cp_writes"
+    cache_prefix: str = "rag_search_demo"
     runtime_cache_ttl_seconds: int = 3600
 
     celery_eager: bool = False
@@ -55,11 +56,6 @@ class Settings(BaseSettings):
     default_kb_code: str = "default"
     default_tenant_id: str = "demo-tenant"
     default_user_id: str = "demo-user"
-    table_prefix: str = "rag_search_demo"
-    checkpoint_prefix: str = "rag_search_demo_cp"
-    checkpoint_write_prefix: str = "rag_search_demo_cp_writes"
-    cache_prefix: str = "rag_search_demo"
-    runtime_cache_ttl_seconds: int = 3600
 
     max_parallel_subtasks: int = 3
     max_replan_count: int = 2

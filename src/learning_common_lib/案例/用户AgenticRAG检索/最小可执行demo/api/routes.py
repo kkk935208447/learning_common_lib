@@ -55,6 +55,8 @@ async def stream_events(
     request: Request,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ):
+    service = build_search_command_service()
+    await service.get_snapshot(request_id)
     parsed_last_id = int(last_event_id or 0)
     return build_sse_response(request_id, request, last_event_id=parsed_last_id)
 

@@ -50,7 +50,7 @@ class ManagedProcess:
 
 def base_env() -> dict[str, str]:
     env = os.environ.copy()
-    env["UV_CACHE_DIR"] = "/tmp/uv-cache"
+    env["UV_CACHE_DIR"] = os.environ.get("UV_CACHE_DIR", "/tmp/uv-cache")
     env["DEEPSEARCH_DEMO_CELERY_EAGER"] = "0"
     env.setdefault("MIN_RAG_CELERY_EAGER", "1")
     return env

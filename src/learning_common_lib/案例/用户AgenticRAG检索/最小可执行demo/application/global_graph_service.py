@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -14,7 +13,7 @@ from ..config import get_settings
 from ..domain.clarify_rules import apply_clarification_to_query
 from ..domain.contracts import ClarificationOption, ClarificationRequest
 from ..domain.state import GlobalState
-from .common import json_safe, value_of
+from .common import json_safe, utcnow, value_of
 
 try:
     from ..infrastructure.models import SearchTask, Subtask
@@ -130,8 +129,15 @@ class GlobalGraphService:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == state["task_id"]))
             if task is None:
                 return {"next_action": "fallback", "error": "TASK_NOT_FOUND"}
+            settings = get_settings()
             task.status = "PLANNING"
-            task.budget_json = {"llm_tokens": 4000, "retrieval_calls": 12, "max_parallel_subtasks": 3}
+            task.budget_json = {
+                "llm_tokens": 4000,
+                "retrieval_calls": 12,
+                "max_parallel_subtasks": settings.max_parallel_subtasks,
+                "max_replan_count": settings.max_replan_count,
+                "max_clarification_count": settings.max_clarification_count,
+            }
             task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "NONE"}
             await self.progress_service.append_event(
                 session,
@@ -163,6 +169,14 @@ class GlobalGraphService:
                 allow_clarify=allow_clarify,
             )
             task.resolved_query = outcome.resolved_query
+            task.task_profile_json = {
+                "intent": outcome.profile.intent,
+                "complexity": outcome.profile.complexity,
+                "risk": outcome.profile.risk,
+                "needs_time_range": outcome.profile.needs_time_range,
+                "needs_object_scope": outcome.profile.needs_object_scope,
+                "needs_baseline": outcome.profile.needs_baseline,
+            }
             if outcome.clarification_request is not None:
                 control_json["pending_generated_clarification"] = outcome.clarification_request.model_dump(mode="json")
                 control_json["clarification_source"] = "PREPLAN"
@@ -176,7 +190,19 @@ class GlobalGraphService:
 
             control_json.pop("clarification_reply_selected", None)
             control_json.pop("pending_generated_clarification", None)
-            control_json.setdefault("historical_fingerprints", []).append(outcome.dag_fingerprint)
+            fingerprints = list(control_json.get("historical_fingerprints") or [])
+            if int(task.replan_count or 0) > 0 and outcome.dag_fingerprint in fingerprints:
+                task.control_json = {
+                    **control_json,
+                    "historical_fingerprints": fingerprints,
+                    "waiting_reason": "NONE",
+                }
+                task.last_error_code = "REPLAN_LOOP_DETECTED"
+                task.last_error_message = "重规划得到重复 DAG 指纹，已停止继续循环。"
+                await session.commit()
+                return {"next_action": "fallback", "error": "REPLAN_LOOP_DETECTED"}
+            fingerprints.append(outcome.dag_fingerprint)
+            control_json["historical_fingerprints"] = fingerprints
             task.control_json = control_json
             plan_version = await self.run_service.activate_plan(
                 session,
@@ -266,7 +292,13 @@ class GlobalGraphService:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is None:
                 return {"next_action": "fallback"}
-            claimed = await self.run_service.claim_ready_batch(session, task=task, max_parallel=3)
+            claimed = await self.run_service.claim_ready_batch(
+                session,
+                task=task,
+                max_parallel=get_settings().max_parallel_subtasks,
+            )
+            if claimed and get_settings().celery_eager:
+                await self.run_service.mark_waiting_subtasks(session, task=task, claimed_count=len(claimed))
             await session.commit()
             tenant_id = task.tenant_id
             active_plan_version = task.active_plan_version
@@ -278,24 +310,18 @@ class GlobalGraphService:
         if get_settings().celery_eager:
             return {"next_action": "output"}
 
-        dispatch_results = self.run_service.dispatch_claimed_batch(
-            task=SimpleNamespace(
-                id=task_id,
-                tenant_id=tenant_id,
-                request_id=request_id,
-                active_plan_version=active_plan_version,
-            ),
-            claimed=claimed,
-        )
+        dispatch_results = self.run_service.dispatch_claimed_batch(claimed=claimed)
         async with self.session_factory() as session:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is not None:
-                await self.run_service.persist_dispatch_results(
+                summary = await self.run_service.persist_dispatch_results(
                     session,
                     task=task,
                     dispatch_results=dispatch_results,
                 )
                 await session.commit()
+                if summary["success_count"] == 0:
+                    return {"next_action": "step_gate"}
         return {"next_action": "output"}
 
     async def step_gate_node(self, state: GlobalState) -> dict[str, Any]:
@@ -318,6 +344,9 @@ class GlobalGraphService:
                     reason_code="postexec_gap",
                 ).model_dump(mode="json")
                 task.control_json = control_json
+            elif next_action == "finalize":
+                task.status = "FINALIZING"
+                task.control_json = {**control_json, "waiting_reason": "NONE"}
             await session.commit()
         return {"next_action": next_action}
 
@@ -325,6 +354,11 @@ class GlobalGraphService:
         async with self.session_factory() as session:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == state["task_id"]))
             if task is None:
+                return {"next_action": "fallback"}
+            if int(task.replan_count or 0) >= get_settings().max_replan_count:
+                task.last_error_code = "REPLAN_LIMIT_REACHED"
+                task.last_error_message = "超过最大重规划次数，进入降级输出。"
+                await session.commit()
                 return {"next_action": "fallback"}
             task.replan_count = int(task.replan_count or 0) + 1
             task.status = "PLANNING"
@@ -362,6 +396,9 @@ class GlobalGraphService:
             assembled = await self.evidence_service.assemble_final_answer(session, task_id=task.id, plan_version=task.active_plan_version)
             task.final_answer = assembled["answer"]
             task.status = "DEGRADED" if assembled["coverage_summary"]["uncovered"] else "COMPLETED"
+            task.final_citations_json = assembled["citations"]
+            task.coverage_summary_json = assembled["coverage_summary"]
+            task.completed_at = utcnow()
             task.control_json = {
                 **json_safe(task.control_json or {}),
                 "waiting_reason": "NONE",
@@ -408,6 +445,9 @@ class GlobalGraphService:
                         item.last_error_message = "任务进入降级输出，节点未继续执行。"
                 task.status = "DEGRADED"
                 task.final_answer = "当前无法稳定完成全部深搜步骤，已返回可用的部分结果。"
+                task.final_citations_json = []
+                task.coverage_summary_json = {"covered": [], "uncovered": ["全部任务"]}
+                task.completed_at = utcnow()
                 task.control_json = {
                     **json_safe(task.control_json or {}),
                     "waiting_reason": "NONE",

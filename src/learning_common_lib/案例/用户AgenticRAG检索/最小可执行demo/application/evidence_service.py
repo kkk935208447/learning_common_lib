@@ -70,12 +70,17 @@ class EvidenceService:
         if not payload:
             run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
             if run is not None:
+                if value_of(run.data_plane_flush_status) == "FLUSHED":
+                    return 0
                 run.data_plane_flush_status = "FAILED"
                 await session.flush()
             return 0
 
         run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
         if run is None:
+            await self.delete_staged_payload(execution_id)
+            return 0
+        if value_of(run.data_plane_flush_status) == "FLUSHED":
             await self.delete_staged_payload(execution_id)
             return 0
 

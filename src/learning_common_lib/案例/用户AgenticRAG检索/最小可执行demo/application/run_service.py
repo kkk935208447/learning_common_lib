@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..errors import RetryableDispatchError
+from ..config import get_settings
 from .common import build_execution_id, json_safe, utcnow, value_of
 from .progress_service import ProgressService
 
@@ -17,10 +17,14 @@ except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskPlan
 
 
+TERMINAL_RUN_STATUSES = {"COMPLETED", "FAILED", "ESCALATED", "STALE_IGNORED"}
+
+
 class RunService:
     def __init__(self, progress_service: ProgressService, task_queue) -> None:
         self.progress_service = progress_service
         self.task_queue = task_queue
+        self.settings = get_settings()
 
     async def activate_plan(
         self,
@@ -69,8 +73,8 @@ class RunService:
                     priority=node.priority,
                     status="PENDING",
                     iteration=0,
-                    max_iterations=2,
-                    timeout_ms=30000,
+                    max_iterations=self.settings.max_subtask_iterations,
+                    timeout_ms=self.settings.subtask_timeout_ms,
                     evidence_refs_json=[],
                     result_snapshot_json={},
                     row_version=0,
@@ -80,26 +84,45 @@ class RunService:
             )
         task.active_plan_version = new_version
         task.status = "EXECUTING"
-        task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "NONE", "latest_escalation": None, "clarification_request": None}
+        task.control_json = {
+            **json_safe(task.control_json or {}),
+            "waiting_reason": "NONE",
+            "latest_escalation": None,
+            "clarification_request": None,
+        }
         await session.flush()
         await self.progress_service.append_event(
             session,
             tenant_id=task.tenant_id,
             task_id=task.id,
             event_type="plan_activated",
-            payload_json={"status": "EXECUTING", "message": f"计划版本 {new_version} 已激活", "plan_version": new_version, "dag_fingerprint": dag_fingerprint},
+            payload_json={
+                "status": "EXECUTING",
+                "message": f"计划版本 {new_version} 已激活",
+                "plan_version": new_version,
+                "dag_fingerprint": dag_fingerprint,
+            },
             plan_version=new_version,
         )
         return new_version
 
-    async def ensure_ready_subtasks(self, session: AsyncSession, *, task_id: int, plan_version: int) -> list[Subtask]:
-        subtasks = list(
-            (
-                await session.scalars(
-                    select(Subtask).where(Subtask.task_id == task_id).where(Subtask.plan_version == plan_version).order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
-                )
-            ).all()
+    async def ensure_ready_subtasks(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+        plan_version: int,
+        for_update: bool = False,
+    ) -> list[Subtask]:
+        stmt = (
+            select(Subtask)
+            .where(Subtask.task_id == task_id)
+            .where(Subtask.plan_version == plan_version)
+            .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        subtasks = list((await session.scalars(stmt)).all())
         by_code = {item.subtask_code: item for item in subtasks}
         ready: list[Subtask] = []
         for item in subtasks:
@@ -114,10 +137,22 @@ class RunService:
         await session.flush()
         return ready
 
-    async def claim_ready_batch(self, session: AsyncSession, *, task: SearchTask, max_parallel: int = 3) -> list[dict[str, Any]]:
-        ready = await self.ensure_ready_subtasks(session, task_id=task.id, plan_version=task.active_plan_version)
+    async def claim_ready_batch(
+        self,
+        session: AsyncSession,
+        *,
+        task: SearchTask,
+        max_parallel: int | None = None,
+    ) -> list[dict[str, Any]]:
+        ready = await self.ensure_ready_subtasks(
+            session,
+            task_id=task.id,
+            plan_version=task.active_plan_version,
+            for_update=True,
+        )
         claimed: list[dict[str, Any]] = []
-        for subtask in ready[:max_parallel]:
+        limit = max_parallel or self.settings.max_parallel_subtasks
+        for subtask in ready[:limit]:
             attempt_stmt = (
                 select(func.count(SubtaskRun.id))
                 .where(SubtaskRun.task_id == task.id)
@@ -161,23 +196,37 @@ class RunService:
                 subtask_code=subtask.subtask_code,
                 execution_id=execution_id,
             )
-            claimed.append({"execution_id": execution_id, "subtask_code": subtask.subtask_code, "attempt_no": attempt_no})
-
-        if claimed:
-            task.status = "WAITING_SUBTASKS"
-            task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "SUBTASKS"}
-            await self.progress_service.append_event(
-                session,
-                tenant_id=task.tenant_id,
-                task_id=task.id,
-                event_type="task_waiting_subtasks",
-                payload_json={"status": "WAITING_SUBTASKS", "message": f"等待 {len(claimed)} 个子任务执行"},
-                plan_version=task.active_plan_version,
+            claimed.append(
+                {
+                    "execution_id": execution_id,
+                    "subtask_code": subtask.subtask_code,
+                    "attempt_no": attempt_no,
+                }
             )
+
         await session.flush()
         return claimed
 
-    def dispatch_claimed_batch(self, *, task: SearchTask, claimed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def mark_waiting_subtasks(
+        self,
+        session: AsyncSession,
+        *,
+        task: SearchTask,
+        claimed_count: int,
+    ) -> None:
+        task.status = "WAITING_SUBTASKS"
+        task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "SUBTASKS"}
+        await self.progress_service.append_event(
+            session,
+            tenant_id=task.tenant_id,
+            task_id=task.id,
+            event_type="task_waiting_subtasks",
+            payload_json={"status": "WAITING_SUBTASKS", "message": f"等待 {claimed_count} 个子任务执行"},
+            plan_version=task.active_plan_version,
+        )
+        await session.flush()
+
+    def dispatch_claimed_batch(self, *, claimed: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for item in claimed:
             execution_id = item["execution_id"]
@@ -206,16 +255,20 @@ class RunService:
         *,
         task: SearchTask,
         dispatch_results: list[dict[str, Any]],
-    ) -> None:
+    ) -> dict[str, int]:
+        success_count = 0
+        failed_count = 0
         for item in dispatch_results:
             execution_id = item["execution_id"]
             subtask_code = item["subtask_code"]
             if not item["ok"]:
                 await self.mark_dispatch_failed(session, execution_id=execution_id, error_code=item["error_code"])
+                failed_count += 1
                 continue
             run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
             if run is not None and value_of(run.status) == "CLAIMED":
                 run.status = "DISPATCHED"
+                success_count += 1
                 await self.progress_service.append_event(
                     session,
                     tenant_id=task.tenant_id,
@@ -226,7 +279,15 @@ class RunService:
                     subtask_code=subtask_code,
                     execution_id=execution_id,
                 )
+
+        if success_count > 0:
+            await self.mark_waiting_subtasks(session, task=task, claimed_count=success_count)
+        else:
+            task.status = "EXECUTING"
+            task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "NONE"}
+
         await session.flush()
+        return {"success_count": success_count, "failed_count": failed_count}
 
     async def mark_dispatch_failed(self, session: AsyncSession, *, execution_id: str, error_code: str) -> None:
         run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
@@ -242,17 +303,24 @@ class RunService:
         )
         task = await session.scalar(select(SearchTask).where(SearchTask.id == run.task_id))
         if subtask is not None and subtask.current_execution_id == execution_id:
-            subtask.status = "READY"
+            subtask.status = "FAILED"
             subtask.last_error_code = "DISPATCH_FAILED"
             subtask.last_error_message = error_code[:1024]
+            subtask.current_execution_id = None
             subtask.updated_at = utcnow()
         if task is not None:
+            task.last_error_code = "DISPATCH_FAILED"
+            task.last_error_message = error_code[:1024]
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
                 task_id=task.id,
                 event_type="subtask_dispatch_failed",
-                payload_json={"status": "EXECUTING", "message": f"{run.subtask_code} 分发失败", "error_code": error_code},
+                payload_json={
+                    "status": "EXECUTING",
+                    "message": f"{run.subtask_code} 分发失败",
+                    "error_code": error_code,
+                },
                 plan_version=run.plan_version,
                 subtask_code=run.subtask_code,
                 execution_id=execution_id,
@@ -270,6 +338,8 @@ class RunService:
         )
         if run is None or task is None or subtask is None:
             return False
+        if value_of(run.status) in TERMINAL_RUN_STATUSES:
+            return False
 
         if int(task.active_plan_version or 0) != envelope.plan_version or subtask.current_execution_id != envelope.execution_id:
             run.status = "STALE_IGNORED"
@@ -279,7 +349,10 @@ class RunService:
                 tenant_id=task.tenant_id,
                 task_id=task.id,
                 event_type="subtask_stale_ignored",
-                payload_json={"status": value_of(task.status), "message": f"{envelope.subtask_code} 旧执行结果已忽略"},
+                payload_json={
+                    "status": value_of(task.status),
+                    "message": f"{envelope.subtask_code} 旧执行结果已忽略",
+                },
                 plan_version=envelope.plan_version,
                 subtask_code=envelope.subtask_code,
                 execution_id=envelope.execution_id,
@@ -290,7 +363,10 @@ class RunService:
         run.usage_stats_json = envelope.usage_stats
         run.eval_json = envelope.eval_summary
         run.verify_json = envelope.verify_summary
-        run.output_json = {"output_text": envelope.output_text, "evidence_card_refs": envelope.evidence_card_refs}
+        run.output_json = {
+            "output_text": envelope.output_text,
+            "evidence_card_refs": envelope.evidence_card_refs,
+        }
         run.error_code = envelope.error_code
         run.finished_at = utcnow()
 
@@ -300,7 +376,11 @@ class RunService:
             subtask.final_score = envelope.eval_summary.get("total_score")
             subtask.key_findings = envelope.output_text
             subtask.evidence_refs_json = envelope.evidence_card_refs
-            subtask.result_snapshot_json = {"output_text": envelope.output_text, "verify_summary": envelope.verify_summary, "eval_summary": envelope.eval_summary}
+            subtask.result_snapshot_json = {
+                "output_text": envelope.output_text,
+                "verify_summary": envelope.verify_summary,
+                "eval_summary": envelope.eval_summary,
+            }
             subtask.completed_at = utcnow()
             event_type = "subtask_completed"
             message = f"{envelope.subtask_code} 已完成"
@@ -310,7 +390,10 @@ class RunService:
             subtask.status = "FAILED"
             subtask.last_error_code = "ESCALATED"
             subtask.last_error_message = envelope.escalation_report.message[:1024] if envelope.escalation_report else "子任务升级"
-            task.control_json = {**json_safe(task.control_json or {}), "latest_escalation": envelope.escalation_report.model_dump(mode="json") if envelope.escalation_report else None}
+            task.control_json = {
+                **json_safe(task.control_json or {}),
+                "latest_escalation": envelope.escalation_report.model_dump(mode="json") if envelope.escalation_report else None,
+            }
             event_type = "subtask_escalated"
             message = f"{envelope.subtask_code} 已升级"
         else:
@@ -323,7 +406,11 @@ class RunService:
 
         subtask.updated_at = utcnow()
         task.status = "EXECUTING"
-        task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "NONE", "latest_result_ref": envelope.result_ref}
+        task.control_json = {
+            **json_safe(task.control_json or {}),
+            "waiting_reason": "NONE",
+            "latest_result_ref": envelope.result_ref,
+        }
         await self.progress_service.append_event(
             session,
             tenant_id=task.tenant_id,
@@ -342,7 +429,10 @@ class RunService:
         subtasks = list(
             (
                 await session.scalars(
-                    select(Subtask).where(Subtask.task_id == task.id).where(Subtask.plan_version == plan_version).order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
+                    select(Subtask)
+                    .where(Subtask.task_id == task.id)
+                    .where(Subtask.plan_version == plan_version)
+                    .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
                 )
             ).all()
         )
@@ -364,7 +454,7 @@ class RunService:
             return "finalize"
         if latest_escalation and latest_escalation.get("suggested_global_action") == "clarify" and int(task.postexec_clarification_used or 0) < 1:
             return "clarify"
-        if any(state == "FAILED" for state in states) and int(task.replan_count or 0) < 2:
+        if any(state == "FAILED" for state in states) and int(task.replan_count or 0) < self.settings.max_replan_count:
             return "replan"
         if any(state == "FAILED" for state in states):
             return "finalize"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Awaitable, Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,9 +38,28 @@ class SearchCommandService:
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
 
+    async def _dispatch_or_run_locally(
+        self,
+        *,
+        task_name: str,
+        payload: dict[str, object],
+        queue_name: str,
+        local_runner: Callable[[], Awaitable[dict[str, object]]],
+    ) -> None:
+        try:
+            self.task_queue.dispatch(
+                task_name=task_name,
+                payload=payload,
+                queue_name=queue_name,
+            )
+        except Exception:
+            await local_runner()
+
     async def submit_search(self, request: SearchSubmitRequest) -> SearchAcceptedResponse:
         if not request.query.strip():
             raise ValidationError("query 不能为空")
+        if request.kb_code and request.kb_code != "default":
+            raise ValidationError("当前最小 demo 仅支持 kb_code=default")
 
         request_id = build_request_id(request.session_id, request.query)
         async with self.session_factory() as session:
@@ -74,24 +95,32 @@ class SearchCommandService:
                 )
                 session.add(task)
                 await session.flush()
+                task_id = task.id
                 await self.session_service.append_query_turn(
                     session,
                     session_id=request.session_id,
-                    task_id=task.id,
+                    task_id=task_id,
                     query=request.query.strip(),
                 )
                 await self.progress_service.append_event(
                     session,
                     tenant_id=task.tenant_id,
-                    task_id=task.id,
+                    task_id=task_id,
                     event_type="task_submitted",
                     payload_json={"request_id": request_id, "status": "PENDING", "message": "搜索任务已提交"},
                 )
-            self.task_queue.dispatch(
-                task_name=TaskName.START_SEARCH.value,
-                payload={"task_id": task.id},
-                queue_name=QueueName.ORCHESTRATE.value,
-            )
+
+        try:
+            from ..workers.orchestrate_tasks import start_search_async
+        except ImportError:
+            from 最小可执行demo.workers.orchestrate_tasks import start_search_async
+
+        await self._dispatch_or_run_locally(
+            task_name=TaskName.START_SEARCH.value,
+            payload={"task_id": task_id},
+            queue_name=QueueName.ORCHESTRATE.value,
+            local_runner=lambda: start_search_async(task_id=task_id, drain_eager=False),
+        )
 
         return SearchAcceptedResponse(
             request_id=request_id,
@@ -138,19 +167,33 @@ class SearchCommandService:
                     **control_json,
                     "clarification_reply_selected": selected_option_id,
                     "clarification_source": clarification_source,
+                    "clarification_request": None,
                     "waiting_reason": "NONE",
                 }
+                task_id = task.id
                 await self.progress_service.append_event(
                     session,
                     tenant_id=task.tenant_id,
-                    task_id=task.id,
+                    task_id=task_id,
                     event_type="clarification_received",
                     payload_json={"status": "EXECUTING", "message": f"收到澄清选项 {selected_option_id}"},
                     plan_version=task.active_plan_version,
                 )
-            self.task_queue.dispatch(
-                task_name=TaskName.RESUME_SEARCH.value,
-                payload={"task_id": task.id, "entry_action": "planner" if clarification_source == "PREPLAN" else "step_gate"},
-                queue_name=QueueName.ORCHESTRATE.value,
-            )
+
+        entry_action = "planner" if clarification_source == "PREPLAN" else "step_gate"
+        try:
+            from ..workers.orchestrate_tasks import resume_search_async
+        except ImportError:
+            from 最小可执行demo.workers.orchestrate_tasks import resume_search_async
+
+        await self._dispatch_or_run_locally(
+            task_name=TaskName.RESUME_SEARCH.value,
+            payload={"task_id": task_id, "entry_action": entry_action},
+            queue_name=QueueName.ORCHESTRATE.value,
+            local_runner=lambda: resume_search_async(
+                task_id=task_id,
+                entry_action=entry_action,
+                drain_eager=False,
+            ),
+        )
         return await self.get_snapshot(request_id)

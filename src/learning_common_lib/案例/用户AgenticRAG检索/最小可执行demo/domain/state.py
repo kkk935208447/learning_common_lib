@@ -14,6 +14,7 @@ class GlobalState(TypedDict, total=False):
     user_id: str
     original_query: str
     resolved_query: str
+    budget: dict
     active_plan_version: int
     global_iteration: int
     replan_count: int

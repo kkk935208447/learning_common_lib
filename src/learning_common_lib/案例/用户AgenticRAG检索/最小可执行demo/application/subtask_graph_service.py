@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, KnowledgeChunkHit, SubtaskResultEnvelope
 from ..domain.scoring import passes_threshold, score_evidence_cards
 from ..domain.state import SubtaskState
@@ -83,21 +84,22 @@ class SubtaskGraphService:
         return {"query": query}
 
     async def retrieve_node(self, state: SubtaskState) -> dict[str, Any]:
+        settings = get_settings()
         filters = await self.projection_reader.build_retrieval_filters(state["task_id"])
         vector_hits = [
             KnowledgeChunkHit.model_validate(item)
-            for item in await self.vector_reader.search(state["query"], top_k=8, filters=filters)
+            for item in await self.vector_reader.search(state["query"], top_k=settings.vector_top_k, filters=filters)
         ]
         search_hits = [
             KnowledgeChunkHit.model_validate(item)
-            for item in await self.search_reader.search(state["query"], top_k=8, filters=filters)
+            for item in await self.search_reader.search(state["query"], top_k=settings.search_top_k, filters=filters)
         ]
         merged: dict[str, KnowledgeChunkHit] = {}
         for hit in vector_hits + search_hits:
             existing = merged.get(hit.chunk_uid)
             if existing is None or hit.score > existing.score:
                 merged[hit.chunk_uid] = hit
-        top_hits = sorted(merged.values(), key=lambda item: item.score, reverse=True)[:10]
+        top_hits = sorted(merged.values(), key=lambda item: item.score, reverse=True)[: settings.merged_top_k]
         drafts = self.evidence_service.build_evidence_drafts(
             task_id=state["task_id"],
             plan_version=state["plan_version"],
@@ -122,7 +124,7 @@ class SubtaskGraphService:
             prompt = {
                 "kind": "reasoning_summary",
                 "query": state["query"],
-                "evidence": [item.model_dump(mode="json") for item in drafts[:6]],
+                "evidence": [item.model_dump(mode="json") for item in drafts[: get_settings().final_evidence_top_k]],
             }
             llm_response = await self.llm.generate(prompt, structured_schema="reasoning_summary")
             structured = llm_response.get("structured_output") or {}
