@@ -63,13 +63,71 @@ class GlobalGraphService:
         graph.add_conditional_edges("scheduler", self.route_after_scheduler)
         graph.add_conditional_edges("executor", self.route_by_action)
         graph.add_conditional_edges("step_gate", self.route_by_action)
-        graph.add_edge("replan", "planner")
+        graph.add_conditional_edges("replan", self.route_by_action)
         graph.add_conditional_edges("finalize", self.route_by_action)
         graph.add_conditional_edges("fallback", self.route_by_action)
         graph.add_edge("output", END)
         return graph.compile(checkpointer=checkpointer)
 
-    async def run(self, task_id: int, *, entry_action: str | None = None) -> dict[str, Any]:
+    async def _apply_result_envelope(self, result_envelope: dict[str, Any]) -> None:
+        try:
+            from ..domain.contracts import SubtaskResultEnvelope
+        except ImportError:
+            from 最小可执行demo.domain.contracts import SubtaskResultEnvelope
+
+        envelope = SubtaskResultEnvelope.model_validate(result_envelope)
+        async with self.session_factory() as session:
+            async with session.begin():
+                await self.run_service.apply_subtask_result(session, envelope)
+
+    async def _run_eager_claimed_batch(self, task_id: int) -> None:
+        try:
+            from ..service_runtime import build_runtime_bundle, build_subtask_graph_service
+            from ..infrastructure.models import SubtaskRun
+        except ImportError:
+            from 最小可执行demo.service_runtime import build_runtime_bundle, build_subtask_graph_service
+            from 最小可执行demo.infrastructure.models import SubtaskRun
+
+        runtime = build_runtime_bundle(use_task_engine=True)
+        service = build_subtask_graph_service(use_task_engine=True)
+        async with runtime.session_factory() as session:
+            task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+            if task is None:
+                return
+            plan_version = int(task.active_plan_version or 0)
+            runs = list(
+                (
+                    await session.scalars(
+                        select(SubtaskRun)
+                        .where(SubtaskRun.task_id == task_id)
+                        .where(SubtaskRun.plan_version == plan_version)
+                        .where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED")))
+                        .order_by(SubtaskRun.id.asc())
+                    )
+                ).all()
+            )
+
+        for run in runs:
+            execution_id = run.execution_id
+            envelope = await service.execute(execution_id=execution_id)
+            if envelope is None:
+                continue
+            async with runtime.session_factory() as session:
+                async with session.begin():
+                    await runtime.run_service.apply_subtask_result(session, envelope)
+            async with runtime.session_factory() as session:
+                async with session.begin():
+                    await runtime.evidence_service.flush_staged_payload(session, execution_id)
+
+    async def run(
+        self,
+        task_id: int,
+        *,
+        entry_action: str | None = None,
+        result_envelope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if result_envelope is not None:
+            await self._apply_result_envelope(result_envelope)
         async with self.session_factory() as session:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is None:
@@ -190,6 +248,7 @@ class GlobalGraphService:
 
             control_json.pop("clarification_reply_selected", None)
             control_json.pop("pending_generated_clarification", None)
+            control_json["clarification_request"] = None
             fingerprints = list(control_json.get("historical_fingerprints") or [])
             if int(task.replan_count or 0) > 0 and outcome.dag_fingerprint in fingerprints:
                 task.control_json = {
@@ -300,15 +359,13 @@ class GlobalGraphService:
             if claimed and get_settings().celery_eager:
                 await self.run_service.mark_waiting_subtasks(session, task=task, claimed_count=len(claimed))
             await session.commit()
-            tenant_id = task.tenant_id
-            active_plan_version = task.active_plan_version
-            request_id = task.request_id
 
         if not claimed:
             return {"next_action": "step_gate"}
 
         if get_settings().celery_eager:
-            return {"next_action": "output"}
+            await self._run_eager_claimed_batch(task_id)
+            return {"next_action": "step_gate"}
 
         dispatch_results = self.run_service.dispatch_claimed_batch(claimed=claimed)
         async with self.session_factory() as session:
@@ -329,8 +386,12 @@ class GlobalGraphService:
             task = await session.scalar(select(SearchTask).where(SearchTask.id == state["task_id"]))
             if task is None:
                 return {"next_action": "fallback"}
-            next_action = await self.run_service.decide_next_action(session, task=task)
             control_json = json_safe(task.control_json or {})
+            if control_json.get("clarification_reply_selected") and control_json.get("clarification_source") == "STEP_GATE":
+                control_json.pop("clarification_reply_selected", None)
+                control_json["clarification_request"] = None
+                task.control_json = control_json
+            next_action = await self.run_service.decide_next_action(session, task=task)
             if next_action == "clarify":
                 control_json["pending_generated_clarification"] = ClarificationRequest(
                     question="请选择你希望优先保留的回答口径",
@@ -399,6 +460,8 @@ class GlobalGraphService:
             task.final_citations_json = assembled["citations"]
             task.coverage_summary_json = assembled["coverage_summary"]
             task.completed_at = utcnow()
+            task.last_error_code = None
+            task.last_error_message = None
             task.control_json = {
                 **json_safe(task.control_json or {}),
                 "waiting_reason": "NONE",

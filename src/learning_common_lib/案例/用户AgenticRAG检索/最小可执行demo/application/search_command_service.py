@@ -16,8 +16,10 @@ from .session_service import SessionService
 
 try:
     from ..infrastructure.models import SearchTask
+    from ..ports.task_queue_port import TaskDispatchError
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask
+    from 最小可执行demo.ports.task_queue_port import TaskDispatchError
 
 
 class SearchCommandService:
@@ -52,7 +54,7 @@ class SearchCommandService:
                 payload=payload,
                 queue_name=queue_name,
             )
-        except Exception:
+        except TaskDispatchError:
             await local_runner()
 
     async def submit_search(self, request: SearchSubmitRequest) -> SearchAcceptedResponse:
@@ -139,7 +141,9 @@ class SearchCommandService:
     async def submit_clarification(self, request_id: str, selected_option_id: str) -> TaskSnapshotResponse:
         async with self.session_factory() as session:
             async with session.begin():
-                task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+                task = await session.scalar(
+                    select(SearchTask).where(SearchTask.request_id == request_id).with_for_update()
+                )
                 if task is None:
                     raise NotFoundError(f"request_id={request_id} 不存在")
                 if value_of(task.status) != "WAITING_CLARIFICATION":
@@ -167,7 +171,6 @@ class SearchCommandService:
                     **control_json,
                     "clarification_reply_selected": selected_option_id,
                     "clarification_source": clarification_source,
-                    "clarification_request": None,
                     "waiting_reason": "NONE",
                 }
                 task_id = task.id

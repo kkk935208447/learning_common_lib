@@ -7,9 +7,9 @@ import threading
 from typing import Any
 
 try:
-    from ..ports.task_queue_port import TaskQueuePort
+    from ..ports.task_queue_port import TaskDispatchError, TaskQueuePort
 except ImportError:
-    from 最小可执行demo.ports.task_queue_port import TaskQueuePort
+    from 最小可执行demo.ports.task_queue_port import TaskDispatchError, TaskQueuePort
 
 
 class CeleryTaskQueueAdapter(TaskQueuePort):
@@ -24,7 +24,10 @@ class CeleryTaskQueueAdapter(TaskQueuePort):
             from ..celery_app import celery_app
         except ImportError:
             from 最小可执行demo.celery_app import celery_app
-        result = celery_app.send_task(task_name, kwargs=payload, queue=queue_name, countdown=countdown)
+        try:
+            result = celery_app.send_task(task_name, kwargs=payload, queue=queue_name, countdown=countdown)
+        except Exception as exc:
+            raise TaskDispatchError(f"任务投递失败: {task_name}") from exc
         return result.id
 
     def dispatch_batch(self, events: list[dict[str, Any]]) -> list[str | None]:
@@ -116,9 +119,15 @@ class InMemoryTaskQueueAdapter(TaskQueuePort):
         return None
 
     def dispatch_batch(self, events: list[dict[str, Any]]) -> list[str | None]:
-        for event in events:
-            self.events.append(event)
-        return [None for _ in events]
+        return [
+            self.dispatch(
+                task_name=event["task_name"],
+                payload=event["payload"],
+                queue_name=event["queue_name"],
+                countdown=event.get("countdown"),
+            )
+            for event in events
+        ]
 
 
 LocalTaskQueueAdapter = InMemoryTaskQueueAdapter

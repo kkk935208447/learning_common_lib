@@ -154,6 +154,7 @@ class TaskName(str, Enum):
     REAP_STUCK_RUNS = "deepsearch.reap_stuck_runs"
     APPLY_CLARIFY_DEFAULTS = "deepsearch.apply_clarify_defaults"
     REBUILD_RUNTIME_CACHE = "deepsearch.rebuild_runtime_cache"
+    RECOVER_ORCHESTRATION_GAPS = "deepsearch.recover_orchestration_gaps"
 
 
 class QueueName(str, Enum):

@@ -15,7 +15,7 @@
 1. Python 3.11
 2. MySQL 8.0+
 3. Redis 7.x
-4. 上游数据库管理 demo 可访问
+4. 同仓库内的上游数据库管理 demo 目录存在，并且其 MySQL / `.runtime` 投影可读
 
 默认配置：
 
@@ -30,6 +30,19 @@
 
 1. 普通 Redis 也可以运行当前 demo。
 2. 如果 Redis 缺少 RediSearch / Redis Stack 能力，checkpoint 会自动降级，不影响最小链路演示。
+
+## 真实前置条件
+
+这个 demo 不是通过 HTTP 去访问上游数据库管理 demo，而是直接复用它的本地代码和运行产物。
+
+运行前需要满足：
+
+1. `../../实现AgenticRAG数据库管理/最小可执行demo` 目录存在。
+2. DeepSearch 和上游 demo 连接到同一个 MySQL 实例。
+3. 上游 demo 已经初始化并 seed 活动知识。
+4. 上游 `.runtime/vector_store`、`.runtime/search_store` 和对象存储布局可读。
+5. 当前最小 demo 只支持 `kb_code=default`。
+6. `scope_json` 目前只支持 `document_ids`、`external_doc_keys`、`version_ids` 三个键，其他过滤条件会被忽略。
 
 ## 当前目录
 
@@ -76,6 +89,40 @@ export UV_CACHE_DIR=/tmp/uv-cache-deepsearch
 7. [client_demo.py](./client_demo.py)
 8. [integration_test_production_stack.py](./integration_test_production_stack.py)
 
+## 代码阅读顺序
+
+如果你是来理解架构，而不是直接启动，建议按下面顺序阅读：
+
+1. `service_runtime.py`
+2. `bootstrap.py`
+3. `domain/contracts.py`
+4. `domain/dag_templates.py`
+5. `domain/clarify_rules.py`
+6. `application/plan_service.py`
+7. `api/routes.py`
+8. `application/search_command_service.py`
+9. `application/run_service.py`
+10. `application/global_graph_service.py`
+11. `application/subtask_graph_service.py`
+12. `application/evidence_service.py`
+13. `workers/orchestrate_tasks.py`
+14. `workers/subtask_tasks.py`
+
+理解建议：
+
+1. 先看 `service_runtime.py + bootstrap.py`，明确依赖是如何组装的。
+2. 再看 `domain/* + plan_service.py`，先建立术语和计划生成的心智模型。
+3. 然后看 `routes.py + search_command_service.py + run_service.py`，理解请求进入和控制面规则。
+4. 最后看 `global_graph_service.py + subtask_graph_service.py + workers/*`，把图编排和异步包装串起来。
+
+## 破坏性说明
+
+下面这些脚本会重建或覆写 demo 数据，不适合在你想保留现有样例数据时直接执行：
+
+1. `init_db.py`
+2. `demo_flow.py`
+3. `integration_test_production_stack.py`
+
 ## 初始化
 
 ### 初始化上游知识投影
@@ -90,6 +137,11 @@ MIN_RAG_CELERY_EAGER=1 uv run python seed_demo_kb.py
 ```bash
 uv run python init_db.py
 ```
+
+说明：
+
+1. `init_db.py` 会先 `drop_all` 再 `create_all`。
+2. 如果你只想验证 API / worker，不要在已有样例数据上反复执行它。
 
 ## 启动方式
 
@@ -142,6 +194,11 @@ uv run celery -A celery_app:celery_app purge -f
 ```bash
 uv run python demo_flow.py
 ```
+
+额外说明：
+
+1. 这个脚本会调用 `reset_tables()` 并重新 seed 上游活动知识。
+2. 它更适合联调，不适合作为保留现场数据时的只读演示。
 
 当前预期：
 
@@ -234,6 +291,26 @@ uv run python integration_test_production_stack.py
 2. `GET /api/v1/search/{request_id}`
 3. `GET /api/v1/search/{request_id}/events`
 4. `POST /api/v1/search/{request_id}/clarification`
+
+## HTTP 返回格式
+
+所有 HTTP 接口都返回统一 envelope：
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {}
+}
+```
+
+当前最常用的约定如下：
+
+1. `POST /api/v1/search` 成功时返回 `200 OK`，`data.status` 当前是 `PENDING`，不是 `PLANNING`。
+2. `GET /api/v1/search/{request_id}` 返回任务快照。
+3. `POST /api/v1/search/{request_id}/clarification` 成功时返回 `200 OK` 与最新快照。
+4. Clarification 冲突场景返回 `409`，响应体是 `{code, message, data: null}`，不会额外附带快照。
+5. SSE 断线回放使用 `Last-Event-ID` 请求头，当前实现要求它是整数。
 
 ## 当前已验证的能力
 

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
+from ..ports.task_queue_port import TaskDispatchError
 from .common import build_execution_id, json_safe, utcnow, value_of
 from .progress_service import ProgressService
 
@@ -129,7 +130,14 @@ class RunService:
             if value_of(item.status) not in {"PENDING", "READY"}:
                 continue
             deps = item.depends_on_json or []
-            deps_met = all(value_of(by_code[dep["code"]].status) == "COMPLETED" for dep in deps if dep["code"] in by_code)
+            missing_deps = [dep["code"] for dep in deps if dep.get("code") not in by_code]
+            if missing_deps:
+                item.status = "FAILED"
+                item.last_error_code = "MISSING_DEPENDENCY"
+                item.last_error_message = f"缺少依赖节点: {', '.join(missing_deps[:4])}"
+                item.updated_at = utcnow()
+                continue
+            deps_met = all(value_of(by_code[dep["code"]].status) == "COMPLETED" for dep in deps)
             if deps_met:
                 item.status = "READY"
                 item.updated_at = utcnow()
@@ -238,7 +246,7 @@ class RunService:
                     queue_name="subtask_jobs",
                 )
                 results.append({"execution_id": execution_id, "subtask_code": subtask_code, "ok": True})
-            except Exception as exc:
+            except TaskDispatchError as exc:
                 results.append(
                     {
                         "execution_id": execution_id,
@@ -328,13 +336,16 @@ class RunService:
         await session.flush()
 
     async def apply_subtask_result(self, session: AsyncSession, envelope) -> bool:
-        run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == envelope.execution_id))
-        task = await session.scalar(select(SearchTask).where(SearchTask.id == envelope.task_id))
+        run = await session.scalar(
+            select(SubtaskRun).where(SubtaskRun.execution_id == envelope.execution_id).with_for_update()
+        )
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == envelope.task_id).with_for_update())
         subtask = await session.scalar(
             select(Subtask)
             .where(Subtask.task_id == envelope.task_id)
             .where(Subtask.plan_version == envelope.plan_version)
             .where(Subtask.subtask_code == envelope.subtask_code)
+            .with_for_update()
         )
         if run is None or task is None or subtask is None:
             return False
@@ -443,6 +454,22 @@ class RunService:
         states = [value_of(item.status) for item in subtasks]
         control_json = json_safe(task.control_json or {})
         latest_escalation = control_json.get("latest_escalation")
+        failed_flushes = int(
+            (
+                await session.scalar(
+                    select(func.count(SubtaskRun.id))
+                    .where(SubtaskRun.task_id == task.id)
+                    .where(SubtaskRun.plan_version == plan_version)
+                    .where(SubtaskRun.data_plane_flush_status == "FAILED")
+                )
+            )
+            or 0
+        )
+        if failed_flushes > 0:
+            task.last_error_code = "DATA_PLANE_FLUSH_FAILED"
+            task.last_error_message = "存在未成功刷入数据面的子任务结果，终止正常收口。"
+            await session.flush()
+            return "fallback"
         if "READY" in states:
             return "schedule"
         if "RUNNING" in states:

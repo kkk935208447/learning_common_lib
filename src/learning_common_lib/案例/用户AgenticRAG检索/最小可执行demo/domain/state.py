@@ -25,6 +25,7 @@ class GlobalState(TypedDict, total=False):
     clarification_ref: dict | None
     pending_resume_execution_id: str | None
     historical_fingerprints: list[str]
+    ready_count: int
     next_action: Literal["schedule", "replan", "clarify", "finalize", "fallback", "output"]
     final_answer: str | None
     error: str | None

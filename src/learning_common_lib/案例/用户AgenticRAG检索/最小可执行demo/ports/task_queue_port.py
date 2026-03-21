@@ -6,6 +6,10 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+class TaskDispatchError(RuntimeError):
+    """Raised when a task could not be handed off to the configured queue backend."""
+
+
 class TaskQueuePort(ABC):
     @abstractmethod
     def dispatch(

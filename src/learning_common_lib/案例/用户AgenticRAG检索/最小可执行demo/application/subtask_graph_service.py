@@ -219,7 +219,8 @@ class SubtaskGraphService:
 
         global_evidence_refs: list[str] = []
         global_evidence_payloads: list[dict[str, Any]] = []
-        if value_of(subtask.task_type) == "REASONING":
+        reuse_global_evidence = value_of(subtask.task_type) == "REASONING"
+        if reuse_global_evidence:
             async with self.session_factory() as session:
                 cards = list(
                     (
@@ -269,6 +270,7 @@ class SubtaskGraphService:
         verify_summary = json_safe(result.get("verify_summary", {}))
         evidence_drafts = json_safe(result.get("evidence_drafts", []))
         draft_text = result.get("draft_text")
+        evidence_card_refs = list(global_evidence_refs) if reuse_global_evidence else [f"EC-{execution_id}-{item['chunk_uid']}" for item in evidence_drafts]
 
         if result.get("status") == "COMPLETED":
             envelope = SubtaskResultEnvelope(
@@ -278,7 +280,7 @@ class SubtaskGraphService:
                 execution_id=execution_id,
                 status="COMPLETED",
                 result_ref={"execution_id": execution_id},
-                evidence_card_refs=[f"EC-{execution_id}-{item['chunk_uid']}" for item in evidence_drafts],
+                evidence_card_refs=evidence_card_refs,
                 output_text=draft_text,
                 verify_summary=verify_summary,
                 eval_summary=eval_summary,
@@ -317,7 +319,7 @@ class SubtaskGraphService:
                 "plan_version": run.plan_version,
                 "subtask_code": run.subtask_code,
                 "kb_code": task.kb_code,
-                "evidence_cards": evidence_drafts,
+                "evidence_cards": [] if reuse_global_evidence else evidence_drafts,
             },
         )
         return envelope

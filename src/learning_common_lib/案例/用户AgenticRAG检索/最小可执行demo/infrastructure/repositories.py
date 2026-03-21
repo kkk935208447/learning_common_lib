@@ -122,13 +122,13 @@ class SubtaskRepository(BaseRepository):
         stmt = (
             select(Subtask)
             .where(Subtask.task_id == task_id, Subtask.plan_version == plan_version)
-            .order_by(Subtask.priority.desc(), Subtask.subtask_code.asc())
+            .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
         )
         return list((await self.session.scalars(stmt)).all())
 
     async def list_by_task(self, task_id: int, plan_version: int | None = None) -> list[Subtask]:
         if plan_version is None:
-            stmt = select(Subtask).where(Subtask.task_id == task_id).order_by(Subtask.priority.desc(), Subtask.subtask_code.asc())
+            stmt = select(Subtask).where(Subtask.task_id == task_id).order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
             return list((await self.session.scalars(stmt)).all())
         return await self.list_by_plan(task_id, plan_version)
 
@@ -145,7 +145,7 @@ class SubtaskRepository(BaseRepository):
                 Subtask.plan_version == plan_version,
                 Subtask.status.in_(statuses),
             )
-            .order_by(Subtask.priority.desc(), Subtask.subtask_code.asc())
+            .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
         )
         return list((await self.session.scalars(stmt)).all())
 

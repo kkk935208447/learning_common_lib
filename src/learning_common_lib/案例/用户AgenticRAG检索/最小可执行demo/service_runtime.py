@@ -65,6 +65,7 @@ _CHECKPOINTER: Any | None = None
 @dataclass(slots=True)
 class RuntimeBundle:
     session_factory: async_sessionmaker
+    session_engine: Any | None
     llm: object
     redis_runtime: object
     task_queue: object
@@ -83,11 +84,8 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     if cached is not None:
         return cached
 
-    session_factory = (
-        async_sessionmaker(build_engine(), expire_on_commit=False)
-        if use_task_engine
-        else get_session_factory()
-    )
+    session_engine = build_engine() if use_task_engine else None
+    session_factory = async_sessionmaker(session_engine, expire_on_commit=False) if session_engine is not None else get_session_factory()
     llm = build_llm()
     redis_runtime = build_redis_runtime()
     task_queue = build_task_queue()
@@ -101,6 +99,7 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     search_reader = build_search_reader()
     bundle = RuntimeBundle(
         session_factory=session_factory,
+        session_engine=session_engine,
         llm=llm,
         redis_runtime=redis_runtime,
         task_queue=task_queue,
@@ -131,9 +130,7 @@ async def _get_checkpointer() -> Any:
 async def close_runtime_resources() -> None:
     global _CHECKPOINT_ADAPTER, _CHECKPOINTER
     for bundle in _RUNTIME_BUNDLES.values():
-        aclose = getattr(bundle.redis_runtime, "aclose", None)
-        if callable(aclose):
-            await aclose()
+        await close_runtime_bundle(bundle)
     _RUNTIME_BUNDLES.clear()
     if _CHECKPOINT_ADAPTER is not None:
         await _CHECKPOINT_ADAPTER.aclose()
@@ -143,6 +140,23 @@ async def close_runtime_resources() -> None:
 
 async def build_global_graph_service(*, use_task_engine: bool = False) -> GlobalGraphService:
     bundle = build_runtime_bundle(use_task_engine=use_task_engine)
+    return await build_global_graph_service_from_bundle(bundle, use_task_engine=use_task_engine)
+
+
+async def close_runtime_bundle(bundle: RuntimeBundle) -> None:
+    aclose = getattr(bundle.redis_runtime, "aclose", None)
+    if callable(aclose):
+        await aclose()
+    dispose = getattr(bundle.session_engine, "dispose", None)
+    if callable(dispose):
+        await dispose()
+
+
+async def build_global_graph_service_from_bundle(
+    bundle: RuntimeBundle,
+    *,
+    use_task_engine: bool = False,
+) -> GlobalGraphService:
     settings = get_settings()
     checkpointer = None
     if not settings.celery_eager and not use_task_engine:
@@ -160,6 +174,10 @@ async def build_global_graph_service(*, use_task_engine: bool = False) -> Global
 
 def build_search_command_service(*, use_task_engine: bool = False) -> SearchCommandService:
     bundle = build_runtime_bundle(use_task_engine=use_task_engine)
+    return build_search_command_service_from_bundle(bundle)
+
+
+def build_search_command_service_from_bundle(bundle: RuntimeBundle) -> SearchCommandService:
     settings = get_settings()
     return SearchCommandService(
         bundle.session_factory,
@@ -173,6 +191,10 @@ def build_search_command_service(*, use_task_engine: bool = False) -> SearchComm
 
 def build_subtask_graph_service(*, use_task_engine: bool = False) -> SubtaskGraphService:
     bundle = build_runtime_bundle(use_task_engine=use_task_engine)
+    return build_subtask_graph_service_from_bundle(bundle)
+
+
+def build_subtask_graph_service_from_bundle(bundle: RuntimeBundle) -> SubtaskGraphService:
     return SubtaskGraphService(
         bundle.session_factory,
         vector_reader=bundle.vector_reader,
@@ -186,6 +208,10 @@ def build_subtask_graph_service(*, use_task_engine: bool = False) -> SubtaskGrap
 
 def build_maintenance_service(*, use_task_engine: bool = False) -> MaintenanceService:
     bundle = build_runtime_bundle(use_task_engine=use_task_engine)
+    return build_maintenance_service_from_bundle(bundle)
+
+
+def build_maintenance_service_from_bundle(bundle: RuntimeBundle) -> MaintenanceService:
     return MaintenanceService(
         bundle.session_factory,
         task_queue=bundle.task_queue,
