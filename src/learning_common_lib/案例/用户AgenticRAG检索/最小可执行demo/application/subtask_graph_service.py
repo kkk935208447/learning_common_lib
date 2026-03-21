@@ -185,15 +185,18 @@ class SubtaskGraphService:
 
     async def execute(self, *, execution_id: str) -> SubtaskResultEnvelope | None:
         async with self.session_factory() as session:
-            run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
+            run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id).with_for_update())
             if run is None:
                 return None
-            task = await session.scalar(select(SearchTask).where(SearchTask.id == run.task_id))
+            if value_of(run.status) not in {"CLAIMED", "DISPATCHED"}:
+                return None
+            task = await session.scalar(select(SearchTask).where(SearchTask.id == run.task_id).with_for_update())
             subtask = await session.scalar(
                 select(Subtask)
                 .where(Subtask.task_id == run.task_id)
                 .where(Subtask.plan_version == run.plan_version)
                 .where(Subtask.subtask_code == run.subtask_code)
+                .with_for_update()
             )
             if task is None or subtask is None:
                 return None
@@ -221,33 +224,38 @@ class SubtaskGraphService:
         global_evidence_payloads: list[dict[str, Any]] = []
         reuse_global_evidence = value_of(subtask.task_type) == "REASONING"
         if reuse_global_evidence:
-            async with self.session_factory() as session:
-                cards = list(
-                    (
-                        await session.scalars(
-                            select(EvidenceCard)
-                            .where(EvidenceCard.task_id == run.task_id)
-                            .where(EvidenceCard.plan_version == run.plan_version)
-                            .order_by(EvidenceCard.created_at.asc())
-                        )
-                    ).all()
-                )
-                global_evidence_refs = [card.card_uid for card in cards[:8]]
-                global_evidence_payloads = [
-                    {
-                        "claim": card.claim,
-                        "source_type": value_of(card.source_type),
-                        "document_id": card.source_locator_json.get("document_id"),
-                        "version_id": card.source_locator_json.get("version_id"),
-                        "chunk_uid": card.source_locator_json.get("chunk_uid"),
-                        "retrieval_score": float(card.retrieval_score or 0.0),
-                        "confidence": float(card.confidence or 0.0),
-                        "claim_type": value_of(card.claim_type),
-                        "payload_json": card.payload_json or {},
-                        "card_uid": card.card_uid,
-                    }
-                    for card in cards[:8]
-                ]
+            cached_pool = await self.evidence_service.load_evidence_pool(task.request_id, run.plan_version)
+            if cached_pool:
+                global_evidence_refs = [str(item["card_uid"]) for item in cached_pool[:8]]
+                global_evidence_payloads = [json_safe(item) for item in cached_pool[:8]]
+            else:
+                async with self.session_factory() as session:
+                    cards = list(
+                        (
+                            await session.scalars(
+                                select(EvidenceCard)
+                                .where(EvidenceCard.task_id == run.task_id)
+                                .where(EvidenceCard.plan_version == run.plan_version)
+                                .order_by(EvidenceCard.created_at.asc())
+                            )
+                        ).all()
+                    )
+                    global_evidence_refs = [card.card_uid for card in cards[:8]]
+                    global_evidence_payloads = [
+                        {
+                            "claim": card.claim,
+                            "source_type": value_of(card.source_type),
+                            "document_id": card.source_locator_json.get("document_id"),
+                            "version_id": card.source_locator_json.get("version_id"),
+                            "chunk_uid": card.source_locator_json.get("chunk_uid"),
+                            "retrieval_score": float(card.retrieval_score or 0.0),
+                            "confidence": float(card.confidence or 0.0),
+                            "claim_type": value_of(card.claim_type),
+                            "payload_json": card.payload_json or {},
+                            "card_uid": card.card_uid,
+                        }
+                        for card in cards[:8]
+                    ]
 
         result = await self.graph.ainvoke(
             {
@@ -311,11 +319,29 @@ class SubtaskGraphService:
                 },
             )
 
+        await self.evidence_service.stage_subtask_memory(
+            execution_id,
+            {
+                "task_id": run.task_id,
+                "plan_version": run.plan_version,
+                "subtask_code": run.subtask_code,
+                "query": f"{task.resolved_query or task.original_query}。子任务：{subtask.description}",
+                "task_type": value_of(subtask.task_type),
+                "retrieval_hits": json_safe(result.get("retrieval_hits", [])),
+                "evidence_drafts": evidence_drafts,
+                "eval_summary": eval_summary,
+                "verify_summary": verify_summary,
+                "draft_text": draft_text,
+                "global_evidence_refs": global_evidence_refs,
+            },
+        )
+
         await self.evidence_service.stage_payload(
             execution_id,
             {
                 "tenant_id": task.tenant_id,
                 "task_id": run.task_id,
+                "request_id": task.request_id,
                 "plan_version": run.plan_version,
                 "subtask_code": run.subtask_code,
                 "kb_code": task.kb_code,

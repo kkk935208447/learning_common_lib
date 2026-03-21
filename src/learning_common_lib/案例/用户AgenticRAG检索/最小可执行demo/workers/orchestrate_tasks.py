@@ -102,7 +102,7 @@ async def resume_search_async(
 
     result = await _run_with_task_lock(
         task_id=task_id,
-        entry_action=None,
+        entry_action=entry_action,
         result_envelope=result_envelope,
     )
     if result.get("status") != "locked":
@@ -110,7 +110,7 @@ async def resume_search_async(
     await asyncio.sleep(0.05)
     result = await _run_with_task_lock(
         task_id=task_id,
-        entry_action=None,
+        entry_action=entry_action,
         result_envelope=result_envelope,
     )
     if result.get("status") != "locked" or get_settings().celery_eager:

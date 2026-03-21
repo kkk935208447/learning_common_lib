@@ -2,35 +2,26 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select, text
 
 try:
-    from ....实现AgenticRAG数据库管理.最小可执行demo.models import Document as UpstreamDocument
-    from ....实现AgenticRAG数据库管理.最小可执行demo.models import DocumentVersion as UpstreamDocumentVersion
     from ..db import task_session_scope
     from ..domain.enums import SearchTaskStatus
     from ..ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from ..ports.object_storage_port import ObjectStorageReadPort
     from .repositories import SearchTaskRepository
 except ImportError:
-    cases_root = Path(__file__).resolve().parent.parent.parent.parent
-    if str(cases_root) not in sys.path:
-        sys.path.insert(0, str(cases_root))
-    from 实现AgenticRAG数据库管理.最小可执行demo.models import (
-        Document as UpstreamDocument,
-    )
-    from 实现AgenticRAG数据库管理.最小可执行demo.models import (
-        DocumentVersion as UpstreamDocumentVersion,
-    )
     from 最小可执行demo.db import task_session_scope
     from 最小可执行demo.domain.enums import SearchTaskStatus
     from 最小可执行demo.ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from 最小可执行demo.ports.object_storage_port import ObjectStorageReadPort
     from 最小可执行demo.infrastructure.repositories import SearchTaskRepository
+
+
+UPSTREAM_DOCUMENTS_TABLE = "rag_min_demo_documents"
+UPSTREAM_DOCUMENT_VERSIONS_TABLE = "rag_min_demo_document_versions"
 
 
 class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
@@ -45,40 +36,59 @@ class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
         scope_json: dict[str, Any] | None = None,
     ) -> ActiveScope:
         scope_json = scope_json or {}
-        stmt = (
-            select(UpstreamDocument, UpstreamDocumentVersion)
-            .join(
-                UpstreamDocumentVersion,
-                UpstreamDocument.active_version_id == UpstreamDocumentVersion.id,
-            )
-            .where(UpstreamDocument.active_version_id.is_not(None))
-        )
+        sql = f"""
+        SELECT
+            d.id AS document_id,
+            d.external_doc_key AS external_doc_key,
+            d.title AS title,
+            d.active_version_id AS active_version_id,
+            dv.storage_key AS storage_key
+        FROM {UPSTREAM_DOCUMENTS_TABLE} AS d
+        JOIN {UPSTREAM_DOCUMENT_VERSIONS_TABLE} AS dv
+          ON d.active_version_id = dv.id
+        WHERE d.active_version_id IS NOT NULL
+        """
+        conditions: list[str] = []
+        params: dict[str, Any] = {}
 
         document_ids = scope_json.get("document_ids") or []
         external_doc_keys = scope_json.get("external_doc_keys") or []
         version_ids = scope_json.get("version_ids") or []
 
         if document_ids:
-            stmt = stmt.where(UpstreamDocument.id.in_(document_ids))
+            conditions.append("d.id IN :document_ids")
+            params["document_ids"] = tuple(document_ids)
         if external_doc_keys:
-            stmt = stmt.where(UpstreamDocument.external_doc_key.in_(external_doc_keys))
+            conditions.append("d.external_doc_key IN :external_doc_keys")
+            params["external_doc_keys"] = tuple(external_doc_keys)
         if version_ids:
-            stmt = stmt.where(UpstreamDocumentVersion.id.in_(version_ids))
+            conditions.append("dv.id IN :version_ids")
+            params["version_ids"] = tuple(version_ids)
+        if conditions:
+            sql = f"{sql} AND {' AND '.join(conditions)}"
+        stmt = text(sql)
+        if "document_ids" in params:
+            stmt = stmt.bindparams(bindparam("document_ids", expanding=True))
+        if "external_doc_keys" in params:
+            stmt = stmt.bindparams(bindparam("external_doc_keys", expanding=True))
+        if "version_ids" in params:
+            stmt = stmt.bindparams(bindparam("version_ids", expanding=True))
 
         async with task_session_scope() as session:
-            rows = (await session.execute(stmt)).all()
+            rows = (await session.execute(stmt, params)).mappings().all()
 
         documents: list[ActiveDocumentRef] = []
         active_version_ids: list[int] = []
-        for document, version in rows:
-            active_version_ids.append(version.id)
+        for row in rows:
+            active_version_id = int(row["active_version_id"])
+            active_version_ids.append(active_version_id)
             documents.append(
                 {
-                    "document_id": document.id,
-                    "external_doc_key": document.external_doc_key,
-                    "title": document.title,
-                    "active_version_id": version.id,
-                    "storage_key": version.storage_key,
+                    "document_id": int(row["document_id"]),
+                    "external_doc_key": str(row["external_doc_key"]),
+                    "title": str(row["title"] or ""),
+                    "active_version_id": active_version_id,
+                    "storage_key": str(row["storage_key"]),
                 }
             )
 
@@ -127,9 +137,15 @@ class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
         document_id = locator.get("document_id")
 
         if not storage_key and version_id:
-            stmt = select(UpstreamDocumentVersion).where(UpstreamDocumentVersion.id == version_id)
+            stmt = text(
+                f"""
+                SELECT id, document_id, storage_key
+                FROM {UPSTREAM_DOCUMENT_VERSIONS_TABLE}
+                WHERE id = :version_id
+                """
+            )
             async with task_session_scope() as session:
-                version = await session.scalar(stmt)
+                version = (await session.execute(stmt, {"version_id": version_id})).mappings().first()
             if version is None:
                 return {
                     "document_id": document_id,
@@ -138,8 +154,8 @@ class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
                     "content": "",
                     "metadata": {},
                 }
-            storage_key = version.storage_key
-            document_id = document_id or version.document_id
+            storage_key = str(version["storage_key"])
+            document_id = document_id or int(version["document_id"])
 
         if not storage_key:
             return {

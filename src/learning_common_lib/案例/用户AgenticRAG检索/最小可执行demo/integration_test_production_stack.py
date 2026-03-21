@@ -7,14 +7,26 @@ import json
 import os
 import signal
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+from typing import TextIO
 
 import httpx
+from sqlalchemy import select
 
 try:
+    from .application.common import build_request_id, utcnow
     from .config import get_settings
     from .domain.contracts import SearchSubmitRequest
-    from .service_runtime import build_runtime_bundle, build_search_command_service
+    from .service_runtime import (
+        build_global_graph_service_from_bundle,
+        build_maintenance_service,
+        build_runtime_bundle,
+        build_search_command_service,
+        build_subtask_graph_service,
+        close_runtime_bundle,
+    )
+    from .infrastructure.models import SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent
 except ImportError:
     import sys
     from pathlib import Path
@@ -22,14 +34,20 @@ except ImportError:
     demo_parent = Path(__file__).resolve().parent.parent
     if str(demo_parent) not in sys.path:
         sys.path.insert(0, str(demo_parent))
+    from 最小可执行demo.application.common import build_request_id, utcnow
     from 最小可执行demo.config import get_settings
     from 最小可执行demo.domain.contracts import (
         SearchSubmitRequest,
     )
     from 最小可执行demo.service_runtime import (
+        build_global_graph_service_from_bundle,
+        build_maintenance_service,
         build_runtime_bundle,
         build_search_command_service,
+        build_subtask_graph_service,
+        close_runtime_bundle,
     )
+    from 最小可执行demo.infrastructure.models import SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent
 
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -46,6 +64,7 @@ class ManagedProcess:
     name: str
     process: asyncio.subprocess.Process
     log_path: Path
+    log_file: TextIO
 
 
 def base_env() -> dict[str, str]:
@@ -83,11 +102,12 @@ async def start_process(name: str, *args: str, env: dict[str, str], log_dir: Pat
         stdout=log_file,
         stderr=asyncio.subprocess.STDOUT,
     )
-    return ManagedProcess(name=name, process=process, log_path=log_path)
+    return ManagedProcess(name=name, process=process, log_path=log_path, log_file=log_file)
 
 
 async def stop_process(item: ManagedProcess) -> None:
     if item.process.returncode is not None:
+        item.log_file.close()
         return
     item.process.send_signal(signal.SIGINT)
     try:
@@ -99,6 +119,8 @@ async def stop_process(item: ManagedProcess) -> None:
         except asyncio.TimeoutError:
             item.process.kill()
             await item.process.wait()
+    finally:
+        item.log_file.close()
 
 
 async def wait_for_health(base_url: str, timeout_s: int = 30) -> None:
@@ -179,6 +201,22 @@ def assert_subsequence(events: list[str], expected: list[str]) -> None:
         raise AssertionError(f"expected subsequence {expected}, got {events}")
 
 
+async def list_event_names(request_id: str) -> list[str]:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    async with runtime.session_factory() as session:
+        task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+        if task is None:
+            return []
+        events = list(
+            (
+                await session.scalars(
+                    select(TaskEvent).where(TaskEvent.task_id == task.id).order_by(TaskEvent.id.asc())
+                )
+            ).all()
+        )
+    return [event.event_type for event in events]
+
+
 async def test_http_completion(base_url: str) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         submit = await client.post(
@@ -233,6 +271,31 @@ async def test_sse_sequence(base_url: str) -> dict:
     return {"request_id": request_id, "event_count": len(events), "replay_count": len(replay)}
 
 
+async def test_sse_invalid_last_event_id(base_url: str) -> dict:
+    async with httpx.AsyncClient(timeout=30) as client:
+        submit = await client.post(
+            f"{base_url}/api/v1/search",
+            json={
+                "session_id": "sess_integration_bad_last_id",
+                "query": "请帮我整理公司近 90 天差旅报销规则的变化",
+                "kb_code": "default",
+                "scope_json": None,
+            },
+        )
+        submit.raise_for_status()
+        request_id = submit.json()["data"]["request_id"]
+        resp = await client.get(
+            f"{base_url}/api/v1/search/{request_id}/events",
+            headers={"Last-Event-ID": "abc"},
+        )
+    if resp.status_code != 400:
+        raise AssertionError(f"Invalid Last-Event-ID should return 400, got {resp.status_code}: {resp.text}")
+    payload = resp.json()
+    if payload.get("code") != "VALIDATION_ERROR":
+        raise AssertionError(f"Invalid Last-Event-ID should return VALIDATION_ERROR, got {payload}")
+    return {"request_id": request_id, "status_code": resp.status_code}
+
+
 async def test_clarify_flow(base_url: str) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         submit = await client.post(
@@ -285,7 +348,589 @@ async def test_clarify_flow(base_url: str) -> dict:
         raise AssertionError("Clarify flow did not produce a final snapshot")
     if final_snapshot["status"] != "COMPLETED":
         raise AssertionError(f"Clarify flow expected COMPLETED, got {final_snapshot['status']}")
-    return {"request_id": request_id, "clarify_events": event_names, "final_status": final_snapshot["status"]}
+    all_event_names = await list_event_names(request_id)
+    planning_started_count = all_event_names.count("task_planning_started")
+    if planning_started_count != 1:
+        raise AssertionError(f"Clarify flow expected exactly one task_planning_started, got {planning_started_count}")
+    return {
+        "request_id": request_id,
+        "clarify_events": event_names,
+        "planning_started_count": planning_started_count,
+        "final_status": final_snapshot["status"],
+    }
+
+
+async def test_expired_clarify_defaults(base_url: str) -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    async with httpx.AsyncClient(timeout=30) as client:
+        submit = await client.post(
+            f"{base_url}/api/v1/search",
+            json={
+                "session_id": "sess_integration_expired_clarify",
+                "query": "请帮我整理差旅报销规则的变化",
+                "kb_code": "default",
+                "scope_json": None,
+            },
+        )
+        submit.raise_for_status()
+        request_id = submit.json()["data"]["request_id"]
+
+    snapshot_data = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        for _ in range(30):
+            snapshot = await client.get(f"{base_url}/api/v1/search/{request_id}")
+            snapshot.raise_for_status()
+            snapshot_data = snapshot.json()["data"]
+            if snapshot_data["status"] == "WAITING_CLARIFICATION":
+                break
+            await asyncio.sleep(1)
+    if snapshot_data is None or snapshot_data["status"] != "WAITING_CLARIFICATION":
+        raise AssertionError("Expired clarify test timed out waiting for WAITING_CLARIFICATION")
+
+    clarify_request = snapshot_data["clarification_request"]
+    default_option_id = clarify_request["default_option_id"]
+    fallback_option_id = next(
+        option["id"] for option in clarify_request["options"] if option["id"] != default_option_id
+    )
+    expired_at = utcnow() - timedelta(minutes=1)
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id).with_for_update())
+            if task is None:
+                raise AssertionError("Expired clarify test task missing")
+            control_json = dict(task.control_json or {})
+            clarification_payload = dict(control_json.get("clarification_request") or {})
+            clarification_payload["expires_at"] = expired_at.isoformat()
+            control_json["clarification_request"] = clarification_payload
+            task.control_json = control_json
+            latest_turn = await session.scalar(
+                select(SessionTurn)
+                .where(SessionTurn.task_id == task.id)
+                .where(SessionTurn.turn_type == "CLARIFY_REQUEST")
+                .order_by(SessionTurn.id.desc())
+                .limit(1)
+                .with_for_update()
+            )
+            if latest_turn is None:
+                raise AssertionError("Expired clarify test request turn missing")
+            latest_turn.expires_at = expired_at
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        answer = await client.post(
+            f"{base_url}/api/v1/search/{request_id}/clarification",
+            json={"selected_option_id": fallback_option_id},
+        )
+        answer.raise_for_status()
+
+    final_snapshot = await poll_snapshot(base_url, request_id)
+    if final_snapshot["status"] != "COMPLETED":
+        raise AssertionError(f"Expired clarify test expected COMPLETED, got {final_snapshot['status']}")
+    event_names = await list_event_names(request_id)
+    if "clarification_default_applied" not in event_names:
+        raise AssertionError("Expired clarify test expected clarification_default_applied event")
+    if "clarification_received" in event_names:
+        raise AssertionError("Expired clarify test should not accept a late clarification_received event")
+    return {
+        "request_id": request_id,
+        "final_status": final_snapshot["status"],
+        "default_applied": True,
+    }
+
+
+async def test_time_serialization_uses_utc(base_url: str) -> dict:
+    async with httpx.AsyncClient(timeout=30) as client:
+        submit = await client.post(
+            f"{base_url}/api/v1/search",
+            json={
+                "session_id": "sess_integration_time_utc",
+                "query": "请帮我整理差旅报销规则的变化",
+                "kb_code": "default",
+                "scope_json": None,
+            },
+        )
+        submit.raise_for_status()
+        request_id = submit.json()["data"]["request_id"]
+        snapshot_data = None
+        for _ in range(30):
+            snapshot = await client.get(f"{base_url}/api/v1/search/{request_id}")
+            snapshot.raise_for_status()
+            snapshot_data = snapshot.json()["data"]
+            if snapshot_data["status"] == "WAITING_CLARIFICATION":
+                break
+            await asyncio.sleep(1)
+    if snapshot_data is None or snapshot_data["status"] != "WAITING_CLARIFICATION":
+        raise AssertionError("UTC serialization test timed out waiting for WAITING_CLARIFICATION")
+    expires_at = snapshot_data["clarification_request"]["expires_at"]
+    if not expires_at.endswith("Z"):
+        raise AssertionError(f"clarification expires_at should end with Z, got {expires_at}")
+    events = await read_sse_until_clarify(base_url, request_id)
+    if not events or not events[0]["data"]["ts"].endswith("Z"):
+        raise AssertionError(f"SSE ts should end with Z, got {events}")
+    return {"request_id": request_id, "expires_at": expires_at}
+
+
+async def test_invalid_scope_validation(base_url: str) -> dict:
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{base_url}/api/v1/search",
+            json={
+                "session_id": "sess_bad_scope",
+                "query": "请说明差旅报销规则",
+                "kb_code": "default",
+                "scope_json": {"document_ids": 1},
+            },
+        )
+    if resp.status_code != 422:
+        raise AssertionError(f"Invalid scope_json should return 422, got {resp.status_code}: {resp.text}")
+    return {"status_code": resp.status_code}
+
+
+async def test_duplicate_execution_id_is_ignored() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    subtask_service = build_subtask_graph_service(use_task_engine=True)
+    request_id = build_request_id("sess_integration_dedup", "请说明差旅报销规则")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_dedup",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_dedup",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            claimed = await runtime.run_service.claim_ready_batch(session, task=task, max_parallel=1)
+            if not claimed:
+                raise AssertionError("Idempotency test failed to claim a subtask")
+            execution_id = claimed[0]["execution_id"]
+
+    first_envelope = await subtask_service.execute(execution_id=execution_id)
+    second_envelope = await subtask_service.execute(execution_id=execution_id)
+    if first_envelope is None:
+        raise AssertionError("First subtask execution should produce an envelope")
+    if second_envelope is not None:
+        raise AssertionError("Duplicate subtask execution should be ignored")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.run_service.apply_subtask_result(session, first_envelope)
+            await runtime.evidence_service.flush_staged_payload(session, execution_id)
+
+    async with runtime.session_factory() as session:
+        task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+        if task is None:
+            raise AssertionError("Idempotency test task missing")
+        started_events = list(
+            (
+                await session.scalars(
+                    select(TaskEvent)
+                    .where(TaskEvent.task_id == task.id)
+                    .where(TaskEvent.event_type == "subtask_started")
+                    .order_by(TaskEvent.id.asc())
+                )
+            ).all()
+        )
+    if len(started_events) != 1:
+        raise AssertionError(f"Duplicate subtask execution should emit 1 start event, got {len(started_events)}")
+    return {"execution_id": execution_id, "started_event_count": len(started_events)}
+
+
+async def test_maintenance_recovery_resumes_terminal_plan() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    maintenance_service = build_maintenance_service(use_task_engine=True)
+    request_id = build_request_id("sess_integration_recovery", "请说明差旅报销规则")
+    stale_at = utcnow() - timedelta(minutes=5)
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_recovery",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_recovery",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=stale_at,
+                updated_at=stale_at,
+            )
+            session.add(task)
+            await session.flush()
+            outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            subtasks = list(
+                (
+                    await session.scalars(
+                        select(Subtask)
+                        .where(Subtask.task_id == task.id)
+                        .where(Subtask.plan_version == task.active_plan_version)
+                    )
+                ).all()
+            )
+            for subtask in subtasks:
+                subtask.status = "COMPLETED"
+                subtask.current_execution_id = None
+                subtask.completed_at = stale_at
+                subtask.updated_at = stale_at
+            task.status = "EXECUTING"
+            task.updated_at = stale_at
+
+    summary = await maintenance_service.recover_orchestration_gaps(stall_seconds=0)
+    if summary["resumed"] < 1:
+        raise AssertionError(f"Maintenance recovery expected resumed >= 1, got {summary}")
+
+    final_snapshot = None
+    for _ in range(30):
+        async with runtime.session_factory() as session:
+            final_snapshot = await runtime.progress_service.build_snapshot(session, request_id)
+        if final_snapshot.status in {"COMPLETED", "DEGRADED", "FAILED"}:
+            break
+        await asyncio.sleep(1)
+    if final_snapshot is None or final_snapshot.status not in {"COMPLETED", "DEGRADED"}:
+        raise AssertionError(f"Maintenance recovery expected terminal snapshot, got {getattr(final_snapshot, 'status', None)}")
+    return {"request_id": request_id, "summary": summary, "final_status": final_snapshot.status}
+
+
+async def test_maintenance_recovery_resumes_planning_and_finalizing() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    maintenance_service = build_maintenance_service(use_task_engine=True)
+    planning_request_id = build_request_id("sess_integration_recovery_planning", "请说明差旅报销规则")
+    finalizing_request_id = build_request_id("sess_integration_recovery_finalizing", "请说明差旅报销规则")
+    stale_at = utcnow() - timedelta(minutes=5)
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_recovery_planning",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            planning_task = SearchTask(
+                request_id=planning_request_id,
+                session_id="sess_integration_recovery_planning",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PLANNING",
+                active_plan_version=0,
+                budget_json={"llm_tokens": 4000},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=stale_at,
+                updated_at=stale_at,
+            )
+            session.add(planning_task)
+            await session.flush()
+
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_recovery_finalizing",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            finalizing_task = SearchTask(
+                request_id=finalizing_request_id,
+                session_id="sess_integration_recovery_finalizing",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=stale_at,
+                updated_at=stale_at,
+            )
+            session.add(finalizing_task)
+            await session.flush()
+            outcome = runtime.plan_service.create_plan(
+                original_query=finalizing_task.original_query,
+                resolved_query=finalizing_task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=finalizing_task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            finalizing_subtasks = list(
+                (
+                    await session.scalars(
+                        select(Subtask)
+                        .where(Subtask.task_id == finalizing_task.id)
+                        .where(Subtask.plan_version == finalizing_task.active_plan_version)
+                    )
+                ).all()
+            )
+            for subtask in finalizing_subtasks:
+                subtask.status = "COMPLETED"
+                subtask.current_execution_id = None
+                subtask.completed_at = stale_at
+                subtask.updated_at = stale_at
+            finalizing_task.status = "FINALIZING"
+            finalizing_task.updated_at = stale_at
+
+    summary = await maintenance_service.recover_orchestration_gaps(stall_seconds=0)
+    if summary["resumed"] < 2:
+        raise AssertionError(f"Expected at least 2 resumed tasks for planning/finalizing recovery, got {summary}")
+
+    planning_snapshot = None
+    finalizing_snapshot = None
+    for _ in range(30):
+        async with runtime.session_factory() as session:
+            planning_snapshot = await runtime.progress_service.build_snapshot(session, planning_request_id)
+            finalizing_snapshot = await runtime.progress_service.build_snapshot(session, finalizing_request_id)
+        if (
+            planning_snapshot.status in {"COMPLETED", "DEGRADED", "FAILED", "WAITING_CLARIFICATION"}
+            and finalizing_snapshot.status in {"COMPLETED", "DEGRADED", "FAILED"}
+        ):
+            break
+        await asyncio.sleep(1)
+    if planning_snapshot is None or planning_snapshot.status not in {"COMPLETED", "DEGRADED", "WAITING_CLARIFICATION"}:
+        raise AssertionError(f"Planning recovery expected progress, got {getattr(planning_snapshot, 'status', None)}")
+    if finalizing_snapshot is None or finalizing_snapshot.status not in {"COMPLETED", "DEGRADED"}:
+        raise AssertionError(f"Finalizing recovery expected terminal snapshot, got {getattr(finalizing_snapshot, 'status', None)}")
+    return {
+        "summary": summary,
+        "planning_status": planning_snapshot.status,
+        "finalizing_status": finalizing_snapshot.status,
+    }
+
+
+async def test_background_failure_marks_task_failed() -> dict:
+    service = build_search_command_service(use_task_engine=True)
+    runtime = build_runtime_bundle(use_task_engine=True)
+    request_id = build_request_id("sess_integration_bg_fail", "请说明差旅报销规则")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_bg_fail",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_bg_fail",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            task_id = task.id
+
+    async def broken_runner() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    service._run_in_background(
+        broken_runner,
+        task_id=task_id,
+        task_name="deepsearch.start_search",
+    )
+    await asyncio.sleep(0.3)
+
+    async with runtime.session_factory() as session:
+        snapshot = await runtime.progress_service.build_snapshot(session, request_id)
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+        failed_events = list(
+            (
+                await session.scalars(
+                    select(TaskEvent)
+                    .where(TaskEvent.task_id == task_id)
+                    .where(TaskEvent.event_type == "task_failed")
+                    .order_by(TaskEvent.id.asc())
+                )
+            ).all()
+        )
+    if snapshot.status != "FAILED" or task is None:
+        raise AssertionError(f"Background failure should mark task FAILED, got {snapshot.status}")
+    if task.last_error_code != "BACKGROUND_TASK_FAILED":
+        raise AssertionError(f"Expected BACKGROUND_TASK_FAILED, got {task.last_error_code}")
+    if not failed_events:
+        raise AssertionError("Background failure should append a task_failed event")
+    return {"request_id": request_id, "status": snapshot.status, "event_count": len(failed_events)}
+
+
+async def test_redis_memory_layers() -> dict:
+    service = build_search_command_service(use_task_engine=True)
+    runtime = build_runtime_bundle(use_task_engine=True)
+    accepted = await service.submit_search(
+        SearchSubmitRequest(
+            session_id="sess_integration_redis_layers",
+            query="请帮我整理公司近 90 天差旅报销规则的变化",
+            kb_code="default",
+            scope_json=None,
+        )
+    )
+    request_id = accepted.request_id
+
+    final_snapshot = None
+    for _ in range(60):
+        async with runtime.session_factory() as session:
+            final_snapshot = await runtime.progress_service.build_snapshot(session, request_id)
+        if final_snapshot.status in {"COMPLETED", "DEGRADED", "FAILED"}:
+            break
+        await asyncio.sleep(1)
+    if final_snapshot is None or final_snapshot.status != "COMPLETED":
+        raise AssertionError(f"Redis memory layers test expected COMPLETED, got {getattr(final_snapshot, 'status', None)}")
+
+    async with runtime.session_factory() as session:
+        task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+        if task is None:
+            raise AssertionError("Redis memory layers test task missing")
+        run = await session.scalar(
+            select(SubtaskRun)
+            .where(SubtaskRun.task_id == task.id)
+            .where(SubtaskRun.plan_version == task.active_plan_version)
+            .where(SubtaskRun.data_plane_ref_json.is_not(None))
+            .order_by(SubtaskRun.id.asc())
+            .limit(1)
+        )
+        if run is None:
+            raise AssertionError("Redis memory layers test run missing")
+
+    cached_snapshot = await runtime.progress_service.load_cached_snapshot(request_id)
+    cached_events = await runtime.redis_runtime.load_json_list("task_event_replay", task.request_id)
+    working_memory = await runtime.redis_runtime.load_json("subtask_memory", run.execution_id)
+    evidence_pool = await runtime.redis_runtime.load_json_list("evidence_pool", f"{task.request_id}:{task.active_plan_version}")
+
+    if cached_snapshot is None:
+        raise AssertionError("Expected snapshot hot cache in Redis")
+    if not cached_events:
+        raise AssertionError("Expected event replay hot cache in Redis")
+    if not working_memory:
+        raise AssertionError("Expected L2 subtask working memory in Redis")
+    if not evidence_pool:
+        raise AssertionError("Expected L3 evidence hot pool in Redis")
+    if not (run.data_plane_ref_json or {}).get("l2_working_memory_ref"):
+        raise AssertionError("Expected subtask_runs.data_plane_ref_json to reference L2 memory")
+    return {
+        "request_id": request_id,
+        "event_cache_count": len(cached_events),
+        "evidence_pool_count": len(evidence_pool),
+        "working_memory_execution_id": run.execution_id,
+    }
+
+
+async def test_checkpoint_does_not_mutate_redis_url_env() -> dict:
+    previous = os.environ.get("REDIS_URL")
+    if "REDIS_URL" in os.environ:
+        del os.environ["REDIS_URL"]
+    runtime = build_runtime_bundle(use_task_engine=True)
+    try:
+        await build_global_graph_service_from_bundle(runtime, use_task_engine=True)
+        current = os.environ.get("REDIS_URL")
+        if current != previous:
+            raise AssertionError(f"REDIS_URL should remain unchanged, got before={previous!r}, after={current!r}")
+        return {"redis_url_env": current}
+    finally:
+        await close_runtime_bundle(runtime)
+        if previous is None:
+            os.environ.pop("REDIS_URL", None)
+        else:
+            os.environ["REDIS_URL"] = previous
 
 
 async def test_offline_submit() -> dict:
@@ -369,8 +1014,18 @@ async def main() -> None:
         summary = {
             "http_completion": await test_http_completion(base_url),
             "sse_sequence": await test_sse_sequence(base_url),
+            "sse_invalid_last_event_id": await test_sse_invalid_last_event_id(base_url),
             "clarify_flow": await test_clarify_flow(base_url),
+            "expired_clarify_defaults": await test_expired_clarify_defaults(base_url),
+            "time_serialization_uses_utc": await test_time_serialization_uses_utc(base_url),
+            "invalid_scope_validation": await test_invalid_scope_validation(base_url),
             "offline_submit": await test_offline_submit(),
+            "duplicate_execution_id": await test_duplicate_execution_id_is_ignored(),
+            "maintenance_recovery": await test_maintenance_recovery_resumes_terminal_plan(),
+            "maintenance_recovery_planning_finalizing": await test_maintenance_recovery_resumes_planning_and_finalizing(),
+            "background_failure_marks_task_failed": await test_background_failure_marks_task_failed(),
+            "redis_memory_layers": await test_redis_memory_layers(),
+            "checkpoint_env_isolation": await test_checkpoint_does_not_mutate_redis_url_env(),
             "logs": {
                 "worker": str(worker.log_path),
                 "beat": str(beat.log_path),

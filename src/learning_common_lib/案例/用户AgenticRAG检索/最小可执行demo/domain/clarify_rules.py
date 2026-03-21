@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from .contracts import ClarificationOption, ClarificationRequest
 from .dag_templates import QueryProfile
+from ..application.common import utcnow
 
 
 def maybe_build_preplan_clarification(query: str, profile: QueryProfile) -> ClarificationRequest | None:
@@ -18,7 +19,7 @@ def maybe_build_preplan_clarification(query: str, profile: QueryProfile) -> Clar
             ],
             default_option_id="opt_90d",
             clarification_source="PREPLAN",
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utcnow() + timedelta(minutes=10),
             reason_code="missing_time_range",
         )
     if profile.needs_baseline:
@@ -30,7 +31,7 @@ def maybe_build_preplan_clarification(query: str, profile: QueryProfile) -> Clar
             ],
             default_option_id="opt_latest",
             clarification_source="PREPLAN",
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utcnow() + timedelta(minutes=10),
             reason_code="missing_baseline",
         )
     if "哪些" in query and "部门" in query:
@@ -42,7 +43,7 @@ def maybe_build_preplan_clarification(query: str, profile: QueryProfile) -> Clar
             ],
             default_option_id="opt_all",
             clarification_source="PREPLAN",
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utcnow() + timedelta(minutes=10),
             reason_code="missing_object_scope",
         )
     return None

@@ -8,7 +8,8 @@
 2. `GlobalGraph` 执行 `Intake -> Planner -> Clarify -> Scheduler -> Executor -> StepGate -> Replan / Finalize`
 3. `SubtaskGraph` 执行 `Rewrite -> Retrieval(Vector+ES) -> Evaluate -> Draft -> Verify -> Escalate`
 4. `Celery` 执行 `orchestrate_jobs / subtask_jobs / persist_jobs / maintenance_jobs`
-5. `task_events + SSE` 负责实时进度和 `Last-Event-ID` 回放
+5. Redis 承担 `L2` 子任务工作记忆、`L3-Control` 热缓存、`L3-Evidence` 热池与 SSE 回放辅助
+6. `task_events + SSE` 负责实时进度和 `Last-Event-ID` 回放
 
 ## 环境
 
@@ -25,6 +26,7 @@
 4. DeepSearch 默认 MySQL: `127.0.0.1:3306`，账号 `root`，密码 `123456`
 5. DeepSearch 默认 Redis: `127.0.0.1:6379`，密码 `123456`
 6. DeepSearch 表名前缀 `rag_search_demo`
+7. API / SSE 的时间戳统一以 UTC 输出，格式带尾缀 `Z`
 
 说明：
 
@@ -42,7 +44,7 @@
 3. 上游 demo 已经初始化并 seed 活动知识。
 4. 上游 `.runtime/vector_store`、`.runtime/search_store` 和对象存储布局可读。
 5. 当前最小 demo 只支持 `kb_code=default`。
-6. `scope_json` 目前只支持 `document_ids`、`external_doc_keys`、`version_ids` 三个键，其他过滤条件会被忽略。
+6. `scope_json` 目前只支持 `document_ids`、`external_doc_keys`、`version_ids` 三个键；传入其他键或错误类型会返回 `422`。
 
 ## 当前目录
 
@@ -249,11 +251,20 @@ uv run python offline_submit_demo.py
 2. seed 上游活动知识
 3. 用 `celery` CLI 启动 worker 和 beat
 4. 用 `api.py` 启动 FastAPI
-5. 跑 4 组自动化检查：
+5. 跑 13 组自动化检查：
    - HTTP completion
    - SSE sequence + `Last-Event-ID` replay
+   - SSE invalid `Last-Event-ID`
    - Clarify flow
+   - expired Clarify default fallback
+   - UTC timestamp serialization
+   - invalid `scope_json` validation
    - offline submit
+   - duplicate `execution_id` dedup
+   - maintenance recovery for terminal tasks
+   - maintenance recovery for `PLANNING` / `FINALIZING`
+   - background failure visibility
+   - Redis `L2/L3` memory layers and replay/control hot cache
 6. 输出 JSON 汇总，并在结束时自动关闭进程
 
 运行命令：
@@ -274,8 +285,17 @@ uv run python integration_test_production_stack.py
 {
   "http_completion": {"final_status": "COMPLETED"},
   "sse_sequence": {"event_count": 18},
+  "sse_invalid_last_event_id": {"status_code": 400},
   "clarify_flow": {"final_status": "COMPLETED"},
-  "offline_submit": {"final_status": "COMPLETED"}
+  "expired_clarify_defaults": {"default_applied": true},
+  "time_serialization_uses_utc": {"expires_at": "2026-03-21T03:00:00Z"},
+  "invalid_scope_validation": {"status_code": 422},
+  "offline_submit": {"final_status": "COMPLETED"},
+  "duplicate_execution_id": {"started_event_count": 1},
+  "maintenance_recovery": {"summary": {"resumed": 1}},
+  "maintenance_recovery_planning_finalizing": {"summary": {"resumed": 2}},
+  "background_failure_marks_task_failed": {"status": "FAILED"},
+  "redis_memory_layers": {"event_cache_count": 18}
 }
 ```
 

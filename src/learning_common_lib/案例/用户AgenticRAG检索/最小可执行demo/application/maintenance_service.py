@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..config import get_settings
 from ..domain.enums import QueueName, TaskName
-from .common import json_safe, utcnow, value_of
+from .common import json_safe, parse_utc_datetime, utcnow, value_of
 from .progress_service import ProgressService
 from .session_service import SessionService
 
@@ -141,8 +141,8 @@ class MaintenanceService:
                     expires_at = clarification_request.get("expires_at")
                     if not expires_at:
                         continue
-                    deadline = datetime.fromisoformat(expires_at.replace("Z", "+00:00")).replace(tzinfo=None)
-                    if deadline > utcnow():
+                    deadline = parse_utc_datetime(expires_at)
+                    if deadline is None or deadline > utcnow():
                         continue
                     if control_json.get("clarification_reply_selected"):
                         continue
@@ -197,7 +197,11 @@ class MaintenanceService:
                     (
                         await session.scalars(
                             select(SearchTask)
-                            .where(SearchTask.status.in_(("PENDING", "EXECUTING", "WAITING_SUBTASKS")))
+                            .where(
+                                SearchTask.status.in_(
+                                    ("PENDING", "PLANNING", "EXECUTING", "WAITING_SUBTASKS", "FINALIZING")
+                                )
+                            )
                             .where(SearchTask.updated_at < cutoff)
                             .with_for_update()
                         )
@@ -209,8 +213,20 @@ class MaintenanceService:
                     if status == "PENDING" and int(task.active_plan_version or 0) == 0:
                         start_payloads.append({"task_id": task.id})
                         recovered_start += 1
+                    elif status == "PLANNING":
+                        resume_payloads.append({"task_id": task.id, "entry_action": "planner"})
+                        recovered_resume += 1
+                    elif status == "FINALIZING" and int(task.active_plan_version or 0) > 0:
+                        resume_payloads.append({"task_id": task.id, "entry_action": "finalize"})
+                        recovered_resume += 1
                     elif control_json.get("clarification_reply_selected"):
-                        resume_payloads.append({"task_id": task.id})
+                        clarification_source = control_json.get("clarification_source") or "PREPLAN"
+                        resume_payloads.append(
+                            {
+                                "task_id": task.id,
+                                "entry_action": "planner" if clarification_source == "PREPLAN" else "step_gate",
+                            }
+                        )
                         recovered_resume += 1
                     elif status in {"EXECUTING", "WAITING_SUBTASKS"} and int(task.active_plan_version or 0) > 0:
                         subtasks = list(
@@ -222,9 +238,9 @@ class MaintenanceService:
                                 )
                             ).all()
                         )
-                        states = {str(item.status) for item in subtasks}
+                        states = {value_of(item.status) for item in subtasks}
                         if subtasks and states.issubset({"COMPLETED", "FAILED", "SKIPPED"}):
-                            resume_payloads.append({"task_id": task.id})
+                            resume_payloads.append({"task_id": task.id, "entry_action": "step_gate"})
                             recovered_resume += 1
 
                 for payload in start_payloads:

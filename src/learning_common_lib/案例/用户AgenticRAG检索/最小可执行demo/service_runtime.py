@@ -66,6 +66,7 @@ _CHECKPOINTER: Any | None = None
 class RuntimeBundle:
     session_factory: async_sessionmaker
     session_engine: Any | None
+    checkpoint_adapter: Any | None
     llm: object
     redis_runtime: object
     task_queue: object
@@ -89,7 +90,7 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     llm = build_llm()
     redis_runtime = build_redis_runtime()
     task_queue = build_task_queue()
-    progress_service = ProgressService()
+    progress_service = ProgressService(redis_runtime)
     session_service = SessionService()
     evidence_service = EvidenceService(redis_runtime, llm)
     plan_service = PlanService()
@@ -100,6 +101,7 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     bundle = RuntimeBundle(
         session_factory=session_factory,
         session_engine=session_engine,
+        checkpoint_adapter=None,
         llm=llm,
         redis_runtime=redis_runtime,
         task_queue=task_queue,
@@ -144,6 +146,10 @@ async def build_global_graph_service(*, use_task_engine: bool = False) -> Global
 
 
 async def close_runtime_bundle(bundle: RuntimeBundle) -> None:
+    adapter = getattr(bundle, "checkpoint_adapter", None)
+    if adapter is not None:
+        await adapter.aclose()
+        bundle.checkpoint_adapter = None
     aclose = getattr(bundle.redis_runtime, "aclose", None)
     if callable(aclose):
         await aclose()
@@ -159,8 +165,13 @@ async def build_global_graph_service_from_bundle(
 ) -> GlobalGraphService:
     settings = get_settings()
     checkpointer = None
-    if not settings.celery_eager and not use_task_engine:
-        checkpointer = await _get_checkpointer()
+    if not settings.celery_eager:
+        if use_task_engine:
+            adapter = build_checkpoint_manager()
+            bundle.checkpoint_adapter = adapter
+            checkpointer = await adapter.get_checkpointer()
+        else:
+            checkpointer = await _get_checkpointer()
     return GlobalGraphService(
         bundle.session_factory,
         plan_service=bundle.plan_service,

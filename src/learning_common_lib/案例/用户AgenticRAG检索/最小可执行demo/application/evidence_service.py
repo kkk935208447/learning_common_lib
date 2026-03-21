@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, FinalAnswerInput, KnowledgeChunkHit
 from .common import json_safe, utcnow, value_of
 
@@ -22,6 +22,11 @@ class EvidenceService:
     def __init__(self, redis_runtime, llm) -> None:
         self.redis_runtime = redis_runtime
         self.llm = llm
+        self.settings = get_settings()
+
+    @staticmethod
+    def build_evidence_pool_key(request_id: str, plan_version: int) -> str:
+        return f"{request_id}:{plan_version}"
 
     def build_evidence_drafts(
         self,
@@ -65,6 +70,35 @@ class EvidenceService:
     async def delete_staged_payload(self, execution_id: str) -> None:
         await self.redis_runtime.delete_json("run_payload", execution_id)
 
+    async def stage_subtask_memory(self, execution_id: str, payload: dict[str, Any]) -> None:
+        await self.redis_runtime.save_json(
+            "subtask_memory",
+            execution_id,
+            json_safe(payload),
+            ttl_seconds=self.settings.subtask_memory_ttl_seconds,
+        )
+
+    async def load_subtask_memory(self, execution_id: str) -> dict[str, Any] | None:
+        return await self.redis_runtime.load_json("subtask_memory", execution_id)
+
+    async def append_evidence_pool_items(self, request_id: str, plan_version: int, items: list[dict[str, Any]]) -> None:
+        if not items:
+            return
+        key = self.build_evidence_pool_key(request_id, plan_version)
+        for item in items:
+            await self.redis_runtime.append_json_list(
+                "evidence_pool",
+                key,
+                json_safe(item),
+                ttl_seconds=self.settings.evidence_pool_ttl_seconds,
+                max_items=self.settings.evidence_pool_max_items,
+            )
+
+    async def load_evidence_pool(self, request_id: str, plan_version: int) -> list[dict[str, Any]]:
+        key = self.build_evidence_pool_key(request_id, plan_version)
+        items = await self.redis_runtime.load_json_list("evidence_pool", key)
+        return [json_safe(item) for item in items]
+
     async def flush_staged_payload(self, session: AsyncSession, execution_id: str) -> int:
         payload = await self.load_staged_payload(execution_id)
         if not payload:
@@ -85,6 +119,7 @@ class EvidenceService:
             return 0
 
         inserted = 0
+        inserted_pool_items: list[dict[str, Any]] = []
         for item in payload.get("evidence_cards", []):
             card_uid = f"EC-{execution_id}-{item['chunk_uid']}"
             exists = await session.scalar(select(EvidenceCard).where(EvidenceCard.card_uid == card_uid))
@@ -111,7 +146,7 @@ class EvidenceService:
                         **locator,
                     },
                     reliability_tier="T1",
-                    data_freshness=date.today(),
+                    data_freshness=utcnow().date(),
                     retrieval_score=item["retrieval_score"],
                     confidence=item["confidence"],
                     corroborated_by_json=[],
@@ -121,9 +156,24 @@ class EvidenceService:
                 )
             )
             inserted += 1
+            inserted_pool_items.append(
+                {
+                    "card_uid": card_uid,
+                    "claim": item["claim"],
+                    "source_type": item["source_type"],
+                    "document_id": item["document_id"],
+                    "version_id": item["version_id"],
+                    "chunk_uid": item["chunk_uid"],
+                    "retrieval_score": item["retrieval_score"],
+                    "confidence": item["confidence"],
+                    "claim_type": item.get("claim_type", "DESCRIPTIVE"),
+                    "payload_json": payload_json,
+                }
+            )
 
         run.data_plane_flush_status = "FLUSHED"
         await session.flush()
+        await self.append_evidence_pool_items(payload["request_id"], payload["plan_version"], inserted_pool_items)
         await self.delete_staged_payload(execution_id)
         return inserted
 

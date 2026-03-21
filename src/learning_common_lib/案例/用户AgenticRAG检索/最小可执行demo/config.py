@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     checkpoint_write_prefix: str = "rag_search_demo_cp_writes"
     cache_prefix: str = "rag_search_demo"
     runtime_cache_ttl_seconds: int = 3600
+    snapshot_cache_ttl_seconds: int = 120
+    event_replay_max_items: int = 256
+    subtask_memory_ttl_seconds: int = 3600
+    evidence_pool_ttl_seconds: int = 3600
+    evidence_pool_max_items: int = 128
 
     celery_eager: bool = False
     api_host: str = "127.0.0.1"

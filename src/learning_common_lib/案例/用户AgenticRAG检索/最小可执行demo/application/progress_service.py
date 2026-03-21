@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..config import get_settings
 from ..domain.contracts import (
     ProgressSummary,
     TaskEventData,
@@ -24,6 +25,72 @@ except ImportError:
 
 
 class ProgressService:
+    def __init__(self, redis_runtime=None) -> None:
+        self.redis_runtime = redis_runtime
+        self.settings = get_settings()
+
+    async def _cache_event(self, session: AsyncSession, event: TaskEvent) -> None:
+        if self.redis_runtime is None:
+            return
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == event.task_id))
+        if task is None:
+            return
+        payload = json_safe(event.payload_json or {})
+        cached = TaskEventEnvelope(
+            id=int(event.id),
+            event=event.event_type,
+            data=TaskEventData(
+                request_id=task.request_id,
+                status=payload.get("status", value_of(task.status)),
+                message=payload.get("message", event.event_type),
+                ts=event.created_at,
+                plan_version=event.plan_version,
+                subtask_code=event.subtask_code,
+                execution_id=event.execution_id,
+            ),
+        ).model_dump(mode="json")
+        await self.redis_runtime.append_json_list(
+            "task_event_replay",
+            task.request_id,
+            cached,
+            ttl_seconds=self.settings.runtime_cache_ttl_seconds,
+            max_items=self.settings.event_replay_max_items,
+        )
+        await self.redis_runtime.delete_json("task_snapshot", task.request_id)
+
+    async def load_cached_snapshot(self, request_id: str) -> TaskSnapshotResponse | None:
+        if self.redis_runtime is None:
+            return None
+        raw = await self.redis_runtime.load_json("task_snapshot", request_id)
+        if raw is None:
+            return None
+        return TaskSnapshotResponse.model_validate(raw)
+
+    async def _cache_snapshot(self, snapshot: TaskSnapshotResponse) -> None:
+        if self.redis_runtime is None:
+            return
+        await self.redis_runtime.save_json(
+            "task_snapshot",
+            snapshot.request_id,
+            snapshot.model_dump(mode="json"),
+            ttl_seconds=self.settings.snapshot_cache_ttl_seconds,
+        )
+
+    async def load_cached_events_after(self, request_id: str, after_event_id: int) -> list[TaskEventEnvelope] | None:
+        if self.redis_runtime is None:
+            return None
+        cached_events = await self.redis_runtime.load_json_list("task_event_replay", request_id)
+        if not cached_events:
+            return None
+        first_cached_id = int(cached_events[0]["id"])
+        if after_event_id < first_cached_id - 1:
+            return None
+        return [
+            TaskEventEnvelope.model_validate(item)
+            for item in cached_events
+            if int(item["id"]) > after_event_id
+        ]
+
     async def append_event(
         self,
         session: AsyncSession,
@@ -48,6 +115,7 @@ class ProgressService:
         )
         session.add(event)
         await session.flush()
+        await self._cache_event(session, event)
         return event
 
     async def build_snapshot(self, session: AsyncSession, request_id: str) -> TaskSnapshotResponse:
@@ -76,7 +144,7 @@ class ProgressService:
         )
         clarification_request = control_json.get("clarification_request") if value_of(task.status) == "WAITING_CLARIFICATION" else None
         final_citations = task.final_citations_json if isinstance(task.final_citations_json, list) else control_json.get("final_citations", [])
-        return TaskSnapshotResponse(
+        snapshot = TaskSnapshotResponse(
             request_id=task.request_id,
             status=value_of(task.status),
             waiting_reason=control_json.get("waiting_reason"),
@@ -89,6 +157,8 @@ class ProgressService:
             error_code=task.last_error_code,
             error_message=task.last_error_message,
         )
+        await self._cache_snapshot(snapshot)
+        return snapshot
 
     async def list_events_after(
         self,
@@ -121,9 +191,17 @@ class ProgressService:
                 task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
                 if task is None:
                     break
-                events = await self.list_events_after(session, task_id=task.id, after_event_id=current_id, limit=100)
+                cached_events = await self.load_cached_events_after(request_id, current_id)
+                if cached_events:
+                    events = cached_events
+                else:
+                    events = await self.list_events_after(session, task_id=task.id, after_event_id=current_id, limit=100)
                 if events:
                     for event in events:
+                        if isinstance(event, TaskEventEnvelope):
+                            current_id = int(event.id)
+                            yield event
+                            continue
                         payload = json_safe(event.payload_json or {})
                         current_id = int(event.id)
                         yield TaskEventEnvelope(

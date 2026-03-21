@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import threading
 from typing import Awaitable, Callable
 
 from sqlalchemy import select
@@ -20,6 +23,14 @@ try:
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask
     from 最小可执行demo.ports.task_queue_port import TaskDispatchError
+
+try:
+    from ..infrastructure.celery_adapter import InMemoryTaskQueueAdapter
+except ImportError:
+    from 最小可执行demo.infrastructure.celery_adapter import InMemoryTaskQueueAdapter
+
+
+logger = logging.getLogger(__name__)
 
 
 class SearchCommandService:
@@ -40,6 +51,55 @@ class SearchCommandService:
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
 
+    async def _record_background_failure(self, *, task_id: int, task_name: str, exc: BaseException) -> None:
+        message = f"{task_name} 后台执行失败: {type(exc).__name__}: {exc}"
+        async with self.session_factory() as session:
+            async with session.begin():
+                task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id).with_for_update())
+                if task is None:
+                    return
+                status = value_of(task.status)
+                if status not in {"COMPLETED", "FAILED", "DEGRADED", "WAITING_CLARIFICATION"}:
+                    task.status = "FAILED"
+                task.last_error_code = "BACKGROUND_TASK_FAILED"
+                task.last_error_message = message[:1024]
+                task.control_json = {**json_safe(task.control_json or {}), "waiting_reason": "NONE"}
+                task.updated_at = utcnow()
+                await self.progress_service.append_event(
+                    session,
+                    tenant_id=task.tenant_id,
+                    task_id=task.id,
+                    event_type="task_failed",
+                    payload_json={
+                        "status": value_of(task.status),
+                        "message": message,
+                        "task_name": task_name,
+                        "error_code": "BACKGROUND_TASK_FAILED",
+                    },
+                    plan_version=task.active_plan_version,
+                )
+
+    def _run_in_background(
+        self,
+        runner: Callable[[], Awaitable[dict[str, object]]],
+        *,
+        task_id: int | None,
+        task_name: str,
+    ) -> None:
+        def _thread_entry() -> None:
+            try:
+                asyncio.run(runner())
+            except BaseException as exc:
+                logger.exception("background runner failed for %s task_id=%s", task_name, task_id)
+                if task_id is None:
+                    return
+                try:
+                    asyncio.run(self._record_background_failure(task_id=task_id, task_name=task_name, exc=exc))
+                except BaseException:
+                    logger.exception("failed to persist background runner failure for task_id=%s", task_id)
+
+        threading.Thread(target=_thread_entry, daemon=True).start()
+
     async def _dispatch_or_run_locally(
         self,
         *,
@@ -47,7 +107,12 @@ class SearchCommandService:
         payload: dict[str, object],
         queue_name: str,
         local_runner: Callable[[], Awaitable[dict[str, object]]],
+        background_local_runner: bool = False,
     ) -> None:
+        task_id = int(payload["task_id"]) if "task_id" in payload else None
+        if background_local_runner and isinstance(self.task_queue, InMemoryTaskQueueAdapter):
+            self._run_in_background(local_runner, task_id=task_id, task_name=task_name)
+            return
         try:
             self.task_queue.dispatch(
                 task_name=task_name,
@@ -55,6 +120,9 @@ class SearchCommandService:
                 queue_name=queue_name,
             )
         except TaskDispatchError:
+            if background_local_runner:
+                self._run_in_background(local_runner, task_id=task_id, task_name=task_name)
+                return
             await local_runner()
 
     async def submit_search(self, request: SearchSubmitRequest) -> SearchAcceptedResponse:
@@ -62,6 +130,7 @@ class SearchCommandService:
             raise ValidationError("query 不能为空")
         if request.kb_code and request.kb_code != "default":
             raise ValidationError("当前最小 demo 仅支持 kb_code=default")
+        scope_json = request.scope_json.model_dump(mode="json", exclude_none=True) if request.scope_json is not None else None
 
         request_id = build_request_id(request.session_id, request.query)
         async with self.session_factory() as session:
@@ -79,7 +148,7 @@ class SearchCommandService:
                     tenant_id=self.default_tenant_id,
                     user_id=self.default_user_id,
                     kb_code=request.kb_code or "default",
-                    scope_json=request.scope_json,
+                    scope_json=scope_json or None,
                     original_query=request.query.strip(),
                     resolved_query=request.query.strip(),
                     task_profile_json={},
@@ -122,6 +191,7 @@ class SearchCommandService:
             payload={"task_id": task_id},
             queue_name=QueueName.ORCHESTRATE.value,
             local_runner=lambda: start_search_async(task_id=task_id, drain_eager=False),
+            background_local_runner=True,
         )
 
         return SearchAcceptedResponse(
@@ -132,6 +202,9 @@ class SearchCommandService:
         )
 
     async def get_snapshot(self, request_id: str) -> TaskSnapshotResponse:
+        cached = await self.progress_service.load_cached_snapshot(request_id)
+        if cached is not None:
+            return cached
         async with self.session_factory() as session:
             try:
                 return await self.progress_service.build_snapshot(session, request_id)
@@ -158,18 +231,28 @@ class SearchCommandService:
                     task_id=task.id,
                     selected_option_id=selected_option_id,
                 )
+                clarification_source = latest_request.clarification_source or control_json.get("clarification_source") or "PREPLAN"
+                reply_option_id = selected_option_id
+                reply_origin = "USER"
+                event_type = "clarification_received"
+                event_message = f"收到澄清选项 {selected_option_id}"
+                if self.session_service.is_clarification_expired(latest_request):
+                    reply_option_id = latest_request.default_option_id or selected_option_id
+                    reply_origin = "DEFAULT_APPLIED"
+                    event_type = "clarification_default_applied"
+                    event_message = f"澄清已过期，已应用默认选项 {reply_option_id}"
+
                 await self.session_service.record_clarification_reply(
                     session,
                     session_id=task.session_id,
                     task_id=task.id,
-                    selected_option_id=selected_option_id,
-                    answer_origin="USER",
+                    selected_option_id=reply_option_id,
+                    answer_origin=reply_origin,
                 )
-                clarification_source = latest_request.clarification_source or control_json.get("clarification_source") or "PREPLAN"
                 task.status = "EXECUTING"
                 task.control_json = {
                     **control_json,
-                    "clarification_reply_selected": selected_option_id,
+                    "clarification_reply_selected": reply_option_id,
                     "clarification_source": clarification_source,
                     "waiting_reason": "NONE",
                 }
@@ -178,8 +261,8 @@ class SearchCommandService:
                     session,
                     tenant_id=task.tenant_id,
                     task_id=task_id,
-                    event_type="clarification_received",
-                    payload_json={"status": "EXECUTING", "message": f"收到澄清选项 {selected_option_id}"},
+                    event_type=event_type,
+                    payload_json={"status": "EXECUTING", "message": event_message},
                     plan_version=task.active_plan_version,
                 )
 
@@ -198,5 +281,6 @@ class SearchCommandService:
                 entry_action=entry_action,
                 drain_eager=False,
             ),
+            background_local_runner=True,
         )
         return await self.get_snapshot(request_id)

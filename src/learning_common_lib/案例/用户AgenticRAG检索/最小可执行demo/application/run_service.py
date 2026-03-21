@@ -378,6 +378,16 @@ class RunService:
             "output_text": envelope.output_text,
             "evidence_card_refs": envelope.evidence_card_refs,
         }
+        run.data_plane_ref_json = {
+            "l2_working_memory_ref": {
+                "namespace": "subtask_memory",
+                "key": envelope.execution_id,
+            },
+            "l3_evidence_pool_ref": {
+                "namespace": "evidence_pool",
+                "key": f"{task.request_id}:{envelope.plan_version}",
+            },
+        }
         run.error_code = envelope.error_code
         run.finished_at = utcnow()
 

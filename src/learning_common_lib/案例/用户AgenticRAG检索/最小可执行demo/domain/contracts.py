@@ -2,17 +2,42 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+
+
+def _normalize_utc_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    raise TypeError(f"unsupported datetime value: {value!r}")
+
+
+def _serialize_utc_datetime(value: datetime) -> str:
+    return value.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class SearchScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[int] | None = None
+    external_doc_keys: list[str] | None = None
+    version_ids: list[int] | None = None
 
 
 class SearchSubmitRequest(BaseModel):
-    session_id: str
+    session_id: str = Field(min_length=1, max_length=64)
     query: str
-    kb_code: str = "default"
-    scope_json: dict[str, Any] | None = None
+    kb_code: str = Field(default="default", min_length=1, max_length=64)
+    scope_json: SearchScope | None = None
 
 
 class SearchAcceptedResponse(BaseModel):
@@ -36,9 +61,25 @@ class ClarificationRequest(BaseModel):
     expires_at: datetime
     reason_code: str
 
+    @field_validator("expires_at", mode="before")
+    @classmethod
+    def normalize_expires_at(cls, value: Any) -> datetime:
+        return _normalize_utc_datetime(value)
+
+    @field_serializer("expires_at")
+    def serialize_expires_at(self, value: datetime) -> str:
+        return _serialize_utc_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_default_option(self) -> "ClarificationRequest":
+        option_ids = {option.id for option in self.options}
+        if self.default_option_id not in option_ids:
+            raise ValueError("default_option_id 必须存在于 options 中")
+        return self
+
 
 class ClarificationAnswerRequest(BaseModel):
-    selected_option_id: str
+    selected_option_id: str = Field(min_length=1, max_length=64)
 
 
 ClarificationSubmitRequest = ClarificationAnswerRequest
@@ -133,6 +174,15 @@ class TaskEventData(BaseModel):
     plan_version: int | None = None
     subtask_code: str | None = None
     execution_id: str | None = None
+
+    @field_validator("ts", mode="before")
+    @classmethod
+    def normalize_ts(cls, value: Any) -> datetime:
+        return _normalize_utc_datetime(value)
+
+    @field_serializer("ts")
+    def serialize_ts(self, value: datetime) -> str:
+        return _serialize_utc_datetime(value)
 
 
 class TaskEventEnvelope(BaseModel):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -289,7 +289,7 @@ class GlobalGraphService:
                     ],
                     default_option_id="opt_all",
                     clarification_source="STEP_GATE",
-                    expires_at=datetime.utcnow() + timedelta(minutes=10),
+                    expires_at=utcnow() + timedelta(minutes=10),
                     reason_code="postexec_gap",
                 ).model_dump(mode="json")
             clarification = ClarificationRequest.model_validate(raw)
@@ -401,7 +401,7 @@ class GlobalGraphService:
                     ],
                     default_option_id="opt_change",
                     clarification_source="STEP_GATE",
-                    expires_at=datetime.utcnow() + timedelta(minutes=10),
+                    expires_at=utcnow() + timedelta(minutes=10),
                     reason_code="postexec_gap",
                 ).model_dump(mode="json")
                 task.control_json = control_json

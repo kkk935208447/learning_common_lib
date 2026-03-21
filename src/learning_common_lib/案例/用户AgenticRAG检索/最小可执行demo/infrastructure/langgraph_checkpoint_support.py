@@ -10,6 +10,7 @@ from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.redis.aio import AsyncKeyRegistry
+from redis.asyncio import Redis as AsyncRedis
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class CheckpointManager:
 
     async def _reuse_existing_indexes(self, saver_cls: type[Any]) -> Any:
         saver = saver_cls(
-            redis_url=self._redis_url,
+            redis_client=AsyncRedis.from_url(self._redis_url, decode_responses=False),
             checkpoint_prefix=self._settings.checkpoint_prefix,
             checkpoint_write_prefix=self._settings.checkpoint_write_prefix,
         )
@@ -180,8 +181,9 @@ class CheckpointManager:
             try:
                 from langgraph.checkpoint.redis.aio import AsyncRedisSaver  # type: ignore[import-untyped]
 
+                redis_client = AsyncRedis.from_url(self._redis_url, decode_responses=False)
                 self._checkpointer_cm = AsyncRedisSaver.from_conn_string(
-                    self._redis_url,
+                    redis_client=redis_client,
                     checkpoint_prefix=self._settings.checkpoint_prefix,
                     checkpoint_write_prefix=self._settings.checkpoint_write_prefix,
                 )
