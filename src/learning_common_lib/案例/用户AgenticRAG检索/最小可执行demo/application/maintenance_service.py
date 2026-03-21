@@ -14,10 +14,10 @@ from .progress_service import ProgressService
 from .session_service import SessionService
 
 try:
-    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
+    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskEvent
     from ..ports.task_queue_port import TaskDispatchError
 except ImportError:
-    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
+    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskEvent
     from 最小可执行demo.ports.task_queue_port import TaskDispatchError
 
 
@@ -30,12 +30,14 @@ class MaintenanceService:
         progress_service: ProgressService,
         session_service: SessionService,
         redis_runtime,
+        evidence_service,
     ) -> None:
         self.session_factory = session_factory
         self.task_queue = task_queue
         self.progress_service = progress_service
         self.session_service = session_service
         self.redis_runtime = redis_runtime
+        self.evidence_service = evidence_service
 
     async def _dispatch_or_resume(self, payload: dict[str, object]) -> None:
         try:
@@ -186,6 +188,7 @@ class MaintenanceService:
 
     async def recover_orchestration_gaps(self, stall_seconds: int | None = None) -> dict[str, int]:
         cutoff = utcnow() - timedelta(seconds=stall_seconds or max(15, get_settings().maintenance_scan_seconds * 2))
+        redispatched = await self.recover_dispatch_gaps(stall_seconds=stall_seconds)
         start_payloads: list[dict[str, object]] = []
         resume_payloads: list[dict[str, object]] = []
         recovered_start = 0
@@ -274,13 +277,142 @@ class MaintenanceService:
             await self._dispatch_or_start(payload)
         for payload in resume_payloads:
             await self._dispatch_or_resume(payload)
-        return {"started": recovered_start, "resumed": recovered_resume}
+        return {"started": recovered_start, "resumed": recovered_resume, "redispatched": redispatched}
 
-    async def rebuild_runtime_cache(self) -> dict[str, str]:
+    async def recover_dispatch_gaps(self, stall_seconds: int | None = None) -> int:
+        cutoff = utcnow() - timedelta(seconds=stall_seconds or max(15, get_settings().maintenance_scan_seconds * 2))
+        redeliveries: list[dict[str, object]] = []
+        recovered = 0
+        async with self.session_factory() as session:
+            async with session.begin():
+                runs = list(
+                    (
+                        await session.scalars(
+                            select(SubtaskRun)
+                            .where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED")))
+                            .where(SubtaskRun.created_at < cutoff)
+                            .with_for_update()
+                        )
+                    ).all()
+                )
+                for run in runs:
+                    task = await session.scalar(select(SearchTask).where(SearchTask.id == run.task_id))
+                    subtask = await session.scalar(
+                        select(Subtask)
+                        .where(Subtask.task_id == run.task_id)
+                        .where(Subtask.plan_version == run.plan_version)
+                        .where(Subtask.subtask_code == run.subtask_code)
+                    )
+                    if task is None or subtask is None:
+                        continue
+                    if int(task.active_plan_version or 0) != run.plan_version or subtask.current_execution_id != run.execution_id:
+                        continue
+                    events = list(
+                        (
+                            await session.scalars(
+                                select(TaskEvent)
+                                .where(TaskEvent.execution_id == run.execution_id)
+                                .order_by(TaskEvent.id.asc())
+                            )
+                        ).all()
+                    )
+                    event_types = {event.event_type for event in events}
+                    if "subtask_started" in event_types:
+                        continue
+                    if value_of(run.status) == "CLAIMED" or "subtask_dispatched" not in event_types:
+                        run.status = "DISPATCHED"
+                        await self.progress_service.append_event(
+                            session,
+                            tenant_id=task.tenant_id,
+                            task_id=task.id,
+                            event_type="subtask_dispatched",
+                            payload_json={
+                                "status": value_of(task.status),
+                                "message": f"{run.subtask_code} 由维护任务补发",
+                            },
+                            plan_version=run.plan_version,
+                            subtask_code=run.subtask_code,
+                            execution_id=run.execution_id,
+                        )
+                    redeliveries.append({"execution_id": run.execution_id})
+                    recovered += 1
+        for payload in redeliveries:
+            try:
+                self.task_queue.dispatch(
+                    task_name=TaskName.EXECUTE_SUBTASK.value,
+                    payload=payload,
+                    queue_name=QueueName.SUBTASK.value,
+                )
+            except TaskDispatchError:
+                try:
+                    from ..workers.subtask_tasks import execute_subtask_async
+                except ImportError:
+                    from 最小可执行demo.workers.subtask_tasks import execute_subtask_async
+
+                await execute_subtask_async(**payload)
+        return recovered
+
+    async def rebuild_runtime_cache(self) -> dict[str, int | str]:
+        active_tasks: list[SearchTask] = []
+        async with self.session_factory() as session:
+            active_tasks = list(
+                (
+                    await session.scalars(
+                        select(SearchTask).where(
+                            SearchTask.status.in_(
+                                (
+                                    "PENDING",
+                                    "PLANNING",
+                                    "EXECUTING",
+                                    "WAITING_SUBTASKS",
+                                    "WAITING_CLARIFICATION",
+                                    "FINALIZING",
+                                )
+                            )
+                        )
+                    )
+                ).all()
+            )
+
+        synced = 0
+        primed_events = 0
+        for task in active_tasks:
+            plan_version = int(task.active_plan_version or 0)
+            if plan_version <= 0:
+                continue
+            await self.evidence_service.sync_evidence_pool_from_db(
+                self.session_factory,
+                task_id=task.id,
+                request_id=task.request_id,
+                plan_version=plan_version,
+            )
+            cache_summary = await self.progress_service.prime_task_cache(
+                self.session_factory,
+                request_id=task.request_id,
+            )
+            runtime_cache = getattr(self.progress_service, "runtime_cache", None)
+            if runtime_cache is not None:
+                await runtime_cache.store_global_state(
+                    task.id,
+                    {
+                        "task_id": task.id,
+                        "request_id": task.request_id,
+                        "active_plan_version": plan_version,
+                        "status": value_of(task.status),
+                        "waiting_reason": json_safe(task.control_json or {}).get("waiting_reason", "NONE"),
+                    },
+                )
+            primed_events += int(cache_summary.get("events", 0))
+            synced += 1
+
         await self.redis_runtime.save_json(
             "maintenance",
             "last_rebuild",
             {"ts": utcnow().isoformat()},
             ttl_seconds=600,
         )
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "synced_evidence_pools": synced,
+            "primed_event_caches": primed_events,
+        }

@@ -128,6 +128,3 @@ class InMemoryTaskQueueAdapter(TaskQueuePort):
             )
             for event in events
         ]
-
-
-LocalTaskQueueAdapter = InMemoryTaskQueueAdapter

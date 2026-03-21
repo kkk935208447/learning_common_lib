@@ -37,31 +37,44 @@ async def execute_subtask_async(*, execution_id: str, **_: object) -> dict:
             return {"status": "ignored"}
 
         settings = get_settings()
+        resume_payload = {
+            "task_id": envelope.task_id,
+            "entry_action": "step_gate",
+            "result_envelope": envelope.model_dump(mode="json"),
+        }
+        flush_payload = {"execution_id": execution_id}
         if settings.celery_eager:
-            await flush_data_plane_async(execution_id=execution_id)
-            await resume_search_async(
-                task_id=envelope.task_id,
-                entry_action="step_gate",
-                result_envelope=envelope.model_dump(mode="json"),
-                drain_eager=False,
+            await asyncio.gather(
+                resume_search_async(
+                    task_id=envelope.task_id,
+                    entry_action="step_gate",
+                    result_envelope=envelope.model_dump(mode="json"),
+                    drain_eager=False,
+                ),
+                flush_data_plane_async(execution_id=execution_id),
             )
         else:
-            persist_payload = {
-                "execution_id": execution_id,
-                "resume_payload": {
-                    "task_id": envelope.task_id,
-                    "entry_action": "step_gate",
-                    "result_envelope": envelope.model_dump(mode="json"),
-                },
-            }
-            try:
-                runtime.task_queue.dispatch(
-                    task_name=TaskName.FLUSH_DATA_PLANE.value,
-                    payload=persist_payload,
-                    queue_name=QueueName.PERSIST.value,
-                )
-            except TaskDispatchError:
-                await flush_data_plane_async(**persist_payload)
+            async def _resume_or_run_locally() -> None:
+                try:
+                    runtime.task_queue.dispatch(
+                        task_name=TaskName.RESUME_SEARCH.value,
+                        payload=resume_payload,
+                        queue_name=QueueName.ORCHESTRATE.value,
+                    )
+                except TaskDispatchError:
+                    await resume_search_async(**resume_payload)
+
+            async def _flush_or_run_locally() -> None:
+                try:
+                    runtime.task_queue.dispatch(
+                        task_name=TaskName.FLUSH_DATA_PLANE.value,
+                        payload=flush_payload,
+                        queue_name=QueueName.PERSIST.value,
+                    )
+                except TaskDispatchError:
+                    await flush_data_plane_async(**flush_payload)
+
+            await asyncio.gather(_resume_or_run_locally(), _flush_or_run_locally())
         return envelope.model_dump(mode="json")
     finally:
         await close_runtime_bundle(runtime)

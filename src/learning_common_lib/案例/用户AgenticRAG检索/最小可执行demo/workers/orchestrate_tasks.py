@@ -7,7 +7,6 @@ from typing import Any
 
 try:
     from ..config import get_settings
-    from ..domain.contracts import SubtaskResultEnvelope
     from ..ports.task_queue_port import TaskDispatchError
     from ..service_runtime import (
         build_global_graph_service_from_bundle,
@@ -16,7 +15,6 @@ try:
     )
 except ImportError:
     from 最小可执行demo.config import get_settings
-    from 最小可执行demo.domain.contracts import SubtaskResultEnvelope
     from 最小可执行demo.ports.task_queue_port import TaskDispatchError
     from 最小可执行demo.service_runtime import (
         build_global_graph_service_from_bundle,
@@ -82,7 +80,8 @@ async def start_search_async(*, task_id: int, drain_eager: bool = True) -> dict[
         )
     except TaskDispatchError:
         pass
-    await close_runtime_bundle(runtime)
+    finally:
+        await close_runtime_bundle(runtime)
     return result
 
 
@@ -93,13 +92,6 @@ async def resume_search_async(
     result_envelope: dict[str, Any] | None = None,
     drain_eager: bool = True,
 ) -> dict[str, Any]:
-    if result_envelope is not None and get_settings().celery_eager and drain_eager:
-        runtime = build_runtime_bundle(use_task_engine=True)
-        envelope = SubtaskResultEnvelope.model_validate(result_envelope)
-        async with runtime.session_factory() as session:
-            async with session.begin():
-                await runtime.evidence_service.flush_staged_payload(session, envelope.execution_id)
-
     result = await _run_with_task_lock(
         task_id=task_id,
         entry_action=entry_action,
@@ -129,7 +121,8 @@ async def resume_search_async(
         )
     except TaskDispatchError:
         pass
-    await close_runtime_bundle(runtime)
+    finally:
+        await close_runtime_bundle(runtime)
     return result
 
 

@@ -82,6 +82,3 @@ class FileVectorReader(VectorReadPort):
 
         hits.sort(key=lambda item: item["score"], reverse=True)
         return hits[:top_k]
-
-
-FileVectorReadAdapter = FileVectorReader

@@ -24,72 +24,103 @@ except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask, SessionTurn, Subtask, TaskEvent
 
 
-class ProgressService:
-    def __init__(self, redis_runtime=None) -> None:
+class _RuntimeCache:
+    def __init__(self, redis_runtime) -> None:
         self.redis_runtime = redis_runtime
         self.settings = get_settings()
 
-    async def _cache_event(self, session: AsyncSession, event: TaskEvent) -> None:
-        if self.redis_runtime is None:
-            return
-        task = await session.scalar(select(SearchTask).where(SearchTask.id == event.task_id))
-        if task is None:
-            return
-        payload = json_safe(event.payload_json or {})
-        cached = TaskEventEnvelope(
-            id=int(event.id),
-            event=event.event_type,
-            data=TaskEventData(
-                request_id=task.request_id,
-                status=payload.get("status", value_of(task.status)),
-                message=payload.get("message", event.event_type),
-                ts=event.created_at,
-                plan_version=event.plan_version,
-                subtask_code=event.subtask_code,
-                execution_id=event.execution_id,
-            ),
-        ).model_dump(mode="json")
-        await self.redis_runtime.append_json_list(
-            "task_event_replay",
-            task.request_id,
-            cached,
-            ttl_seconds=self.settings.runtime_cache_ttl_seconds,
-            max_items=self.settings.event_replay_max_items,
-        )
-        await self.redis_runtime.delete_json("task_snapshot", task.request_id)
-
-    async def load_cached_snapshot(self, request_id: str) -> TaskSnapshotResponse | None:
-        if self.redis_runtime is None:
+    async def load_snapshot(self, request_id: str) -> TaskSnapshotResponse | None:
+        payload = await self.redis_runtime.load_json("snapshot_cache", request_id)
+        if not isinstance(payload, dict):
             return None
-        raw = await self.redis_runtime.load_json("task_snapshot", request_id)
-        if raw is None:
-            return None
-        return TaskSnapshotResponse.model_validate(raw)
+        return TaskSnapshotResponse.model_validate(payload)
 
-    async def _cache_snapshot(self, snapshot: TaskSnapshotResponse) -> None:
-        if self.redis_runtime is None:
-            return
+    async def store_snapshot(self, snapshot: TaskSnapshotResponse) -> None:
         await self.redis_runtime.save_json(
-            "task_snapshot",
+            "snapshot_cache",
             snapshot.request_id,
             snapshot.model_dump(mode="json"),
             ttl_seconds=self.settings.snapshot_cache_ttl_seconds,
         )
 
-    async def load_cached_events_after(self, request_id: str, after_event_id: int) -> list[TaskEventEnvelope] | None:
-        if self.redis_runtime is None:
+    async def delete_snapshot(self, request_id: str) -> None:
+        await self.redis_runtime.delete_json("snapshot_cache", request_id)
+
+    async def load_events_after(
+        self,
+        request_id: str,
+        after_event_id: int,
+    ) -> list[TaskEventEnvelope] | None:
+        items = await self.redis_runtime.load_json_list(
+            "event_cache",
+            request_id,
+            limit=self.settings.event_replay_max_items,
+        )
+        if not items:
             return None
-        cached_events = await self.redis_runtime.load_json_list("task_event_replay", request_id)
-        if not cached_events:
+        oldest_id = int(items[0].get("id", 0) or 0)
+        if len(items) >= self.settings.event_replay_max_items and after_event_id < max(oldest_id - 1, 0):
             return None
-        first_cached_id = int(cached_events[0]["id"])
-        if after_event_id < first_cached_id - 1:
-            return None
-        return [
+        events = [
             TaskEventEnvelope.model_validate(item)
-            for item in cached_events
-            if int(item["id"]) > after_event_id
+            for item in items
+            if int(item.get("id", 0)) > after_event_id
         ]
+        return events or None
+
+    async def append_events(self, request_id: str, events: list[TaskEventEnvelope]) -> None:
+        if not events:
+            return
+        for event in events:
+            await self.redis_runtime.append_json_list(
+                "event_cache",
+                request_id,
+                event.model_dump(mode="json"),
+                ttl_seconds=self.settings.runtime_cache_ttl_seconds,
+                max_items=self.settings.event_replay_max_items,
+            )
+
+    async def replace_events(self, request_id: str, events: list[TaskEventEnvelope]) -> None:
+        await self.redis_runtime.delete_json_list("event_cache", request_id)
+        await self.append_events(request_id, events)
+
+    async def store_global_state(self, task_id: int, state: dict) -> None:
+        await self.redis_runtime.save_json(
+            "global_state",
+            str(task_id),
+            state,
+            ttl_seconds=self.settings.runtime_cache_ttl_seconds,
+        )
+
+    async def load_global_state(self, task_id: int) -> dict | None:
+        payload = await self.redis_runtime.load_json("global_state", str(task_id))
+        return payload if isinstance(payload, dict) else None
+
+
+class ProgressService:
+    def __init__(self, redis_runtime=None) -> None:
+        self.redis_runtime = redis_runtime
+        self.settings = get_settings()
+        self.runtime_cache = _RuntimeCache(redis_runtime) if redis_runtime is not None else None
+
+    async def _cache_event(self, session: AsyncSession, event: TaskEvent) -> None:
+        # 控制面事件以 MySQL 为真相源，避免在事务内先写 Redis 产生幽灵事件。
+        return
+
+    async def load_cached_snapshot(self, request_id: str) -> TaskSnapshotResponse | None:
+        if self.runtime_cache is None:
+            return None
+        return await self.runtime_cache.load_snapshot(request_id)
+
+    async def _cache_snapshot(self, snapshot: TaskSnapshotResponse) -> None:
+        if self.runtime_cache is None:
+            return
+        await self.runtime_cache.store_snapshot(snapshot)
+
+    async def load_cached_events_after(self, request_id: str, after_event_id: int) -> list[TaskEventEnvelope] | None:
+        if self.runtime_cache is None:
+            return None
+        return await self.runtime_cache.load_events_after(request_id, after_event_id)
 
     async def append_event(
         self,
@@ -160,6 +191,22 @@ class ProgressService:
         await self._cache_snapshot(snapshot)
         return snapshot
 
+    def _event_to_envelope(self, *, request_id: str, task_status: str, event: TaskEvent) -> TaskEventEnvelope:
+        payload = json_safe(event.payload_json or {})
+        return TaskEventEnvelope(
+            id=int(event.id),
+            event=event.event_type,
+            data=TaskEventData(
+                request_id=request_id,
+                status=payload.get("status", task_status),
+                message=payload.get("message", event.event_type),
+                ts=event.created_at,
+                plan_version=event.plan_version,
+                subtask_code=event.subtask_code,
+                execution_id=event.execution_id,
+            ),
+        )
+
     async def list_events_after(
         self,
         session: AsyncSession,
@@ -195,28 +242,21 @@ class ProgressService:
                 if cached_events:
                     events = cached_events
                 else:
-                    events = await self.list_events_after(session, task_id=task.id, after_event_id=current_id, limit=100)
+                    db_events = await self.list_events_after(session, task_id=task.id, after_event_id=current_id, limit=100)
+                    events = [
+                        self._event_to_envelope(
+                            request_id=request_id,
+                            task_status=value_of(task.status),
+                            event=event,
+                        )
+                        for event in db_events
+                    ]
+                    if self.runtime_cache is not None and events:
+                        await self.runtime_cache.append_events(request_id, events)
                 if events:
                     for event in events:
-                        if isinstance(event, TaskEventEnvelope):
-                            current_id = int(event.id)
-                            yield event
-                            continue
-                        payload = json_safe(event.payload_json or {})
                         current_id = int(event.id)
-                        yield TaskEventEnvelope(
-                            id=int(event.id),
-                            event=event.event_type,
-                            data=TaskEventData(
-                                request_id=request_id,
-                                status=payload.get("status", value_of(task.status)),
-                                message=payload.get("message", event.event_type),
-                                ts=event.created_at,
-                                plan_version=event.plan_version,
-                                subtask_code=event.subtask_code,
-                                execution_id=event.execution_id,
-                            ),
-                        )
+                        yield event
                     if value_of(task.status) in {"COMPLETED", "FAILED", "DEGRADED"}:
                         break
                 else:
@@ -234,6 +274,39 @@ class ProgressService:
                     if value_of(task.status) in {"COMPLETED", "FAILED", "DEGRADED"}:
                         break
             await asyncio.sleep(heartbeat_interval_s)
+
+    async def prime_task_cache(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        request_id: str,
+        event_limit: int | None = None,
+    ) -> dict[str, int]:
+        if self.runtime_cache is None:
+            return {"events": 0}
+        async with session_factory() as session:
+            snapshot = await self.build_snapshot(session, request_id)
+            task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+            if task is None:
+                await self.runtime_cache.delete_snapshot(request_id)
+                return {"events": 0}
+            db_events = await self.list_events_after(
+                session,
+                task_id=task.id,
+                after_event_id=0,
+                limit=event_limit or self.settings.event_replay_max_items,
+            )
+            events = [
+                self._event_to_envelope(
+                    request_id=request_id,
+                    task_status=snapshot.status,
+                    event=event,
+                )
+                for event in db_events
+            ]
+        await self.runtime_cache.store_snapshot(snapshot)
+        await self.runtime_cache.replace_events(request_id, events)
+        return {"events": len(events)}
 
     def format_sse(self, event: TaskEventEnvelope) -> str:
         return (

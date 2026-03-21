@@ -464,22 +464,6 @@ class RunService:
         states = [value_of(item.status) for item in subtasks]
         control_json = json_safe(task.control_json or {})
         latest_escalation = control_json.get("latest_escalation")
-        failed_flushes = int(
-            (
-                await session.scalar(
-                    select(func.count(SubtaskRun.id))
-                    .where(SubtaskRun.task_id == task.id)
-                    .where(SubtaskRun.plan_version == plan_version)
-                    .where(SubtaskRun.data_plane_flush_status == "FAILED")
-                )
-            )
-            or 0
-        )
-        if failed_flushes > 0:
-            task.last_error_code = "DATA_PLANE_FLUSH_FAILED"
-            task.last_error_message = "存在未成功刷入数据面的子任务结果，终止正常收口。"
-            await session.flush()
-            return "fallback"
         if "READY" in states:
             return "schedule"
         if "RUNNING" in states:

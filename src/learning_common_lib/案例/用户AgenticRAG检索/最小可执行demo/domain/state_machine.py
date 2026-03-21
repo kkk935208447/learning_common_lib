@@ -41,16 +41,10 @@ class SubtaskState(TypedDict, total=False):
     route_hints: list[str]
     iteration: int
     max_iterations: int
+    working_memory_ref: dict
     global_evidence_refs: list[str]
-    global_evidence_payloads: list[dict]
-    working_evidence_refs: list[str]
-    working_evidence: list[dict]
-    retrieval_hits: list[dict]
-    evidence_drafts: list[dict]
     eval_summary: dict
-    draft_text: str
     verify_summary: dict
-    filters: dict
     verify_retry_count: int
     status: Literal["COMPLETED", "ESCALATED"]
     next_action: Literal["cache", "rewrite", "retrieve", "retry", "draft", "verify", "complete", "escalate"]

@@ -98,4 +98,3 @@ def build_dag_fingerprint(plan_nodes: list[PlanNodeSpec]) -> str:
         for node in plan_nodes
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-

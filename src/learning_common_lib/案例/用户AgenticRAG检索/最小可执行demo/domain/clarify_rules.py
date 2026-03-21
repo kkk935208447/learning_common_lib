@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from .contracts import ClarificationOption, ClarificationRequest
-from .dag_templates import QueryProfile
+from .dag import QueryProfile
 from ..application.common import utcnow
 
 

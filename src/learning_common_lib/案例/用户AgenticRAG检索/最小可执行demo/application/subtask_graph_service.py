@@ -11,14 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..config import get_settings
 from ..domain.contracts import EvidenceCardDraft, KnowledgeChunkHit, SubtaskResultEnvelope
 from ..domain.scoring import passes_threshold, score_evidence_cards
-from ..domain.state import SubtaskState
+from ..domain.state_machine import SubtaskState
 from .common import json_safe, utcnow, value_of
 from .progress_service import ProgressService
 
 try:
-    from ..infrastructure.models import EvidenceCard, SearchTask, Subtask, SubtaskRun
+    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
 except ImportError:
-    from 最小可执行demo.infrastructure.models import EvidenceCard, SearchTask, Subtask, SubtaskRun
+    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
 
 
 class SubtaskGraphService:
@@ -68,12 +68,35 @@ class SubtaskGraphService:
         graph.add_edge("escalate", END)
         return graph.compile()
 
+    async def _load_memory(self, execution_id: str) -> dict[str, Any]:
+        return json_safe(await self.evidence_service.load_subtask_memory(execution_id) or {})
+
+    async def _update_memory(self, execution_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        payload = await self._load_memory(execution_id)
+        payload.update(json_safe(patch))
+        await self.evidence_service.stage_subtask_memory(execution_id, payload)
+        return payload
+
+    async def _load_global_evidence_payloads(
+        self,
+        *,
+        execution_id: str,
+        plan_version: int,
+        refs: list[str],
+    ) -> list[dict[str, Any]]:
+        if not refs:
+            return []
+        memory = await self._load_memory(execution_id)
+        request_id = str(memory.get("request_id") or "")
+        if not request_id:
+            return []
+        records = await self.evidence_service.load_evidence_pool(request_id, plan_version)
+        by_uid = {str(item.get("card_uid") or ""): json_safe(item) for item in records}
+        return [by_uid[card_uid] for card_uid in refs if card_uid in by_uid]
+
     async def cache_probe_node(self, state: SubtaskState) -> dict[str, Any]:
-        if state.get("task_type") == "REASONING" and state.get("global_evidence_payloads"):
-            return {
-                "next_action": "draft",
-                "evidence_drafts": state.get("global_evidence_payloads", []),
-            }
+        if state.get("task_type") == "REASONING" and state.get("global_evidence_refs"):
+            return {"next_action": "draft"}
         return {"next_action": "rewrite"}
 
     async def rewrite_node(self, state: SubtaskState) -> dict[str, Any]:
@@ -106,25 +129,44 @@ class SubtaskGraphService:
             subtask_code=state["subtask_code"],
             hits=top_hits,
         )
+        await self._update_memory(
+            state["execution_id"],
+            {
+                "retrieval_hits": [hit.model_dump(mode="json") for hit in top_hits],
+                "evidence_drafts": [draft.model_dump(mode="json") for draft in drafts],
+            },
+        )
         return {
-            "retrieval_hits": [hit.model_dump(mode="json") for hit in top_hits],
-            "evidence_drafts": [draft.model_dump(mode="json") for draft in drafts],
+            "working_memory_ref": {
+                "namespace": "subtask_memory",
+                "key": state["execution_id"],
+                "evidence_count": len(drafts),
+            }
         }
 
     async def evaluate_node(self, state: SubtaskState) -> dict[str, Any]:
-        drafts = [EvidenceCardDraft.model_validate(item) for item in state.get("evidence_drafts", [])]
-        return {"eval_summary": score_evidence_cards(drafts)}
+        memory = await self._load_memory(state["execution_id"])
+        drafts = [EvidenceCardDraft.model_validate(item) for item in memory.get("evidence_drafts", [])]
+        eval_summary = score_evidence_cards(drafts)
+        await self._update_memory(state["execution_id"], {"eval_summary": eval_summary})
+        return {"eval_summary": eval_summary}
 
     async def retry_search_node(self, state: SubtaskState) -> dict[str, Any]:
         return {"iteration": int(state.get("iteration", 0)) + 1}
 
     async def draft_node(self, state: SubtaskState) -> dict[str, Any]:
-        drafts = [EvidenceCardDraft.model_validate(item) for item in state.get("evidence_drafts", [])]
-        if state.get("task_type") == "REASONING" and drafts:
+        memory = await self._load_memory(state["execution_id"])
+        drafts = [EvidenceCardDraft.model_validate(item) for item in memory.get("evidence_drafts", [])]
+        if state.get("task_type") == "REASONING":
+            hot_records = await self._load_global_evidence_payloads(
+                execution_id=state["execution_id"],
+                plan_version=state["plan_version"],
+                refs=list(state.get("global_evidence_refs", [])),
+            )
             prompt = {
                 "kind": "reasoning_summary",
                 "query": state["query"],
-                "evidence": [item.model_dump(mode="json") for item in drafts[: get_settings().final_evidence_top_k]],
+                "evidence": hot_records[: get_settings().final_evidence_top_k],
             }
             llm_response = await self.llm.generate(prompt, structured_schema="reasoning_summary")
             structured = llm_response.get("structured_output") or {}
@@ -136,23 +178,25 @@ class SubtaskGraphService:
             llm_response = await self.llm.generate(prompt, structured_schema="draft_answer")
             structured = llm_response.get("structured_output") or {}
             draft_text = structured.get("answer") or llm_response.get("text", "")
-        return {"draft_text": draft_text}
+        await self._update_memory(state["execution_id"], {"draft_text": draft_text})
+        return {}
 
     async def verify_node(self, state: SubtaskState) -> dict[str, Any]:
-        draft_text = state.get("draft_text", "")
-        drafts = state.get("evidence_drafts", [])
+        memory = await self._load_memory(state["execution_id"])
+        draft_text = str(memory.get("draft_text") or "")
+        drafts = list(memory.get("evidence_drafts") or [])
         retry_count = int(state.get("verify_retry_count", 0))
         invalid_sensitive = any(token in draft_text for token in ("身份证", "银行卡", "密码"))
         citations_ok = bool(drafts) or bool(state.get("global_evidence_refs"))
         factual_ok = bool(draft_text.strip()) and citations_ok
-        return {
-            "verify_summary": {
-                "factual_ok": factual_ok,
-                "citations_ok": citations_ok,
-                "sensitive_ok": not invalid_sensitive,
-                "retry_count": retry_count,
-            }
+        verify_summary = {
+            "factual_ok": factual_ok,
+            "citations_ok": citations_ok,
+            "sensitive_ok": not invalid_sensitive,
+            "retry_count": retry_count,
         }
+        await self._update_memory(state["execution_id"], {"verify_summary": verify_summary})
+        return {"verify_summary": verify_summary}
 
     async def retry_answer_node(self, state: SubtaskState) -> dict[str, Any]:
         return {"verify_retry_count": int(state.get("verify_retry_count", 0)) + 1}
@@ -168,7 +212,10 @@ class SubtaskGraphService:
 
     def route_after_evaluate(self, state: SubtaskState) -> str:
         eval_summary = state.get("eval_summary", {})
-        evidence_count = len(state.get("evidence_drafts", []))
+        evidence_count = 0
+        working_memory_ref = state.get("working_memory_ref") or {}
+        if isinstance(working_memory_ref, dict):
+            evidence_count = int(working_memory_ref.get("evidence_count", 0) or 0)
         if passes_threshold(eval_summary, min_sources=2, evidence_count=evidence_count):
             return "draft"
         if int(state.get("iteration", 0)) + 1 < int(state.get("max_iterations", 2)):
@@ -203,6 +250,19 @@ class SubtaskGraphService:
             if subtask.current_execution_id != execution_id or int(task.active_plan_version or 0) != run.plan_version:
                 run.status = "STALE_IGNORED"
                 run.finished_at = utcnow()
+                await self.progress_service.append_event(
+                    session,
+                    tenant_id=task.tenant_id,
+                    task_id=task.id,
+                    event_type="subtask_stale_ignored",
+                    payload_json={
+                        "status": value_of(task.status),
+                        "message": f"{subtask.subtask_code} 旧执行结果已忽略",
+                    },
+                    plan_version=run.plan_version,
+                    subtask_code=subtask.subtask_code,
+                    execution_id=execution_id,
+                )
                 await session.commit()
                 return None
 
@@ -221,41 +281,35 @@ class SubtaskGraphService:
             await session.commit()
 
         global_evidence_refs: list[str] = []
-        global_evidence_payloads: list[dict[str, Any]] = []
         reuse_global_evidence = value_of(subtask.task_type) == "REASONING"
         if reuse_global_evidence:
-            cached_pool = await self.evidence_service.load_evidence_pool(task.request_id, run.plan_version)
-            if cached_pool:
-                global_evidence_refs = [str(item["card_uid"]) for item in cached_pool[:8]]
-                global_evidence_payloads = [json_safe(item) for item in cached_pool[:8]]
-            else:
-                async with self.session_factory() as session:
-                    cards = list(
-                        (
-                            await session.scalars(
-                                select(EvidenceCard)
-                                .where(EvidenceCard.task_id == run.task_id)
-                                .where(EvidenceCard.plan_version == run.plan_version)
-                                .order_by(EvidenceCard.created_at.asc())
-                            )
-                        ).all()
-                    )
-                    global_evidence_refs = [card.card_uid for card in cards[:8]]
-                    global_evidence_payloads = [
-                        {
-                            "claim": card.claim,
-                            "source_type": value_of(card.source_type),
-                            "document_id": card.source_locator_json.get("document_id"),
-                            "version_id": card.source_locator_json.get("version_id"),
-                            "chunk_uid": card.source_locator_json.get("chunk_uid"),
-                            "retrieval_score": float(card.retrieval_score or 0.0),
-                            "confidence": float(card.confidence or 0.0),
-                            "claim_type": value_of(card.claim_type),
-                            "payload_json": card.payload_json or {},
-                            "card_uid": card.card_uid,
-                        }
-                        for card in cards[:8]
-                    ]
+            async with self.session_factory() as session:
+                records = await self.evidence_service.load_plan_evidence_records(
+                    session,
+                    request_id=task.request_id,
+                    task_id=run.task_id,
+                    plan_version=run.plan_version,
+                )
+            global_evidence_refs = [str(item["card_uid"]) for item in records[:8]]
+
+        query = f"{task.resolved_query or task.original_query}。子任务：{subtask.description}"
+        await self.evidence_service.stage_subtask_memory(
+            execution_id,
+            {
+                "request_id": task.request_id,
+                "task_id": run.task_id,
+                "plan_version": run.plan_version,
+                "subtask_code": run.subtask_code,
+                "query": query,
+                "task_type": value_of(subtask.task_type),
+                "retrieval_hits": [],
+                "evidence_drafts": [],
+                "eval_summary": {},
+                "verify_summary": {},
+                "draft_text": "",
+                "global_evidence_refs": global_evidence_refs,
+            },
+        )
 
         result = await self.graph.ainvoke(
             {
@@ -264,20 +318,20 @@ class SubtaskGraphService:
                 "subtask_code": run.subtask_code,
                 "execution_id": execution_id,
                 "task_type": value_of(subtask.task_type),
-                "query": f"{task.resolved_query or task.original_query}。子任务：{subtask.description}",
+                "query": query,
                 "route_hints": subtask.route_hints_json or [],
                 "iteration": 0,
                 "max_iterations": int(subtask.max_iterations or 2),
+                "working_memory_ref": {"namespace": "subtask_memory", "key": execution_id},
                 "global_evidence_refs": global_evidence_refs,
-                "global_evidence_payloads": global_evidence_payloads,
-                "working_evidence_refs": [],
             }
         )
 
+        memory = await self._load_memory(execution_id)
         eval_summary = json_safe(result.get("eval_summary", {}))
         verify_summary = json_safe(result.get("verify_summary", {}))
-        evidence_drafts = json_safe(result.get("evidence_drafts", []))
-        draft_text = result.get("draft_text")
+        evidence_drafts = json_safe(memory.get("evidence_drafts", []))
+        draft_text = str(memory.get("draft_text") or "")
         evidence_card_refs = list(global_evidence_refs) if reuse_global_evidence else [f"EC-{execution_id}-{item['chunk_uid']}" for item in evidence_drafts]
 
         if result.get("status") == "COMPLETED":
@@ -319,23 +373,6 @@ class SubtaskGraphService:
                 },
             )
 
-        await self.evidence_service.stage_subtask_memory(
-            execution_id,
-            {
-                "task_id": run.task_id,
-                "plan_version": run.plan_version,
-                "subtask_code": run.subtask_code,
-                "query": f"{task.resolved_query or task.original_query}。子任务：{subtask.description}",
-                "task_type": value_of(subtask.task_type),
-                "retrieval_hits": json_safe(result.get("retrieval_hits", [])),
-                "evidence_drafts": evidence_drafts,
-                "eval_summary": eval_summary,
-                "verify_summary": verify_summary,
-                "draft_text": draft_text,
-                "global_evidence_refs": global_evidence_refs,
-            },
-        )
-
         await self.evidence_service.stage_payload(
             execution_id,
             {
@@ -348,4 +385,12 @@ class SubtaskGraphService:
                 "evidence_cards": [] if reuse_global_evidence else evidence_drafts,
             },
         )
+        if not reuse_global_evidence and evidence_drafts:
+            await self.evidence_service.promote_evidence_drafts_to_hot_pool(
+                request_id=task.request_id,
+                plan_version=run.plan_version,
+                execution_id=execution_id,
+                subtask_code=run.subtask_code,
+                drafts=evidence_drafts,
+            )
         return envelope

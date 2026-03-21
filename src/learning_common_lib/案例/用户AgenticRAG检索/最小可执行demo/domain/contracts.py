@@ -149,7 +149,7 @@ class KnowledgeChunkHit(BaseModel):
 class EvidenceCardDraft(BaseModel):
     claim: str
     source_type: str
-    document_id: int
+    document_id: int | None = None
     version_id: int
     chunk_uid: str
     retrieval_score: float

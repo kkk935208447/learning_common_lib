@@ -28,6 +28,12 @@ try:
     from .application.session_service import SessionService
     from .application.subtask_graph_service import SubtaskGraphService
     from .application.maintenance_service import MaintenanceService
+    from .ports.knowledge_projection_port import KnowledgeProjectionReadPort
+    from .ports.llm_port import LLMPort
+    from .ports.search_read_port import SearchReadPort
+    from .ports.task_queue_port import TaskQueuePort
+    from .ports.vector_read_port import VectorReadPort
+    from .infrastructure.redis_runtime import RedisRuntime
 except ImportError:
     import sys
     from pathlib import Path
@@ -55,11 +61,15 @@ except ImportError:
     from 最小可执行demo.application.session_service import SessionService
     from 最小可执行demo.application.subtask_graph_service import SubtaskGraphService
     from 最小可执行demo.application.maintenance_service import MaintenanceService
+    from 最小可执行demo.ports.knowledge_projection_port import KnowledgeProjectionReadPort
+    from 最小可执行demo.ports.llm_port import LLMPort
+    from 最小可执行demo.ports.search_read_port import SearchReadPort
+    from 最小可执行demo.ports.task_queue_port import TaskQueuePort
+    from 最小可执行demo.ports.vector_read_port import VectorReadPort
+    from 最小可执行demo.infrastructure.redis_runtime import RedisRuntime
 
 
 _RUNTIME_BUNDLES: dict[bool, "RuntimeBundle"] = {}
-_CHECKPOINT_ADAPTER: object | None = None
-_CHECKPOINTER: Any | None = None
 
 
 @dataclass(slots=True)
@@ -67,17 +77,17 @@ class RuntimeBundle:
     session_factory: async_sessionmaker
     session_engine: Any | None
     checkpoint_adapter: Any | None
-    llm: object
-    redis_runtime: object
-    task_queue: object
+    llm: LLMPort
+    redis_runtime: RedisRuntime
+    task_queue: TaskQueuePort
     progress_service: ProgressService
     session_service: SessionService
     evidence_service: EvidenceService
     plan_service: PlanService
     run_service: RunService
-    projection_reader: object
-    vector_reader: object
-    search_reader: object
+    projection_reader: KnowledgeProjectionReadPort
+    vector_reader: VectorReadPort
+    search_reader: SearchReadPort
 
 
 def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
@@ -119,25 +129,10 @@ def build_runtime_bundle(*, use_task_engine: bool = False) -> RuntimeBundle:
     return bundle
 
 
-async def _get_checkpointer() -> Any:
-    global _CHECKPOINT_ADAPTER, _CHECKPOINTER
-    if _CHECKPOINTER is not None:
-        return _CHECKPOINTER
-    adapter = build_checkpoint_manager()
-    _CHECKPOINT_ADAPTER = adapter
-    _CHECKPOINTER = await adapter.get_checkpointer()
-    return _CHECKPOINTER
-
-
 async def close_runtime_resources() -> None:
-    global _CHECKPOINT_ADAPTER, _CHECKPOINTER
     for bundle in _RUNTIME_BUNDLES.values():
         await close_runtime_bundle(bundle)
     _RUNTIME_BUNDLES.clear()
-    if _CHECKPOINT_ADAPTER is not None:
-        await _CHECKPOINT_ADAPTER.aclose()
-    _CHECKPOINT_ADAPTER = None
-    _CHECKPOINTER = None
 
 
 async def build_global_graph_service(*, use_task_engine: bool = False) -> GlobalGraphService:
@@ -166,12 +161,9 @@ async def build_global_graph_service_from_bundle(
     settings = get_settings()
     checkpointer = None
     if not settings.celery_eager:
-        if use_task_engine:
-            adapter = build_checkpoint_manager()
-            bundle.checkpoint_adapter = adapter
-            checkpointer = await adapter.get_checkpointer()
-        else:
-            checkpointer = await _get_checkpointer()
+        if bundle.checkpoint_adapter is None:
+            bundle.checkpoint_adapter = build_checkpoint_manager()
+        checkpointer = await bundle.checkpoint_adapter.get_checkpointer()
     return GlobalGraphService(
         bundle.session_factory,
         plan_service=bundle.plan_service,
@@ -229,4 +221,5 @@ def build_maintenance_service_from_bundle(bundle: RuntimeBundle) -> MaintenanceS
         progress_service=bundle.progress_service,
         session_service=bundle.session_service,
         redis_runtime=bundle.redis_runtime,
+        evidence_service=bundle.evidence_service,
     )

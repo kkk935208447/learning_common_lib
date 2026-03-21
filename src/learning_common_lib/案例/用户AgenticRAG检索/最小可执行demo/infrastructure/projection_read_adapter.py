@@ -11,13 +11,13 @@ try:
     from ..domain.enums import SearchTaskStatus
     from ..ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from ..ports.object_storage_port import ObjectStorageReadPort
-    from .repositories import SearchTaskRepository
+    from .models import SearchTask
 except ImportError:
     from 最小可执行demo.db import task_session_scope
     from 最小可执行demo.domain.enums import SearchTaskStatus
     from 最小可执行demo.ports.knowledge_projection_port import ActiveDocumentRef, ActiveScope, KnowledgeProjectionReadPort, ParentDocument
     from 最小可执行demo.ports.object_storage_port import ObjectStorageReadPort
-    from 最小可执行demo.infrastructure.repositories import SearchTaskRepository
+    from 最小可执行demo.infrastructure.models import SearchTask
 
 
 UPSTREAM_DOCUMENTS_TABLE = "rag_min_demo_documents"
@@ -100,8 +100,7 @@ class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
 
     async def build_retrieval_filters(self, task_id: int) -> dict[str, Any]:
         async with task_session_scope() as session:
-            task_repo = SearchTaskRepository(session)
-            task = await task_repo.get_by_id(task_id)
+            task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
             if task is None:
                 return {
                     "kb_code": "default",
@@ -177,6 +176,3 @@ class KnowledgeProjectionReader(KnowledgeProjectionReadPort):
                 "locator": locator,
             },
         }
-
-
-KnowledgeProjectionReadAdapter = KnowledgeProjectionReader

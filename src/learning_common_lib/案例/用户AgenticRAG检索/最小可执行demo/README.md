@@ -8,7 +8,7 @@
 2. `GlobalGraph` 执行 `Intake -> Planner -> Clarify -> Scheduler -> Executor -> StepGate -> Replan / Finalize`
 3. `SubtaskGraph` 执行 `Rewrite -> Retrieval(Vector+ES) -> Evaluate -> Draft -> Verify -> Escalate`
 4. `Celery` 执行 `orchestrate_jobs / subtask_jobs / persist_jobs / maintenance_jobs`
-5. Redis 承担 `L2` 子任务工作记忆、`L3-Control` 热缓存、`L3-Evidence` 热池与 SSE 回放辅助
+5. Redis 承担 checkpoint、`L2` 子任务工作记忆、`L3-Control` 热缓存、`L3-Evidence` 热池与 SSE 回放辅助
 6. `task_events + SSE` 负责实时进度和 `Last-Event-ID` 回放
 
 ## 环境
@@ -31,7 +31,7 @@
 说明：
 
 1. 普通 Redis 也可以运行当前 demo。
-2. 如果 Redis 缺少 RediSearch / Redis Stack 能力，checkpoint 会自动降级，不影响最小链路演示。
+2. 当前 demo 只依赖普通 Redis 的键值与列表能力，不要求 RediSearch / Redis Stack 扩展。
 
 ## 真实前置条件
 
@@ -53,6 +53,8 @@
 ```bash
 cd src/learning_common_lib/案例/用户AgenticRAG检索/最小可执行demo
 ```
+
+阅读源码时可以忽略 `.runtime/`、`__pycache__/` 和 `celerybeat-schedule.db` 这类运行产物，它们不属于教程主线。
 
 ## 快速开始
 
@@ -84,38 +86,42 @@ export UV_CACHE_DIR=/tmp/uv-cache-deepsearch
 
 1. [api.py](./api.py)
 2. [celery_app.py](./celery_app.py)
-3. [worker_main.py](./worker_main.py)
-4. [beat_main.py](./beat_main.py)
-5. [demo_flow.py](./demo_flow.py)
-6. [offline_submit_demo.py](./offline_submit_demo.py)
-7. [client_demo.py](./client_demo.py)
-8. [integration_test_production_stack.py](./integration_test_production_stack.py)
+3. [service_runtime.py](./service_runtime.py)
+4. [demo_flow.py](./demo_flow.py)
+5. [offline_submit_demo.py](./offline_submit_demo.py)
+6. [client_demo.py](./client_demo.py)
+7. [integration_test_production_stack.py](./integration_test_production_stack.py)
 
 ## 代码阅读顺序
 
 如果你是来理解架构，而不是直接启动，建议按下面顺序阅读：
 
-1. `service_runtime.py`
-2. `bootstrap.py`
-3. `domain/contracts.py`
-4. `domain/dag_templates.py`
-5. `domain/clarify_rules.py`
+1. `domain/contracts.py`
+2. `domain/enums.py`
+3. `domain/dag.py`
+4. `domain/clarify_rules.py`
+5. `domain/state_machine.py`
 6. `application/plan_service.py`
-7. `api/routes.py`
-8. `application/search_command_service.py`
-9. `application/run_service.py`
-10. `application/global_graph_service.py`
-11. `application/subtask_graph_service.py`
-12. `application/evidence_service.py`
-13. `workers/orchestrate_tasks.py`
-14. `workers/subtask_tasks.py`
+7. `application/search_command_service.py`
+8. `application/run_service.py`
+9. `application/global_graph_service.py`
+10. `application/subtask_graph_service.py`
+11. `application/evidence_service.py`
+12. `application/progress_service.py`
+13. `application/session_service.py`
+14. `application/maintenance_service.py`
+15. `service_runtime.py`
+16. `api/routes.py`
+17. `workers/orchestrate_tasks.py`
+18. `workers/subtask_tasks.py`
+19. `celery_app.py`
 
 理解建议：
 
-1. 先看 `service_runtime.py + bootstrap.py`，明确依赖是如何组装的。
-2. 再看 `domain/* + plan_service.py`，先建立术语和计划生成的心智模型。
-3. 然后看 `routes.py + search_command_service.py + run_service.py`，理解请求进入和控制面规则。
-4. 最后看 `global_graph_service.py + subtask_graph_service.py + workers/*`，把图编排和异步包装串起来。
+1. 先看 `domain/*`，先建立契约、状态字段和 DAG 结构的心智模型。
+2. 再看 `application/plan_service.py + search_command_service.py + run_service.py`，理解请求进入后如何变成 plan、subtask 和 dispatch。
+3. 然后看 `global_graph_service.py + subtask_graph_service.py + evidence_service.py`，把全局闭环和子任务闭环串起来。
+4. 最后再看 `progress/session/maintenance + service_runtime + workers/*`，理解 SSE、恢复补偿和运行时装配。
 
 ## 破坏性说明
 
@@ -147,24 +153,12 @@ uv run python init_db.py
 
 ## 启动方式
 
-### 方式 1：直接运行 py 文件
+### 方式 1：直接运行 API 入口
 
 启动 API：
 
 ```bash
 DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python api.py
-```
-
-启动 Worker：
-
-```bash
-DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python worker_main.py
-```
-
-启动 Beat：
-
-```bash
-DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python beat_main.py
 ```
 
 ### 方式 2：使用 Celery CLI
@@ -338,7 +332,7 @@ uv run python integration_test_production_stack.py
 2. 非 eager 模式下，`FastAPI + Celery worker + Celery beat + MySQL + Redis` 的组合已联调通过
 3. 非 eager 模式下，HTTP 提交、离线提交、SSE 事件流、`Last-Event-ID` 回放都已跑通
 4. `ST-003` 已不再输出占位文本，而会基于已有 evidence cards 生成结构化 reasoning 汇总
-5. 数据面 flush 与控制面 resume 已做顺序屏障，避免非 eager 下先汇总后落库
+5. 子任务结果已改为“控制面先恢复、数据面异步刷库”，`persist_jobs` 与 `resume_orchestrator` 并行触发
 
 ## 常见失败
 
@@ -354,5 +348,5 @@ uv run python integration_test_production_stack.py
 2. Clarify 只支持单选
 3. `KnowledgeProjectionReader` 当前只支持 `document_ids / external_doc_keys / version_ids`
 4. `FileVectorReader` 与 `FileSearchReader` 仍然是 demo 级实现，不是生产级召回
-5. 当前全局控制面虽然保留了 `GlobalGraph` 边界，但执行推进仍然是受控手工驱动版本，不是完全依赖 checkpoint 恢复的图运行时
+5. checkpoint 当前用于线程级热状态续跑与 Redis 热副本辅助；任务恢复的真相仍然以 MySQL 控制面状态为准
 6. `ST-003` 虽然已经会做结构化汇总，但仍然基于 mock LLM 和 mock scoring，不是生产级推理质量

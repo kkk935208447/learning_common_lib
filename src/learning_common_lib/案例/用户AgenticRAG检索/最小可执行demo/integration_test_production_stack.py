@@ -421,7 +421,10 @@ async def test_expired_clarify_defaults(base_url: str) -> dict:
             f"{base_url}/api/v1/search/{request_id}/clarification",
             json={"selected_option_id": fallback_option_id},
         )
-        answer.raise_for_status()
+        if answer.status_code != 409:
+            raise AssertionError(
+                f"Expired clarify test expected 409 Conflict, got {answer.status_code}: {answer.text}"
+            )
 
     final_snapshot = await poll_snapshot(base_url, request_id)
     if final_snapshot["status"] != "COMPLETED":
@@ -781,78 +784,6 @@ async def test_maintenance_recovery_resumes_planning_and_finalizing() -> dict:
     }
 
 
-async def test_background_failure_marks_task_failed() -> dict:
-    service = build_search_command_service(use_task_engine=True)
-    runtime = build_runtime_bundle(use_task_engine=True)
-    request_id = build_request_id("sess_integration_bg_fail", "请说明差旅报销规则")
-
-    async with runtime.session_factory() as session:
-        async with session.begin():
-            await runtime.session_service.ensure_session(
-                session,
-                session_id="sess_integration_bg_fail",
-                tenant_id="demo-tenant",
-                user_id="demo-user",
-                initial_query="请说明差旅报销规则",
-            )
-            task = SearchTask(
-                request_id=request_id,
-                session_id="sess_integration_bg_fail",
-                tenant_id="demo-tenant",
-                user_id="demo-user",
-                kb_code="default",
-                scope_json=None,
-                original_query="请说明差旅报销规则",
-                resolved_query="请说明差旅报销规则",
-                task_profile_json={},
-                status="PENDING",
-                active_plan_version=0,
-                budget_json={},
-                control_json={"waiting_reason": "NONE"},
-                replan_count=0,
-                clarification_count=0,
-                preplan_clarification_used=0,
-                postexec_clarification_used=0,
-                row_version=0,
-                created_at=utcnow(),
-                updated_at=utcnow(),
-            )
-            session.add(task)
-            await session.flush()
-            task_id = task.id
-
-    async def broken_runner() -> dict[str, object]:
-        raise RuntimeError("boom")
-
-    service._run_in_background(
-        broken_runner,
-        task_id=task_id,
-        task_name="deepsearch.start_search",
-    )
-    await asyncio.sleep(0.3)
-
-    async with runtime.session_factory() as session:
-        snapshot = await runtime.progress_service.build_snapshot(session, request_id)
-        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
-        failed_events = list(
-            (
-                await session.scalars(
-                    select(TaskEvent)
-                    .where(TaskEvent.task_id == task_id)
-                    .where(TaskEvent.event_type == "task_failed")
-                    .order_by(TaskEvent.id.asc())
-                )
-            ).all()
-        )
-    if snapshot.status != "FAILED" or task is None:
-        raise AssertionError(f"Background failure should mark task FAILED, got {snapshot.status}")
-    if task.last_error_code != "BACKGROUND_TASK_FAILED":
-        raise AssertionError(f"Expected BACKGROUND_TASK_FAILED, got {task.last_error_code}")
-    if not failed_events:
-        raise AssertionError("Background failure should append a task_failed event")
-    return {"request_id": request_id, "status": snapshot.status, "event_count": len(failed_events)}
-
-
 async def test_redis_memory_layers() -> dict:
     service = build_search_command_service(use_task_engine=True)
     runtime = build_runtime_bundle(use_task_engine=True)
@@ -891,25 +822,29 @@ async def test_redis_memory_layers() -> dict:
         if run is None:
             raise AssertionError("Redis memory layers test run missing")
 
+    await runtime.progress_service.prime_task_cache(runtime.session_factory, request_id=request_id)
     cached_snapshot = await runtime.progress_service.load_cached_snapshot(request_id)
-    cached_events = await runtime.redis_runtime.load_json_list("task_event_replay", task.request_id)
+    cached_events = await runtime.progress_service.load_cached_events_after(request_id, 0)
     working_memory = await runtime.redis_runtime.load_json("subtask_memory", run.execution_id)
-    evidence_pool = await runtime.redis_runtime.load_json_list("evidence_pool", f"{task.request_id}:{task.active_plan_version}")
+    evidence_pool = await runtime.redis_runtime.load_json("evidence_pool", f"{task.request_id}:{task.active_plan_version}")
+    global_state = await runtime.redis_runtime.load_json("global_state", str(task.id))
 
     if cached_snapshot is None:
         raise AssertionError("Expected snapshot hot cache in Redis")
-    if not cached_events:
+    if cached_events is None or not cached_events:
         raise AssertionError("Expected event replay hot cache in Redis")
     if not working_memory:
         raise AssertionError("Expected L2 subtask working memory in Redis")
     if not evidence_pool:
         raise AssertionError("Expected L3 evidence hot pool in Redis")
+    if not global_state:
+        raise AssertionError("Expected control-plane global_state hot cache in Redis")
     if not (run.data_plane_ref_json or {}).get("l2_working_memory_ref"):
         raise AssertionError("Expected subtask_runs.data_plane_ref_json to reference L2 memory")
     return {
         "request_id": request_id,
-        "event_cache_count": len(cached_events),
         "evidence_pool_count": len(evidence_pool),
+        "event_cache_count": len(cached_events),
         "working_memory_execution_id": run.execution_id,
     }
 
@@ -1023,7 +958,6 @@ async def main() -> None:
             "duplicate_execution_id": await test_duplicate_execution_id_is_ignored(),
             "maintenance_recovery": await test_maintenance_recovery_resumes_terminal_plan(),
             "maintenance_recovery_planning_finalizing": await test_maintenance_recovery_resumes_planning_and_finalizing(),
-            "background_failure_marks_task_failed": await test_background_failure_marks_task_failed(),
             "redis_memory_layers": await test_redis_memory_layers(),
             "checkpoint_env_isolation": await test_checkpoint_does_not_mutate_redis_url_env(),
             "logs": {

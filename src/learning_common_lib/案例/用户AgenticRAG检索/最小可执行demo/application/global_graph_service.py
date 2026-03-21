@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any
 
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..config import get_settings
 from ..domain.clarify_rules import apply_clarification_to_query
 from ..domain.contracts import ClarificationOption, ClarificationRequest
-from ..domain.state import GlobalState
+from ..domain.state_machine import GlobalState
 from .common import json_safe, utcnow, value_of
 
 try:
@@ -82,42 +83,56 @@ class GlobalGraphService:
 
     async def _run_eager_claimed_batch(self, task_id: int) -> None:
         try:
-            from ..service_runtime import build_runtime_bundle, build_subtask_graph_service
+            from ..service_runtime import (
+                build_runtime_bundle,
+                build_subtask_graph_service_from_bundle,
+                close_runtime_bundle,
+            )
             from ..infrastructure.models import SubtaskRun
+            from ..workers.persist_tasks import flush_data_plane_async
         except ImportError:
-            from 最小可执行demo.service_runtime import build_runtime_bundle, build_subtask_graph_service
+            from 最小可执行demo.service_runtime import (
+                build_runtime_bundle,
+                build_subtask_graph_service_from_bundle,
+                close_runtime_bundle,
+            )
             from 最小可执行demo.infrastructure.models import SubtaskRun
+            from 最小可执行demo.workers.persist_tasks import flush_data_plane_async
 
         runtime = build_runtime_bundle(use_task_engine=True)
-        service = build_subtask_graph_service(use_task_engine=True)
-        async with runtime.session_factory() as session:
-            task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
-            if task is None:
-                return
-            plan_version = int(task.active_plan_version or 0)
-            runs = list(
-                (
-                    await session.scalars(
-                        select(SubtaskRun)
-                        .where(SubtaskRun.task_id == task_id)
-                        .where(SubtaskRun.plan_version == plan_version)
-                        .where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED")))
-                        .order_by(SubtaskRun.id.asc())
-                    )
-                ).all()
-            )
+        background_flushes: list[asyncio.Task[dict[str, Any]]] = []
+        try:
+            async with runtime.session_factory() as session:
+                task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+                if task is None:
+                    return
+                plan_version = int(task.active_plan_version or 0)
+                runs = list(
+                    (
+                        await session.scalars(
+                            select(SubtaskRun)
+                            .where(SubtaskRun.task_id == task_id)
+                            .where(SubtaskRun.plan_version == plan_version)
+                            .where(SubtaskRun.status.in_(("CLAIMED", "DISPATCHED")))
+                            .order_by(SubtaskRun.id.asc())
+                        )
+                    ).all()
+                )
 
-        for run in runs:
-            execution_id = run.execution_id
-            envelope = await service.execute(execution_id=execution_id)
-            if envelope is None:
-                continue
-            async with runtime.session_factory() as session:
-                async with session.begin():
-                    await runtime.run_service.apply_subtask_result(session, envelope)
-            async with runtime.session_factory() as session:
-                async with session.begin():
-                    await runtime.evidence_service.flush_staged_payload(session, execution_id)
+            service = build_subtask_graph_service_from_bundle(runtime)
+            for run in runs:
+                execution_id = run.execution_id
+                envelope = await service.execute(execution_id=execution_id)
+                if envelope is None:
+                    continue
+                async with runtime.session_factory() as session:
+                    async with session.begin():
+                        await runtime.run_service.apply_subtask_result(session, envelope)
+                task = asyncio.create_task(flush_data_plane_async(execution_id=execution_id))
+                task.add_done_callback(lambda _: None)
+                background_flushes.append(task)
+        finally:
+            await close_runtime_bundle(runtime)
 
     async def run(
         self,
@@ -134,7 +149,11 @@ class GlobalGraphService:
                 raise ValueError(f"task_id={task_id} 不存在")
             initial_state = self._build_initial_state(task, entry_action=entry_action)
         config = {"configurable": {"thread_id": f"deepsearch-task-{task_id}"}}
-        return await self.graph.ainvoke(initial_state, config=config)
+        result = await self.graph.ainvoke(initial_state, config=config)
+        runtime_cache = getattr(self.progress_service, "runtime_cache", None)
+        if runtime_cache is not None:
+            await runtime_cache.store_global_state(task_id, json_safe(result))
+        return result
 
     def _build_initial_state(self, task: SearchTask, *, entry_action: str | None = None) -> GlobalState:
         control_json = json_safe(task.control_json or {})
