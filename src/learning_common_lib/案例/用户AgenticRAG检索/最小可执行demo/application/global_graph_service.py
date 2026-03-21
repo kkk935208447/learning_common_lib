@@ -18,12 +18,15 @@ from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
-    from ..infrastructure.models import SearchTask, Subtask
+    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
 except ImportError:
-    from 最小可执行demo.infrastructure.models import SearchTask, Subtask
+    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
 
 
 logger = logging.getLogger(__name__)
+
+
+RUN_TERMINAL_STATUSES = {"COMPLETED", "FAILED", "ESCALATED", "STALE_IGNORED"}
 
 
 class GlobalGraphService:
@@ -73,6 +76,34 @@ class GlobalGraphService:
         graph.add_conditional_edges("fallback", self.route_by_action)
         graph.add_edge("output", END)
         return graph.compile(checkpointer=checkpointer)
+
+    async def _terminate_inflight_subtasks(
+        self,
+        session: AsyncSession,
+        *,
+        task: SearchTask,
+        subtasks: list[Subtask],
+        subtask_error_code: str,
+        subtask_error_message: str,
+        run_error_code: str,
+    ) -> None:
+        for item in subtasks:
+            if value_of(item.status) in {"COMPLETED", "FAILED", "SKIPPED"}:
+                continue
+            execution_id = item.current_execution_id
+            item.status = "FAILED"
+            item.last_error_code = subtask_error_code
+            item.last_error_message = subtask_error_message
+            item.current_execution_id = None
+            item.updated_at = utcnow()
+            if execution_id is None:
+                continue
+            run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
+            if run is None or value_of(run.status) in RUN_TERMINAL_STATUSES:
+                continue
+            run.status = "FAILED"
+            run.error_code = run_error_code
+            run.finished_at = utcnow()
 
     async def _apply_result_envelope(self, result_envelope: dict[str, Any]) -> bool:
         try:
@@ -533,31 +564,53 @@ class GlobalGraphService:
                     )
                 ).all()
             )
-            for item in subtasks:
-                if value_of(item.status) not in {"COMPLETED", "FAILED", "SKIPPED"}:
-                    item.status = "FAILED"
-                    item.last_error_code = "FINALIZE_UNFINISHED"
-                    item.last_error_message = "任务在最终收口阶段结束，节点未继续执行。"
+            await self._terminate_inflight_subtasks(
+                session,
+                task=task,
+                subtasks=subtasks,
+                subtask_error_code="FINALIZE_UNFINISHED",
+                subtask_error_message="任务在最终收口阶段结束，节点未继续执行。",
+                run_error_code="FINALIZE_UNFINISHED",
+            )
             assembled = await self.evidence_service.assemble_final_answer(session, task_id=task.id, plan_version=task.active_plan_version)
-            task.final_answer = assembled["answer"]
-            task.status = "DEGRADED" if assembled["coverage_summary"]["uncovered"] else "COMPLETED"
+            uncovered_points = list(assembled["coverage_summary"].get("uncovered") or [])
+            degraded_reason = None
+            next_step = None
+            final_answer = assembled["answer"]
+            if uncovered_points:
+                degraded_reason = f"仍有未覆盖信息点：{'、'.join(str(item) for item in uncovered_points[:4])}"
+                next_step = "建议补充关键信息、缩小检索范围，或补充知识后重试。"
+                if "不确定性说明：" not in final_answer:
+                    final_answer = (
+                        f"{final_answer}\n\n"
+                        f"不确定性说明：{degraded_reason}\n"
+                        f"下一步建议：{next_step}"
+                    )
+                task.status = "DEGRADED"
+                task.last_error_code = "PARTIAL_COVERAGE"
+                task.last_error_message = degraded_reason
+            else:
+                task.status = "COMPLETED"
+                task.last_error_code = None
+                task.last_error_message = None
+            task.final_answer = final_answer
             task.final_citations_json = assembled["citations"]
             task.coverage_summary_json = assembled["coverage_summary"]
             task.completed_at = utcnow()
-            task.last_error_code = None
-            task.last_error_message = None
             task.control_json = {
                 **json_safe(task.control_json or {}),
                 "waiting_reason": "NONE",
                 "final_citations": assembled["citations"],
                 "coverage_summary": assembled["coverage_summary"],
                 "final_input": assembled["final_input"],
+                "degraded_reason": degraded_reason,
+                "next_step": next_step,
             }
             await self.session_service.append_answer_turn(
                 session,
                 session_id=task.session_id,
                 task_id=task.id,
-                answer=assembled["answer"],
+                answer=final_answer,
                 citations=assembled["citations"],
                 coverage_summary=assembled["coverage_summary"],
             )
@@ -583,13 +636,16 @@ class GlobalGraphService:
                             .where(Subtask.task_id == task.id)
                             .where(Subtask.plan_version == task.active_plan_version)
                         )
-                    ).all()
+                ).all()
+            )
+                await self._terminate_inflight_subtasks(
+                    session,
+                    task=task,
+                    subtasks=subtasks,
+                    subtask_error_code="FALLBACK_UNFINISHED",
+                    subtask_error_message="任务进入降级输出，节点未继续执行。",
+                    run_error_code="FALLBACK_TERMINATED",
                 )
-                for item in subtasks:
-                    if value_of(item.status) not in {"COMPLETED", "FAILED", "SKIPPED"}:
-                        item.status = "FAILED"
-                        item.last_error_code = "FALLBACK_UNFINISHED"
-                        item.last_error_message = "任务进入降级输出，节点未继续执行。"
                 coverage_summary = {"covered": [], "uncovered": ["全部任务"]}
                 citations: list[str] = []
                 answer = "当前无法稳定完成全部深搜步骤。"

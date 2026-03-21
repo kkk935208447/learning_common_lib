@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TextIO
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 try:
     from ...application.common import build_request_id, utcnow
@@ -828,6 +828,104 @@ async def test_stale_result_does_not_advance_new_plan() -> dict:
     return {"task_id": task_id, "tail_events": tail_names}
 
 
+async def test_fallback_ignores_late_result_and_staged_payload() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    graph_service = await build_global_graph_service_from_bundle(runtime, use_task_engine=True)
+    subtask_service = build_subtask_graph_service(use_task_engine=True)
+    request_id = build_request_id("sess_integration_fallback_ignore_late", "请说明差旅报销规则")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_fallback_ignore_late",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_fallback_ignore_late",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            claimed = await runtime.run_service.claim_ready_batch(session, task=task, max_parallel=1)
+            if not claimed:
+                raise AssertionError("Fallback late result test failed to claim a subtask")
+            execution_id = claimed[0]["execution_id"]
+            task_id = task.id
+
+    envelope = await subtask_service.execute(execution_id=execution_id)
+    if envelope is None:
+        raise AssertionError("Fallback late result test expected a subtask envelope")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+            if task is None:
+                raise AssertionError("Fallback late result task missing before fallback")
+            task.last_error_code = "FORCED_FALLBACK"
+            task.last_error_message = "为测试晚到结果忽略而强制进入 fallback"
+
+    await graph_service.run(task_id, entry_action="fallback")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            applied = await runtime.run_service.apply_subtask_result(session, envelope)
+            flush_result = await runtime.evidence_service.flush_staged_payload(session, execution_id)
+
+    async with runtime.session_factory() as session:
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+        run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
+        evidence_count = int(
+            (
+                await session.execute(
+                    select(func.count(EvidenceCard.id)).where(EvidenceCard.task_id == task_id)
+                )
+            ).scalar_one()
+        )
+    if applied:
+        raise AssertionError("Fallback late result should not be applied after task enters terminal state")
+    if not flush_result.get("stale"):
+        raise AssertionError(f"Fallback late payload should be rejected, got {flush_result}")
+    if evidence_count != 0:
+        raise AssertionError(f"Fallback late payload should not persist evidence, got count={evidence_count}")
+    if task is None or task.status != "DEGRADED":
+        raise AssertionError(f"Fallback late result should leave task DEGRADED, got {getattr(task, 'status', None)}")
+    if run is None or run.status != "FAILED":
+        raise AssertionError(f"Fallback late result should terminate active run, got {getattr(run, 'status', None)}")
+    return {"request_id": request_id, "run_status": run.status, "flush_stale": bool(flush_result.get("stale"))}
+
+
 async def test_maintenance_recovery_resumes_terminal_plan() -> dict:
     runtime = build_runtime_bundle(use_task_engine=True)
     maintenance_service = build_maintenance_service(use_task_engine=True)
@@ -1114,6 +1212,115 @@ async def test_maintenance_recovery_resumes_ready_tasks() -> dict:
     if final_snapshot is None or final_snapshot.status not in {"COMPLETED", "DEGRADED"}:
         raise AssertionError(f"Ready-task recovery expected terminal progress, got {getattr(final_snapshot, 'status', None)}")
     return {"request_id": request_id, "summary": summary, "final_status": final_snapshot.status}
+
+
+async def test_reaped_run_payload_is_rejected() -> dict:
+    class _NoopQueue:
+        def dispatch(self, task_name: str, payload: dict, queue_name: str, countdown: int | None = None):
+            return None
+
+        def dispatch_batch(self, events: list[dict]):
+            return [None for _ in events]
+
+    runtime = build_runtime_bundle(use_task_engine=True)
+    maintenance_service = build_maintenance_service(use_task_engine=True)
+    maintenance_service.task_queue = _NoopQueue()
+    subtask_service = build_subtask_graph_service(use_task_engine=True)
+    request_id = build_request_id("sess_integration_reap_flush", "请说明差旅报销规则")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_reap_flush",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请说明差旅报销规则",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_reap_flush",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请说明差旅报销规则",
+                resolved_query="请说明差旅报销规则",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            claimed = await runtime.run_service.claim_ready_batch(session, task=task, max_parallel=1)
+            if not claimed:
+                raise AssertionError("Reap flush test failed to claim a subtask")
+            execution_id = claimed[0]["execution_id"]
+            task_id = task.id
+
+    envelope = await subtask_service.execute(execution_id=execution_id)
+    if envelope is None:
+        raise AssertionError("Reap flush test expected a subtask envelope")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id).with_for_update())
+            if run is None:
+                raise AssertionError("Reap flush test run missing before reaper")
+            run.started_at = utcnow() - timedelta(minutes=5)
+
+    reaped = await maintenance_service.reap_stuck_runs(timeout_seconds=0)
+    if reaped < 1:
+        raise AssertionError(f"Reap flush test expected at least one reaped run, got {reaped}")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            flush_result = await runtime.evidence_service.flush_staged_payload(session, execution_id)
+
+    async with runtime.session_factory() as session:
+        run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
+        subtask = await session.scalar(
+            select(Subtask)
+            .where(Subtask.task_id == task_id)
+            .where(Subtask.plan_version == 1)
+            .where(Subtask.subtask_code == "ST-001")
+        )
+        evidence_count = int(
+            (
+                await session.execute(
+                    select(func.count(EvidenceCard.id)).where(EvidenceCard.task_id == task_id)
+                )
+            ).scalar_one()
+        )
+    if not flush_result.get("stale"):
+        raise AssertionError(f"Reaped run payload should be rejected, got {flush_result}")
+    if evidence_count != 0:
+        raise AssertionError(f"Reaped run payload should not persist evidence, got count={evidence_count}")
+    if run is None or run.status != "FAILED":
+        raise AssertionError(f"Reaped run should be FAILED, got {getattr(run, 'status', None)}")
+    if subtask is None or subtask.current_execution_id is not None:
+        raise AssertionError("Reaped run should clear subtask.current_execution_id")
+    return {"request_id": request_id, "reaped": reaped, "flush_stale": bool(flush_result.get("stale"))}
 
 
 async def test_checkpoint_resume_recovery() -> dict:
@@ -1565,6 +1772,122 @@ async def test_fallback_returns_partial_results() -> dict:
     return {"request_id": request_id, "final_citations": snapshot.final_citations}
 
 
+async def test_finalize_degraded_includes_guidance() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    graph_service = await build_global_graph_service_from_bundle(runtime, use_task_engine=True)
+    request_id = build_request_id("sess_integration_finalize_degraded", "请帮我整理公司近 90 天差旅报销规则的变化")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_finalize_degraded",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请帮我整理公司近 90 天差旅报销规则的变化",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_finalize_degraded",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请帮我整理公司近 90 天差旅报销规则的变化",
+                resolved_query="请帮我整理公司近 90 天差旅报销规则的变化",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            task_id = task.id
+            outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=outcome.plan_nodes,
+                dag_fingerprint=outcome.dag_fingerprint,
+            )
+            st001 = await session.scalar(
+                select(Subtask)
+                .where(Subtask.task_id == task.id)
+                .where(Subtask.plan_version == task.active_plan_version)
+                .where(Subtask.subtask_code == "ST-001")
+            )
+            st002 = await session.scalar(
+                select(Subtask)
+                .where(Subtask.task_id == task.id)
+                .where(Subtask.plan_version == task.active_plan_version)
+                .where(Subtask.subtask_code == "ST-002")
+            )
+            if st001 is None or st002 is None:
+                raise AssertionError("Finalize degraded test expected ST-001 and ST-002")
+            st001.status = "COMPLETED"
+            st001.key_findings = "ST-001: 已收集到核心制度变化。"
+            st001.evidence_refs_json = ["EC-finalize-degraded"]
+            st001.completed_at = utcnow()
+            st002.status = "FAILED"
+            st002.last_error_code = "INSUFFICIENT_EVIDENCE"
+            st002.last_error_message = "补充检索后仍缺少足够证据。"
+            session.add(
+                EvidenceCard(
+                    card_uid="EC-finalize-degraded",
+                    tenant_id=task.tenant_id,
+                    task_id=task.id,
+                    plan_version=task.active_plan_version,
+                    produced_by_subtask="ST-001",
+                    claim="一线城市住宿标准由 450 元调整为 500 元。",
+                    claim_type="DESCRIPTIVE",
+                    source_id="1:1:chunk-finalize",
+                    source_type="VECTOR_DB",
+                    source_locator_json={
+                        "kb_code": "default",
+                        "document_id": 1,
+                        "version_id": 1,
+                        "chunk_uid": "chunk-finalize",
+                    },
+                    reliability_tier="T1",
+                    data_freshness=utcnow().date(),
+                    retrieval_score=0.91,
+                    confidence=0.82,
+                    corroborated_by_json=[],
+                    conflicts_with_json=[],
+                    payload_json={},
+                    created_at=utcnow(),
+                )
+            )
+            task.status = "FINALIZING"
+
+    await graph_service.run(task_id, entry_action="finalize")
+
+    async with runtime.session_factory() as session:
+        snapshot = await runtime.progress_service.build_snapshot(session, request_id)
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+    if snapshot.status != "DEGRADED":
+        raise AssertionError(f"Finalize degraded test expected DEGRADED, got {snapshot.status}")
+    if "不确定性说明" not in str(snapshot.final_answer or ""):
+        raise AssertionError(f"Finalize degraded answer should include uncertainty note, got {snapshot.final_answer}")
+    if "下一步建议" not in str(snapshot.final_answer or ""):
+        raise AssertionError(f"Finalize degraded answer should include next step guidance, got {snapshot.final_answer}")
+    if task is None or task.last_error_code != "PARTIAL_COVERAGE":
+        raise AssertionError(f"Finalize degraded test expected PARTIAL_COVERAGE, got {getattr(task, 'last_error_code', None)}")
+    return {"request_id": request_id, "status": snapshot.status, "last_error_code": task.last_error_code}
+
+
 async def test_checkpoint_does_not_mutate_redis_url_env() -> dict:
     previous = os.environ.get("REDIS_URL")
     if "REDIS_URL" in os.environ:
@@ -1628,14 +1951,17 @@ async def run_offline_suite() -> dict[str, dict]:
         "offline_submit": await test_offline_submit(),
         "duplicate_execution_id": await test_duplicate_execution_id_is_ignored(),
         "stale_result_resume": await test_stale_result_does_not_advance_new_plan(),
+        "fallback_late_result_guard": await test_fallback_ignores_late_result_and_staged_payload(),
         "maintenance_recovery": await test_maintenance_recovery_resumes_terminal_plan(),
         "maintenance_recovery_planning_finalizing": await test_maintenance_recovery_resumes_planning_and_finalizing(),
         "maintenance_recovery_ready_tasks": await test_maintenance_recovery_resumes_ready_tasks(),
+        "reaped_run_payload_guard": await test_reaped_run_payload_is_rejected(),
         "checkpoint_resume_recovery": await test_checkpoint_resume_recovery(),
         "redis_memory_layers": await test_redis_memory_layers(),
         "dag_fingerprint_semantics": await test_dag_fingerprint_distinguishes_semantics(),
         "invalid_citation_filtering": await test_final_answer_filters_invalid_citations(),
         "fallback_partial_results": await test_fallback_returns_partial_results(),
+        "finalize_degraded_guidance": await test_finalize_degraded_includes_guidance(),
         "checkpoint_env_isolation": await test_checkpoint_does_not_mutate_redis_url_env(),
     }
 

@@ -20,6 +20,7 @@ except ImportError:
 
 
 TERMINAL_RUN_STATUSES = {"COMPLETED", "FAILED", "ESCALATED", "STALE_IGNORED"}
+TERMINAL_TASK_STATUSES = {"COMPLETED", "FAILED", "DEGRADED"}
 
 
 logger = logging.getLogger(__name__)
@@ -353,6 +354,35 @@ class RunService:
             )
         await session.flush()
 
+    async def _mark_result_ignored(
+        self,
+        session: AsyncSession,
+        *,
+        task: SearchTask,
+        subtask: Subtask,
+        run: SubtaskRun,
+        plan_version: int,
+        subtask_code: str,
+        execution_id: str,
+        message: str,
+    ) -> None:
+        run.status = "STALE_IGNORED"
+        run.finished_at = utcnow()
+        await self.progress_service.append_event(
+            session,
+            tenant_id=task.tenant_id,
+            task_id=task.id,
+            event_type="subtask_stale_ignored",
+            payload_json={
+                "status": value_of(task.status),
+                "message": message,
+            },
+            plan_version=plan_version,
+            subtask_code=subtask_code,
+            execution_id=execution_id,
+        )
+        await session.flush()
+
     async def apply_subtask_result(self, session: AsyncSession, envelope) -> bool:
         run = await session.scalar(
             select(SubtaskRun).where(SubtaskRun.execution_id == envelope.execution_id).with_for_update()
@@ -370,9 +400,20 @@ class RunService:
         if value_of(run.status) in TERMINAL_RUN_STATUSES:
             return False
 
+        if value_of(task.status) in TERMINAL_TASK_STATUSES:
+            await self._mark_result_ignored(
+                session,
+                task=task,
+                subtask=subtask,
+                run=run,
+                plan_version=envelope.plan_version,
+                subtask_code=envelope.subtask_code,
+                execution_id=envelope.execution_id,
+                message=f"{envelope.subtask_code} 晚到执行结果已忽略，任务已处于终态",
+            )
+            return False
+
         if int(task.active_plan_version or 0) != envelope.plan_version or subtask.current_execution_id != envelope.execution_id:
-            run.status = "STALE_IGNORED"
-            run.finished_at = utcnow()
             logger.info(
                 "stale subtask result ignored task_id=%s execution_id=%s active_plan_version=%s envelope_plan_version=%s",
                 task.id,
@@ -380,20 +421,16 @@ class RunService:
                 task.active_plan_version,
                 envelope.plan_version,
             )
-            await self.progress_service.append_event(
+            await self._mark_result_ignored(
                 session,
-                tenant_id=task.tenant_id,
-                task_id=task.id,
-                event_type="subtask_stale_ignored",
-                payload_json={
-                    "status": value_of(task.status),
-                    "message": f"{envelope.subtask_code} 旧执行结果已忽略",
-                },
+                task=task,
+                subtask=subtask,
+                run=run,
                 plan_version=envelope.plan_version,
                 subtask_code=envelope.subtask_code,
                 execution_id=envelope.execution_id,
+                message=f"{envelope.subtask_code} 旧执行结果已忽略",
             )
-            await session.flush()
             return False
 
         run.usage_stats_json = envelope.usage_stats

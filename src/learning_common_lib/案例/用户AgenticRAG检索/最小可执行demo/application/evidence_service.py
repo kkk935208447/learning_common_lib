@@ -272,6 +272,16 @@ class EvidenceService:
             run.data_plane_flush_status = "FAILED"
             await session.flush()
             return {"inserted": 0, "task_id": None, "request_id": None, "plan_version": None}
+        if value_of(run.status) in {"FAILED", "STALE_IGNORED"}:
+            run.data_plane_flush_status = "FAILED"
+            await session.flush()
+            return {
+                "inserted": 0,
+                "task_id": run.task_id,
+                "request_id": payload.get("request_id"),
+                "plan_version": run.plan_version,
+                "stale": True,
+            }
         subtask = await session.scalar(
             select(Subtask)
             .where(Subtask.task_id == run.task_id)
