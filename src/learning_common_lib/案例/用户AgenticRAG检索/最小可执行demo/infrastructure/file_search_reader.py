@@ -75,6 +75,3 @@ class FileSearchReader(SearchReadPort):
 
         hits.sort(key=lambda item: item["score"], reverse=True)
         return hits[:top_k]
-
-
-FileSearchReadAdapter = FileSearchReader

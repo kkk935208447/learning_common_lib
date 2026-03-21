@@ -13,6 +13,7 @@ try:
     from .config import get_settings
     from .db import create_tables, dispose_engine
     from .errors import ConflictError, DemoError, NotFoundError, ValidationError
+    from .service_runtime import close_runtime_resources
 except ImportError:
     import sys
     from pathlib import Path
@@ -29,6 +30,7 @@ except ImportError:
         NotFoundError,
         ValidationError,
     )
+    from 最小可执行demo.service_runtime import close_runtime_resources
 
 
 @asynccontextmanager
@@ -38,6 +40,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await close_runtime_resources()
         await dispose_engine()
 
 

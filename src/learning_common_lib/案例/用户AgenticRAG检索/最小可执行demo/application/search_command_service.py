@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Awaitable, Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,9 +16,10 @@ from .session_service import SessionService
 
 try:
     from ..infrastructure.models import SearchTask
+    from ..ports.task_queue_port import TaskDispatchError
 except ImportError:
     from 最小可执行demo.infrastructure.models import SearchTask
-
+    from 最小可执行demo.ports.task_queue_port import TaskDispatchError
 
 class SearchCommandService:
     def __init__(
@@ -36,9 +39,29 @@ class SearchCommandService:
         self.default_tenant_id = default_tenant_id
         self.default_user_id = default_user_id
 
+    async def _dispatch_or_run_locally(
+        self,
+        *,
+        task_name: str,
+        payload: dict[str, object],
+        queue_name: str,
+        local_runner: Callable[[], Awaitable[dict[str, object]]],
+    ) -> None:
+        try:
+            self.task_queue.dispatch(
+                task_name=task_name,
+                payload=payload,
+                queue_name=queue_name,
+            )
+        except TaskDispatchError:
+            await local_runner()
+
     async def submit_search(self, request: SearchSubmitRequest) -> SearchAcceptedResponse:
         if not request.query.strip():
             raise ValidationError("query 不能为空")
+        if request.kb_code and request.kb_code != "default":
+            raise ValidationError("当前最小 demo 仅支持 kb_code=default")
+        scope_json = request.scope_json.model_dump(mode="json", exclude_none=True) if request.scope_json is not None else None
 
         request_id = build_request_id(request.session_id, request.query)
         async with self.session_factory() as session:
@@ -56,7 +79,7 @@ class SearchCommandService:
                     tenant_id=self.default_tenant_id,
                     user_id=self.default_user_id,
                     kb_code=request.kb_code or "default",
-                    scope_json=request.scope_json,
+                    scope_json=scope_json or None,
                     original_query=request.query.strip(),
                     resolved_query=request.query.strip(),
                     task_profile_json={},
@@ -74,24 +97,32 @@ class SearchCommandService:
                 )
                 session.add(task)
                 await session.flush()
+                task_id = task.id
                 await self.session_service.append_query_turn(
                     session,
                     session_id=request.session_id,
-                    task_id=task.id,
+                    task_id=task_id,
                     query=request.query.strip(),
                 )
                 await self.progress_service.append_event(
                     session,
                     tenant_id=task.tenant_id,
-                    task_id=task.id,
+                    task_id=task_id,
                     event_type="task_submitted",
                     payload_json={"request_id": request_id, "status": "PENDING", "message": "搜索任务已提交"},
                 )
-            self.task_queue.dispatch(
-                task_name=TaskName.START_SEARCH.value,
-                payload={"task_id": task.id},
-                queue_name=QueueName.ORCHESTRATE.value,
-            )
+
+        try:
+            from ..workers.orchestrate_tasks import start_search_async
+        except ImportError:
+            from 最小可执行demo.workers.orchestrate_tasks import start_search_async
+
+        await self._dispatch_or_run_locally(
+            task_name=TaskName.START_SEARCH.value,
+            payload={"task_id": task_id},
+            queue_name=QueueName.ORCHESTRATE.value,
+            local_runner=lambda: start_search_async(task_id=task_id, drain_eager=False),
+        )
 
         return SearchAcceptedResponse(
             request_id=request_id,
@@ -108,9 +139,12 @@ class SearchCommandService:
                 raise NotFoundError(str(exc)) from exc
 
     async def submit_clarification(self, request_id: str, selected_option_id: str) -> TaskSnapshotResponse:
+        expired_conflict = False
         async with self.session_factory() as session:
             async with session.begin():
-                task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
+                task = await session.scalar(
+                    select(SearchTask).where(SearchTask.request_id == request_id).with_for_update()
+                )
                 if task is None:
                     raise NotFoundError(f"request_id={request_id} 不存在")
                 if value_of(task.status) != "WAITING_CLARIFICATION":
@@ -125,32 +159,57 @@ class SearchCommandService:
                     task_id=task.id,
                     selected_option_id=selected_option_id,
                 )
+                clarification_source = latest_request.clarification_source or control_json.get("clarification_source") or "PREPLAN"
+                applied_option_id = selected_option_id
+                applied_origin = "USER"
+                event_type = "clarification_received"
+                event_message = f"收到澄清选项 {selected_option_id}"
+                if self.session_service.is_clarification_expired(latest_request):
+                    applied_option_id = latest_request.default_option_id or selected_option_id
+                    applied_origin = "DEFAULT_APPLIED"
+                    event_type = "clarification_default_applied"
+                    event_message = f"澄清已过期，已应用默认选项 {applied_option_id}"
+                    expired_conflict = True
                 await self.session_service.record_clarification_reply(
                     session,
                     session_id=task.session_id,
                     task_id=task.id,
-                    selected_option_id=selected_option_id,
-                    answer_origin="USER",
+                    selected_option_id=applied_option_id,
+                    answer_origin=applied_origin,
                 )
-                clarification_source = latest_request.clarification_source or control_json.get("clarification_source") or "PREPLAN"
                 task.status = "EXECUTING"
                 task.control_json = {
                     **control_json,
-                    "clarification_reply_selected": selected_option_id,
+                    "clarification_reply_selected": applied_option_id,
                     "clarification_source": clarification_source,
                     "waiting_reason": "NONE",
                 }
+                task_id = task.id
                 await self.progress_service.append_event(
                     session,
                     tenant_id=task.tenant_id,
-                    task_id=task.id,
-                    event_type="clarification_received",
-                    payload_json={"status": "EXECUTING", "message": f"收到澄清选项 {selected_option_id}"},
+                    task_id=task_id,
+                    event_type=event_type,
+                    payload_json={"status": "EXECUTING", "message": event_message},
                     plan_version=task.active_plan_version,
                 )
-            self.task_queue.dispatch(
-                task_name=TaskName.RESUME_SEARCH.value,
-                payload={"task_id": task.id, "entry_action": "planner" if clarification_source == "PREPLAN" else "step_gate"},
-                queue_name=QueueName.ORCHESTRATE.value,
-            )
+
+        entry_action = "planner" if clarification_source == "PREPLAN" else "step_gate"
+        try:
+            from ..workers.orchestrate_tasks import resume_search_async
+        except ImportError:
+            from 最小可执行demo.workers.orchestrate_tasks import resume_search_async
+
+        await self._dispatch_or_run_locally(
+            task_name=TaskName.RESUME_SEARCH.value,
+            payload={"task_id": task_id, "entry_action": entry_action},
+            queue_name=QueueName.ORCHESTRATE.value,
+            local_runner=lambda: resume_search_async(
+                task_id=task_id,
+                entry_action=entry_action,
+                drain_eager=False,
+            ),
+        )
+        if expired_conflict:
+            raise ConflictError("澄清请求已过期，系统已按默认选项继续")
         return await self.get_snapshot(request_id)

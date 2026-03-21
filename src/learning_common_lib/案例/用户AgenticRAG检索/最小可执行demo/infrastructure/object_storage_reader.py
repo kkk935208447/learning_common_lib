@@ -25,6 +25,3 @@ class ObjectStorageReader(ObjectStorageReadPort):
 
     async def exists(self, storage_key: str) -> bool:
         return await self._storage.exists(storage_key)
-
-
-FileObjectStorageReadAdapter = ObjectStorageReader

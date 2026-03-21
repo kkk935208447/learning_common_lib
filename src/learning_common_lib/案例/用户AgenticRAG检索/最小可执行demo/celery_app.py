@@ -10,6 +10,7 @@ try:
     from .workers.maintenance_tasks import (
         apply_clarify_defaults_task,
         reap_stuck_runs_task,
+        recover_orchestration_gaps_task,
         rebuild_runtime_cache_task,
     )
     from .workers.orchestrate_tasks import resume_search_task, start_search_task
@@ -27,6 +28,7 @@ except ImportError:
     from 最小可执行demo.workers.maintenance_tasks import (
         apply_clarify_defaults_task,
         reap_stuck_runs_task,
+        recover_orchestration_gaps_task,
         rebuild_runtime_cache_task,
     )
     from 最小可执行demo.workers.orchestrate_tasks import resume_search_task, start_search_task
@@ -56,6 +58,10 @@ celery_app.conf.update(
             "task": TaskName.APPLY_CLARIFY_DEFAULTS.value,
             "schedule": settings.maintenance_scan_seconds,
         },
+        "deepsearch-recover-orchestration-gaps": {
+            "task": TaskName.RECOVER_ORCHESTRATION_GAPS.value,
+            "schedule": settings.maintenance_scan_seconds,
+        },
         "deepsearch-rebuild-runtime-cache": {
             "task": TaskName.REBUILD_RUNTIME_CACHE.value,
             "schedule": max(settings.maintenance_scan_seconds * 3, 30),
@@ -68,6 +74,7 @@ celery_app.conf.update(
         TaskName.FLUSH_DATA_PLANE.value: {"queue": QueueName.PERSIST.value},
         TaskName.REAP_STUCK_RUNS.value: {"queue": QueueName.MAINTENANCE.value},
         TaskName.APPLY_CLARIFY_DEFAULTS.value: {"queue": QueueName.MAINTENANCE.value},
+        TaskName.RECOVER_ORCHESTRATION_GAPS.value: {"queue": QueueName.MAINTENANCE.value},
         TaskName.REBUILD_RUNTIME_CACHE.value: {"queue": QueueName.MAINTENANCE.value},
     },
 )
@@ -78,4 +85,5 @@ celery_app.task(name=TaskName.EXECUTE_SUBTASK.value, queue=QueueName.SUBTASK.val
 celery_app.task(name=TaskName.FLUSH_DATA_PLANE.value, queue=QueueName.PERSIST.value)(flush_data_plane_task)
 celery_app.task(name=TaskName.REAP_STUCK_RUNS.value, queue=QueueName.MAINTENANCE.value)(reap_stuck_runs_task)
 celery_app.task(name=TaskName.APPLY_CLARIFY_DEFAULTS.value, queue=QueueName.MAINTENANCE.value)(apply_clarify_defaults_task)
+celery_app.task(name=TaskName.RECOVER_ORCHESTRATION_GAPS.value, queue=QueueName.MAINTENANCE.value)(recover_orchestration_gaps_task)
 celery_app.task(name=TaskName.REBUILD_RUNTIME_CACHE.value, queue=QueueName.MAINTENANCE.value)(rebuild_runtime_cache_task)

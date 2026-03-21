@@ -3,12 +3,31 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def normalize_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def parse_utc_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return normalize_utc_datetime(value)
+    if isinstance(value, str):
+        try:
+            return normalize_utc_datetime(datetime.fromisoformat(value.replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None
 
 
 def value_of(value: Any) -> Any:
@@ -30,4 +49,3 @@ def build_request_id(session_id: str, query: str) -> str:
 
 def build_execution_id(task_id: int, plan_version: int, subtask_code: str, attempt_no: int) -> str:
     return f"exec_{task_id}_{plan_version}_{subtask_code}_{attempt_no}"
-

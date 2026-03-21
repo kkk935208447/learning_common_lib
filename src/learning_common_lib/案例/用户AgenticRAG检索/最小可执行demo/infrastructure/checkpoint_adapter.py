@@ -49,6 +49,3 @@ class LangGraphCheckpointAdapter(CheckpointPort):
 
     async def aclose(self) -> None:
         await self._manager.aclose()
-
-
-CheckpointManager = LangGraphCheckpointAdapter

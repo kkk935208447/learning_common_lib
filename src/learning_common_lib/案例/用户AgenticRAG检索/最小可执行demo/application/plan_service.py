@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from ..domain.clarify_rules import maybe_build_preplan_clarification
 from ..domain.contracts import ClarificationRequest, PlanNodeSpec
-from ..domain.dag_templates import QueryProfile, build_dag_fingerprint, build_plan_nodes, detect_query_profile
+from ..domain.dag import QueryProfile, build_dag_fingerprint, build_plan_nodes, detect_query_profile
 
 
 @dataclass(slots=True)

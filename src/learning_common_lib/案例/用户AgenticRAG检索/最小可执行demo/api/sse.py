@@ -28,6 +28,8 @@ def build_sse_response(request_id: str, request: Request, *, last_event_id: int 
             last_event_id=last_event_id,
             heartbeat_interval_s=settings.heartbeat_interval_seconds,
         ):
+            if await request.is_disconnected():
+                break
             yield progress_service.format_sse(event)
 
     return StreamingResponse(

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, Request
 
 try:
     from ..domain.contracts import ClarificationAnswerRequest, SearchSubmitRequest
+    from ..errors import ValidationError
     from ..service_runtime import build_search_command_service
     from .sse import build_sse_response
 except ImportError:
@@ -15,6 +16,7 @@ except ImportError:
         ClarificationAnswerRequest,
         SearchSubmitRequest,
     )
+    from 最小可执行demo.errors import ValidationError
     from 最小可执行demo.service_runtime import (
         build_search_command_service,
     )
@@ -55,7 +57,14 @@ async def stream_events(
     request: Request,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ):
-    parsed_last_id = int(last_event_id or 0)
+    service = build_search_command_service()
+    await service.get_snapshot(request_id)
+    try:
+        parsed_last_id = int(last_event_id or 0)
+    except ValueError as exc:
+        raise ValidationError("Last-Event-ID 必须是非负整数") from exc
+    if parsed_last_id < 0:
+        raise ValidationError("Last-Event-ID 必须是非负整数")
     return build_sse_response(request_id, request, last_event_id=parsed_last_id)
 
 

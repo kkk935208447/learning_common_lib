@@ -35,6 +35,9 @@ class RedisDistributedLock:
         """
         self.client.eval(script, 1, key, token)
 
+    def close(self) -> None:
+        self.client.close()
+
 
 class RedisSessionStore(SessionStorePort):
     """Thin JSON store for session summaries, L2 staging, and runtime cache."""
@@ -65,6 +68,36 @@ class RedisSessionStore(SessionStorePort):
     async def delete_namespace(self, namespace: str, key: str) -> None:
         await self._client.delete(self._key(namespace, key))
 
+    async def load_namespace_list(
+        self,
+        namespace: str,
+        key: str,
+        *,
+        limit: int | None = None,
+    ) -> list[Any]:
+        end = -1 if limit is None else max(limit - 1, 0)
+        raw_items = await self._client.lrange(self._key(namespace, key), 0, end)
+        return [json.loads(item) for item in raw_items]
+
+    async def append_namespace_list(
+        self,
+        namespace: str,
+        key: str,
+        payload: Any,
+        *,
+        ttl_seconds: int | None = None,
+        max_items: int | None = None,
+    ) -> None:
+        redis_key = self._key(namespace, key)
+        ttl = ttl_seconds or self._settings.runtime_cache_ttl_seconds
+        await self._client.rpush(redis_key, json.dumps(payload, ensure_ascii=False))
+        if max_items is not None and max_items > 0:
+            await self._client.ltrim(redis_key, -max_items, -1)
+        await self._client.expire(redis_key, ttl)
+
+    async def delete_namespace_list(self, namespace: str, key: str) -> None:
+        await self._client.delete(self._key(namespace, key))
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -76,17 +109,44 @@ class RedisRuntime:
         self.lock = RedisDistributedLock()
         self.session_store = RedisSessionStore()
 
-    async def load_json(self, namespace: str, key: str) -> dict[str, Any] | None:
+    async def load_json(self, namespace: str, key: str) -> Any:
         return await self.session_store.load_namespace(namespace, key)
 
     async def save_json(
         self,
         namespace: str,
         key: str,
-        payload: dict[str, Any],
+        payload: Any,
         ttl_seconds: int | None = None,
     ) -> None:
         await self.session_store.save_namespace(namespace, key, payload, ttl_seconds=ttl_seconds)
 
     async def delete_json(self, namespace: str, key: str) -> None:
         await self.session_store.delete_namespace(namespace, key)
+
+    async def load_json_list(self, namespace: str, key: str, *, limit: int | None = None) -> list[Any]:
+        return await self.session_store.load_namespace_list(namespace, key, limit=limit)
+
+    async def append_json_list(
+        self,
+        namespace: str,
+        key: str,
+        payload: Any,
+        *,
+        ttl_seconds: int | None = None,
+        max_items: int | None = None,
+    ) -> None:
+        await self.session_store.append_namespace_list(
+            namespace,
+            key,
+            payload,
+            ttl_seconds=ttl_seconds,
+            max_items=max_items,
+        )
+
+    async def delete_json_list(self, namespace: str, key: str) -> None:
+        await self.session_store.delete_namespace_list(namespace, key)
+
+    async def aclose(self) -> None:
+        await self.session_store.aclose()
+        self.lock.close()

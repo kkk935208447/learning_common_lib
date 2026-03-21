@@ -8,21 +8,43 @@
 2. `GlobalGraph` 执行 `Intake -> Planner -> Clarify -> Scheduler -> Executor -> StepGate -> Replan / Finalize`
 3. `SubtaskGraph` 执行 `Rewrite -> Retrieval(Vector+ES) -> Evaluate -> Draft -> Verify -> Escalate`
 4. `Celery` 执行 `orchestrate_jobs / subtask_jobs / persist_jobs / maintenance_jobs`
-5. `task_events + SSE` 负责实时进度和 `Last-Event-ID` 回放
+5. Redis 承担 checkpoint、`L2` 子任务工作记忆、`L3-Control` 热缓存、`L3-Evidence` 热池与 SSE 回放辅助
+6. `task_events + SSE` 负责实时进度和 `Last-Event-ID` 回放
 
 ## 环境
 
 1. Python 3.11
 2. MySQL 8.0+
 3. Redis 7.x
-4. 上游数据库管理 demo 可访问
+4. 同仓库内的上游数据库管理 demo 目录存在，并且其 MySQL / `.runtime` 投影可读
 
 默认配置：
 
 1. DeepSearch 使用 `DEEPSEARCH_DEMO_` 前缀环境变量
 2. 上游数据库管理 demo 使用 `MIN_RAG_` 前缀环境变量
 3. DeepSearch 默认端口 `8092`
-4. DeepSearch 表名前缀 `rag_search_demo`
+4. DeepSearch 默认 MySQL: `127.0.0.1:3306`，账号 `root`，密码 `123456`
+5. DeepSearch 默认 Redis: `127.0.0.1:6379`，密码 `123456`
+6. DeepSearch 表名前缀 `rag_search_demo`
+7. API / SSE 的时间戳统一以 UTC 输出，格式带尾缀 `Z`
+
+说明：
+
+1. 普通 Redis 也可以运行当前 demo。
+2. 当前 demo 只依赖普通 Redis 的键值与列表能力，不要求 RediSearch / Redis Stack 扩展。
+
+## 真实前置条件
+
+这个 demo 不是通过 HTTP 去访问上游数据库管理 demo，而是直接复用它的本地代码和运行产物。
+
+运行前需要满足：
+
+1. `../../实现AgenticRAG数据库管理/最小可执行demo` 目录存在。
+2. DeepSearch 和上游 demo 连接到同一个 MySQL 实例。
+3. 上游 demo 已经初始化并 seed 活动知识。
+4. 上游 `.runtime/vector_store`、`.runtime/search_store` 和对象存储布局可读。
+5. 当前最小 demo 只支持 `kb_code=default`。
+6. `scope_json` 目前只支持 `document_ids`、`external_doc_keys`、`version_ids` 三个键；传入其他键或错误类型会返回 `422`。
 
 ## 当前目录
 
@@ -32,16 +54,82 @@
 cd src/learning_common_lib/案例/用户AgenticRAG检索/最小可执行demo
 ```
 
+阅读源码时可以忽略 `.runtime/`、`__pycache__/` 和 `celerybeat-schedule.db` 这类运行产物，它们不属于教程主线。
+
+## 快速开始
+
+先同步依赖：
+
+```bash
+uv sync
+```
+
+如果你需要覆盖默认连接参数，常见环境变量如下：
+
+```bash
+export DEEPSEARCH_DEMO_MYSQL_HOST=127.0.0.1
+export DEEPSEARCH_DEMO_MYSQL_PORT=3306
+export DEEPSEARCH_DEMO_MYSQL_USER=root
+export DEEPSEARCH_DEMO_MYSQL_PASSWORD=123456
+export DEEPSEARCH_DEMO_REDIS_HOST=127.0.0.1
+export DEEPSEARCH_DEMO_REDIS_PORT=6379
+export DEEPSEARCH_DEMO_REDIS_PASSWORD=123456
+```
+
+如果你在离线或受限网络环境中运行 `uv run`，可以额外指定缓存目录：
+
+```bash
+export UV_CACHE_DIR=/tmp/uv-cache-deepsearch
+```
+
 ## 目录里的关键入口
 
 1. [api.py](./api.py)
 2. [celery_app.py](./celery_app.py)
-3. [worker_main.py](./worker_main.py)
-4. [beat_main.py](./beat_main.py)
-5. [demo_flow.py](./demo_flow.py)
-6. [offline_submit_demo.py](./offline_submit_demo.py)
-7. [client_demo.py](./client_demo.py)
-8. [integration_test_production_stack.py](./integration_test_production_stack.py)
+3. [service_runtime.py](./service_runtime.py)
+4. [demo_flow.py](./demo_flow.py)
+5. [offline_submit_demo.py](./offline_submit_demo.py)
+6. [client_demo.py](./client_demo.py)
+7. [integration_test_production_stack.py](./integration_test_production_stack.py)
+
+## 代码阅读顺序
+
+如果你是来理解架构，而不是直接启动，建议按下面顺序阅读：
+
+1. `domain/contracts.py`
+2. `domain/enums.py`
+3. `domain/dag.py`
+4. `domain/clarify_rules.py`
+5. `domain/state_machine.py`
+6. `application/plan_service.py`
+7. `application/search_command_service.py`
+8. `application/run_service.py`
+9. `application/global_graph_service.py`
+10. `application/subtask_graph_service.py`
+11. `application/evidence_service.py`
+12. `application/progress_service.py`
+13. `application/session_service.py`
+14. `application/maintenance_service.py`
+15. `service_runtime.py`
+16. `api/routes.py`
+17. `workers/orchestrate_tasks.py`
+18. `workers/subtask_tasks.py`
+19. `celery_app.py`
+
+理解建议：
+
+1. 先看 `domain/*`，先建立契约、状态字段和 DAG 结构的心智模型。
+2. 再看 `application/plan_service.py + search_command_service.py + run_service.py`，理解请求进入后如何变成 plan、subtask 和 dispatch。
+3. 然后看 `global_graph_service.py + subtask_graph_service.py + evidence_service.py`，把全局闭环和子任务闭环串起来。
+4. 最后再看 `progress/session/maintenance + service_runtime + workers/*`，理解 SSE、恢复补偿和运行时装配。
+
+## 破坏性说明
+
+下面这些脚本会重建或覆写 demo 数据，不适合在你想保留现有样例数据时直接执行：
+
+1. `init_db.py`
+2. `demo_flow.py`
+3. `integration_test_production_stack.py`
 
 ## 初始化
 
@@ -58,26 +146,19 @@ MIN_RAG_CELERY_EAGER=1 uv run python seed_demo_kb.py
 uv run python init_db.py
 ```
 
+说明：
+
+1. `init_db.py` 会先 `drop_all` 再 `create_all`。
+2. 如果你只想验证 API / worker，不要在已有样例数据上反复执行它。
+
 ## 启动方式
 
-### 方式 1：直接运行 py 文件
+### 方式 1：直接运行 API 入口
 
 启动 API：
 
 ```bash
 DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python api.py
-```
-
-启动 Worker：
-
-```bash
-DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python worker_main.py
-```
-
-启动 Beat：
-
-```bash
-DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run python beat_main.py
 ```
 
 ### 方式 2：使用 Celery CLI
@@ -104,11 +185,16 @@ uv run celery -A celery_app:celery_app purge -f
 
 ### 1. 单进程 eager 演示
 
-这个脚本不依赖外部 worker，适合快速验证从提交到最终汇总的完整链路：
+这个脚本不依赖外部 worker / beat / FastAPI，但仍然依赖 MySQL、Redis 和上游知识库 demo：
 
 ```bash
 uv run python demo_flow.py
 ```
+
+额外说明：
+
+1. 这个脚本会调用 `reset_tables()` 并重新 seed 上游活动知识。
+2. 它更适合联调，不适合作为保留现场数据时的只读演示。
 
 当前预期：
 
@@ -130,6 +216,12 @@ uv run python client_demo.py
 DEEPSEARCH_DEMO_API_PORT=8094 uv run python client_demo.py
 ```
 
+说明：
+
+1. 这个脚本只演示 `submit + immediate snapshot`。
+2. 它不会轮询到终态，也不会演示 SSE。
+3. 如果快照里看到 `PENDING / PLANNING / EXECUTING`，这通常是正常现象，不表示 API 异常。
+
 ### 3. 离线提交演示
 
 这个脚本不经过 FastAPI，直接通过服务层写 MySQL 并把任务投递到 Celery。要求 worker 已启动：
@@ -141,8 +233,9 @@ uv run python offline_submit_demo.py
 当前预期：
 
 1. `submit` 返回 `request_id`
-2. 轮询会从 `PENDING` 进入 `COMPLETED`
-3. 最终快照和 HTTP 提交的输出结构一致
+2. 当前示例查询通常会从 `PENDING` 进入 `COMPLETED`
+3. 一般流程也可能进入 `WAITING_CLARIFICATION`
+4. 最终快照和 HTTP 提交的输出结构一致
 
 ### 4. 生产式集成测试总控脚本
 
@@ -152,11 +245,20 @@ uv run python offline_submit_demo.py
 2. seed 上游活动知识
 3. 用 `celery` CLI 启动 worker 和 beat
 4. 用 `api.py` 启动 FastAPI
-5. 跑 4 组自动化检查：
+5. 跑 13 组自动化检查：
    - HTTP completion
    - SSE sequence + `Last-Event-ID` replay
+   - SSE invalid `Last-Event-ID`
    - Clarify flow
+   - expired Clarify default fallback
+   - UTC timestamp serialization
+   - invalid `scope_json` validation
    - offline submit
+   - duplicate `execution_id` dedup
+   - maintenance recovery for terminal tasks
+   - maintenance recovery for `PLANNING` / `FINALIZING`
+   - background failure visibility
+   - Redis `L2/L3` memory layers and replay/control hot cache
 6. 输出 JSON 汇总，并在结束时自动关闭进程
 
 运行命令：
@@ -165,14 +267,29 @@ uv run python offline_submit_demo.py
 uv run python integration_test_production_stack.py
 ```
 
+说明：
+
+1. 这个脚本会重建 demo 数据，不适合拿现有数据做增量验证。
+2. 它固定把 API 端口覆盖到 `8097`。
+3. 它会继承外部的 `UV_CACHE_DIR`；如果不传，默认使用 `/tmp/uv-cache`。
+
 脚本成功时会打印类似结果：
 
 ```json
 {
   "http_completion": {"final_status": "COMPLETED"},
   "sse_sequence": {"event_count": 18},
+  "sse_invalid_last_event_id": {"status_code": 400},
   "clarify_flow": {"final_status": "COMPLETED"},
-  "offline_submit": {"final_status": "COMPLETED"}
+  "expired_clarify_defaults": {"default_applied": true},
+  "time_serialization_uses_utc": {"expires_at": "2026-03-21T03:00:00Z"},
+  "invalid_scope_validation": {"status_code": 422},
+  "offline_submit": {"final_status": "COMPLETED"},
+  "duplicate_execution_id": {"started_event_count": 1},
+  "maintenance_recovery": {"summary": {"resumed": 1}},
+  "maintenance_recovery_planning_finalizing": {"summary": {"resumed": 2}},
+  "background_failure_marks_task_failed": {"status": "FAILED"},
+  "redis_memory_layers": {"event_cache_count": 18}
 }
 ```
 
@@ -189,12 +306,41 @@ uv run python integration_test_production_stack.py
 3. `GET /api/v1/search/{request_id}/events`
 4. `POST /api/v1/search/{request_id}/clarification`
 
+## HTTP 返回格式
+
+所有 HTTP 接口都返回统一 envelope：
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {}
+}
+```
+
+当前最常用的约定如下：
+
+1. `POST /api/v1/search` 成功时返回 `200 OK`，`data.status` 当前是 `PENDING`，不是 `PLANNING`。
+2. `GET /api/v1/search/{request_id}` 返回任务快照。
+3. `POST /api/v1/search/{request_id}/clarification` 成功时返回 `200 OK` 与最新快照。
+4. Clarification 冲突场景返回 `409`，响应体是 `{code, message, data: null}`，不会额外附带快照。
+5. SSE 断线回放使用 `Last-Event-ID` 请求头，当前实现要求它是整数。
+
 ## 当前已验证的能力
 
 1. eager 模式下，`demo_flow.py` 可直接跑到 `COMPLETED`
 2. 非 eager 模式下，`FastAPI + Celery worker + Celery beat + MySQL + Redis` 的组合已联调通过
 3. 非 eager 模式下，HTTP 提交、离线提交、SSE 事件流、`Last-Event-ID` 回放都已跑通
 4. `ST-003` 已不再输出占位文本，而会基于已有 evidence cards 生成结构化 reasoning 汇总
+5. 子任务结果已改为“控制面先恢复、数据面异步刷库”，`persist_jobs` 与 `resume_orchestrator` 并行触发
+
+## 常见失败
+
+1. `uv run` 报依赖或缓存错误：先执行 `uv sync`，必要时更换 `UV_CACHE_DIR`
+2. MySQL 认证失败：检查 `DEEPSEARCH_DEMO_MYSQL_*` 与 `MIN_RAG_*` 环境变量
+3. Redis 认证或连接失败：检查 `DEEPSEARCH_DEMO_REDIS_*` 环境变量
+4. 表不存在：先执行上游 `init_db.py`、`seed_demo_kb.py` 和当前目录 `init_db.py`
+5. `client_demo.py` 看到非终态：它只看即时快照，不会自动轮询
 
 ## 当前限制
 
@@ -202,4 +348,5 @@ uv run python integration_test_production_stack.py
 2. Clarify 只支持单选
 3. `KnowledgeProjectionReader` 当前只支持 `document_ids / external_doc_keys / version_ids`
 4. `FileVectorReader` 与 `FileSearchReader` 仍然是 demo 级实现，不是生产级召回
-5. `ST-003` 虽然已经会做结构化汇总，但仍然基于 mock LLM 和 mock scoring，不是生产级推理质量
+5. checkpoint 当前用于线程级热状态续跑与 Redis 热副本辅助；任务恢复的真相仍然以 MySQL 控制面状态为准
+6. `ST-003` 虽然已经会做结构化汇总，但仍然基于 mock LLM 和 mock scoring，不是生产级推理质量

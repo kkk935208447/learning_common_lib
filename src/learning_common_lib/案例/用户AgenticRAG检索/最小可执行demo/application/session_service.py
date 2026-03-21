@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain.contracts import ClarificationRequest
 from ..errors import ConflictError, ValidationError
-from .common import json_safe, utcnow
+from .common import json_safe, normalize_utc_datetime, utcnow
 
 try:
     from ..infrastructure.models import Session, SessionTurn
@@ -16,6 +18,15 @@ except ImportError:
 
 
 class SessionService:
+    def get_clarification_deadline(self, turn: SessionTurn) -> datetime | None:
+        if turn.expires_at is None:
+            return None
+        return normalize_utc_datetime(turn.expires_at)
+
+    def is_clarification_expired(self, turn: SessionTurn) -> bool:
+        deadline = self.get_clarification_deadline(turn)
+        return deadline is not None and deadline <= utcnow()
+
     async def ensure_session(
         self,
         session: AsyncSession,
