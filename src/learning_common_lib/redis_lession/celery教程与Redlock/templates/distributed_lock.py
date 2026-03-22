@@ -6,13 +6,15 @@
 不适用场景: 单进程内的并发用 threading.Lock 即可；如果业务不希望依赖后台续期线程，
     或持锁逻辑跨系统事务边界太长，仍应拆分更小的临界区
 实现边界: python-redis-lock 和底层 redis 客户端本身仍是同步实现；
-    async_distributed_lock() 只是通过 asyncio.to_thread(...) 让 async 调用侧不阻塞事件循环，
-    并不等于底层锁实现已经完全 async 化
+    async_distributed_lock() 只是通过 asyncio.to_thread(...) 让 async 调用侧不阻塞事件循环，并不等于底层锁实现已经完全 async 化
 
 锁的三种使用方式:
   1. async_distributed_lock()   — async-first 主路径，首选
   2. distributed_lock()         — 同步上下文管理器（兼容同步场景）
   3. @with_lock(name_template)  — 补充语法糖，只在重复样板很多时再启用
+
+注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
+    对于异步场景，最好使用 纯异步锁，如 aioredlock (pip install aioredlock）
 """
 
 from __future__ import annotations
@@ -177,6 +179,8 @@ async def async_distributed_lock(
 
     基于 python-redis-lock 的线程池包装实现，适合在 async 代码中调用同步锁。
     它解决的是"async 调用侧不阻塞事件循环"，不是把底层 Redis 锁客户端变成原生 async。
+    注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
+    对于异步场景，最好使用 纯异步锁，如 aioredlock (pip install aioredlock）
     """
     lock = _build_lock(redis_client, name, timeout, auto_renewal=auto_renewal)
     acquired = await asyncio.to_thread(
@@ -199,7 +203,8 @@ async def async_distributed_lock(
         yield lock
     finally:
         try:
-            await asyncio.to_thread(lock.release)
+            # ✅ shield 保护，防止二次 cancel 打断释放操作
+            await asyncio.shield(asyncio.to_thread(lock.release))
         except Exception as exc:
             _log_release_exception(
                 name=name,
@@ -347,7 +352,7 @@ def _demo() -> None:
                 redis_client,
                 "order:conflict",
                 timeout=5,
-                blocking_timeout=0.1,
+                blocking_timeout=1,
                 auto_renewal=True,
             ):
                 pass
