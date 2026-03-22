@@ -39,6 +39,11 @@ app = Celery(
     backend="redis://:123456@localhost:6379/1",
 )
 app.conf.update(
+    # 这里故意不显式写 task_queues / Exchange / routing_key。这个示例的重点不是讲完整消息拓扑，而是讲“同一项目按任务形态拆 worker lane”。
+    # 对当前 Redis + 简单双队列 demo 来说，只指定 queue 名已经足够表达：
+    #   1. render_invoice 默认走 prefork_jobs
+    #   2. push_webhook_async 自动路由到 aio_jobs
+    # 真要讲清 exchange / routing_key / 多队列绑定关系，请看 07 章的 01_task_queues.py。
     task_default_queue="prefork_jobs",
     task_routes={
         f"{MODULE}.render_invoice": {"queue": "prefork_jobs"},

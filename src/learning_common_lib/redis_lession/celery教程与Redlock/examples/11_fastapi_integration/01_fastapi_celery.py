@@ -48,7 +48,7 @@ celery_app.conf.update(
 
 @celery_app.task(bind=True, name=f"{MODULE}.process_order")
 async def process_order(self: Any, order_id: int, items: list[str]) -> dict[str, Any]:
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(3)
     return {
         "order_id": order_id,
         "items": items,
@@ -60,7 +60,7 @@ async def process_order(self: Any, order_id: int, items: list[str]) -> dict[str,
 
 @celery_app.task(bind=True, name=f"{MODULE}.send_notification")
 async def send_notification(self: Any, user_id: int, message: str) -> dict[str, Any]:
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(2)
     return {"user_id": user_id, "status": "sent", "message": message, "task_shape": "async def"}
 
 
@@ -124,11 +124,12 @@ async def main() -> None:
         print()
 
         print("── 步骤 2: GET 轮询任务状态 ──")
-        for _ in range(30):
+        for i in range(30):
             resp2 = client.get(f"/tasks/{task_id}")
             status_data = resp2.json()
             if status_data.get("ready"):
                 break
+            print(f"  🔄 第 {i + 1} 次轮询, [{resp2.status_code}]: {status_data}")
             await asyncio.sleep(0.5)
         print(f"  📥 响应 [{resp2.status_code}]: {status_data}")
         print()
@@ -144,11 +145,12 @@ async def main() -> None:
         print()
 
         print("── 步骤 4: GET 轮询通知状态 ──")
-        for _ in range(30):
+        for i in range(30):
             resp4 = client.get(f"/tasks/{notif_task_id}")
             notif_status = resp4.json()
             if notif_status.get("ready"):
                 break
+            print(f"  🔄 第 {i + 1} 次轮询, [{resp4.status_code}]: {notif_status}")
             await asyncio.sleep(0.5)
         print(f"  📥 响应 [{resp4.status_code}]: {notif_status}")
         print()
