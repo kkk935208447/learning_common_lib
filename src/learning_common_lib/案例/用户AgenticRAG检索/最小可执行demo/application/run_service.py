@@ -42,7 +42,18 @@ class RunService:
         replan_reason: str | None = None,
     ) -> int:
         previous_version = int(task.active_plan_version or 0)
+        previous_subtasks_by_code: dict[str, Subtask] = {}
         if previous_version > 0:
+            previous_subtasks = list(
+                (
+                    await session.scalars(
+                        select(Subtask)
+                        .where(Subtask.task_id == task.id)
+                        .where(Subtask.plan_version == previous_version)
+                    )
+                ).all()
+            )
+            previous_subtasks_by_code = {item.subtask_code: item for item in previous_subtasks}
             old_plan = await session.scalar(
                 select(TaskPlan).where(TaskPlan.task_id == task.id).where(TaskPlan.plan_version == previous_version)
             )
@@ -63,7 +74,43 @@ class RunService:
             created_at=utcnow(),
         )
         session.add(plan)
+        prior_reused_subtasks = list(json_safe((task.control_json or {}).get("reused_subtasks") or []))
+        reused_subtasks_json: list[dict[str, Any]] = []
         for node in plan_nodes:
+            previous_subtask = previous_subtasks_by_code.get(node.subtask_code)
+            can_reuse = (
+                previous_subtask is not None
+                and value_of(previous_subtask.status) == "COMPLETED"
+                and value_of(previous_subtask.task_type) == node.task_type
+            )
+            status = "COMPLETED" if can_reuse else "PENDING"
+            iteration = int(previous_subtask.iteration or 0) if can_reuse and previous_subtask is not None else 0
+            started_at = previous_subtask.started_at if can_reuse and previous_subtask is not None else None
+            completed_at = (
+                previous_subtask.completed_at or utcnow()
+                if can_reuse and previous_subtask is not None
+                else None
+            )
+            final_score = previous_subtask.final_score if can_reuse and previous_subtask is not None else None
+            key_findings = previous_subtask.key_findings if can_reuse and previous_subtask is not None else None
+            evidence_refs_json = (
+                json_safe(previous_subtask.evidence_refs_json or [])
+                if can_reuse and previous_subtask is not None
+                else []
+            )
+            result_snapshot_json = (
+                json_safe(previous_subtask.result_snapshot_json or {})
+                if can_reuse and previous_subtask is not None
+                else {}
+            )
+            if can_reuse and previous_subtask is not None:
+                reused_subtasks_json.append(
+                    {
+                        "subtask_code": node.subtask_code,
+                        "from_plan_version": previous_version,
+                        "final_score": float(previous_subtask.final_score or 0.0),
+                    }
+                )
             session.add(
                 Subtask(
                     tenant_id=task.tenant_id,
@@ -77,17 +124,45 @@ class RunService:
                     acceptance_criteria_json=node.acceptance_criteria,
                     budget_slice_json=node.budget_slice,
                     priority=node.priority,
-                    status="PENDING",
-                    iteration=0,
+                    status=status,
+                    iteration=iteration,
                     max_iterations=self.settings.max_subtask_iterations,
                     timeout_ms=self.settings.subtask_timeout_ms,
-                    evidence_refs_json=[],
-                    result_snapshot_json={},
+                    current_execution_id=None,
+                    final_score=final_score,
+                    key_findings=key_findings,
+                    evidence_refs_json=evidence_refs_json,
+                    result_snapshot_json=result_snapshot_json,
+                    last_error_code=None,
+                    last_error_message=None,
                     row_version=0,
                     created_at=utcnow(),
                     updated_at=utcnow(),
+                    started_at=started_at,
+                    completed_at=completed_at,
                 )
-            )
+                )
+        plan.reused_subtasks_json = reused_subtasks_json
+        current_reused_codes = {
+            str(item.get("subtask_code") or "")
+            for item in reused_subtasks_json
+            if str(item.get("subtask_code") or "")
+        }
+        flattened_reused_subtasks: list[dict[str, Any]] = [
+            item
+            for item in prior_reused_subtasks
+            if str(item.get("subtask_code") or "") in current_reused_codes
+        ]
+        seen_reuse_keys = {
+            (int(item.get("from_plan_version") or 0), str(item.get("subtask_code") or ""))
+            for item in flattened_reused_subtasks
+        }
+        for item in reused_subtasks_json:
+            reuse_key = (int(item.get("from_plan_version") or 0), str(item.get("subtask_code") or ""))
+            if reuse_key in seen_reuse_keys:
+                continue
+            flattened_reused_subtasks.append(item)
+            seen_reuse_keys.add(reuse_key)
         task.active_plan_version = new_version
         task.status = "EXECUTING"
         task.control_json = {
@@ -95,6 +170,7 @@ class RunService:
             "waiting_reason": "NONE",
             "latest_escalation": None,
             "clarification_request": None,
+            "reused_subtasks": flattened_reused_subtasks,
         }
         await session.flush()
         await self.progress_service.append_event(
@@ -107,6 +183,7 @@ class RunService:
                 "message": f"计划版本 {new_version} 已激活",
                 "plan_version": new_version,
                 "dag_fingerprint": dag_fingerprint,
+                "reused_subtasks": reused_subtasks_json,
             },
             plan_version=new_version,
         )

@@ -99,15 +99,25 @@ class SubtaskGraphService:
         return [by_uid[card_uid] for card_uid in refs if card_uid in by_uid]
 
     async def cache_probe_node(self, state: SubtaskState) -> dict[str, Any]:
-        if state.get("task_type") == "REASONING" and state.get("global_evidence_refs"):
+        if state.get("task_type") in {"REASONING", "REFLECTION"} and state.get("global_evidence_refs"):
             return {"next_action": "draft"}
         return {"next_action": "rewrite"}
 
     async def rewrite_node(self, state: SubtaskState) -> dict[str, Any]:
         query = state["query"]
         iteration = int(state.get("iteration", 0))
+        route_hints = {str(item) for item in list(state.get("route_hints") or [])}
+        hint_suffixes: list[str] = []
+        if "comparison" in route_hints:
+            hint_suffixes.append("补充关键词：版本差异 对比 上一版")
+        if "gap_recovery" in route_hints:
+            hint_suffixes.append("补充关键词：缺口恢复 补充佐证 例外条件")
+        if "carry_forward" in route_hints:
+            hint_suffixes.append("补充关键词：核心规则 关键定义 生效口径")
         if iteration > 0:
-            query = f"{query} 补充检索"
+            hint_suffixes.append("补充检索")
+        if hint_suffixes:
+            query = f"{query} {' '.join(hint_suffixes)}"
         return {"query": query}
 
     async def retrieve_node(self, state: SubtaskState) -> dict[str, Any]:
@@ -161,7 +171,7 @@ class SubtaskGraphService:
     async def draft_node(self, state: SubtaskState) -> dict[str, Any]:
         memory = await self._load_memory(state["execution_id"])
         drafts = [EvidenceCardDraft.model_validate(item) for item in memory.get("evidence_drafts", [])]
-        if state.get("task_type") == "REASONING":
+        if state.get("task_type") in {"REASONING", "REFLECTION"}:
             hot_records = await self._load_global_evidence_payloads(
                 execution_id=state["execution_id"],
                 plan_version=state["plan_version"],
@@ -306,7 +316,7 @@ class SubtaskGraphService:
             await session.commit()
 
         global_evidence_refs: list[str] = []
-        reuse_global_evidence = value_of(subtask.task_type) == "REASONING"
+        reuse_global_evidence = value_of(subtask.task_type) in {"REASONING", "REFLECTION"}
         if reuse_global_evidence:
             async with self.session_factory() as session:
                 records = await self.evidence_service.load_plan_evidence_records(
@@ -414,7 +424,7 @@ class SubtaskGraphService:
                 output_text=draft_text,
                 verify_summary=verify_summary,
                 eval_summary=eval_summary,
-                usage_stats={"llm_tokens": max(1, len((draft_text or "").split())) * 8, "retrieval_calls": 0 if value_of(subtask.task_type) == "REASONING" else 2, "elapsed_ms": 200, "cache_hits": 0},
+                usage_stats={"llm_tokens": max(1, len((draft_text or "").split())) * 8, "retrieval_calls": 0 if value_of(subtask.task_type) in {"REASONING", "REFLECTION"} else 2, "elapsed_ms": 200, "cache_hits": 0},
             )
         else:
             gap_type = eval_summary.get("gap_type", "insufficient_evidence")

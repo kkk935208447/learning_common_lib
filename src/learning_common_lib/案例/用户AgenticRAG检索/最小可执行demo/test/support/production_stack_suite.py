@@ -25,8 +25,13 @@ try:
         build_subtask_graph_service,
         close_runtime_bundle,
     )
-    from ...infrastructure.models import EvidenceCard, SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent
+    from ...infrastructure.models import EvidenceCard, SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent, TaskPlan
     from ...infrastructure.settings import get_settings
+    from .test_registry import (
+        PREPARE_DEMO_ENV_SCRIPT,
+        PRODUCTION_OFFLINE_CASE_SPECS,
+        SERVICE_SUITE_CASE_SPECS,
+    )
 except ImportError:
     import sys
     from pathlib import Path
@@ -46,15 +51,16 @@ except ImportError:
         build_subtask_graph_service,
         close_runtime_bundle,
     )
-    from 最小可执行demo.infrastructure.models import EvidenceCard, SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent
+    from 最小可执行demo.infrastructure.models import EvidenceCard, SearchTask, SessionTurn, Subtask, SubtaskRun, TaskEvent, TaskPlan
     from 最小可执行demo.infrastructure.settings import get_settings
+    from 最小可执行demo.test.support.test_registry import (
+        PREPARE_DEMO_ENV_SCRIPT,
+        PRODUCTION_OFFLINE_CASE_SPECS,
+        SERVICE_SUITE_CASE_SPECS,
+    )
 
 
 DEMO_ROOT = Path(__file__).resolve().parents[2]
-CASES_ROOT = DEMO_ROOT.parent.parent
-UPSTREAM_INIT = CASES_ROOT / "实现AgenticRAG数据库管理" / "最小可执行demo" / "init_db.py"
-DEEP_INIT = DEMO_ROOT / "scripts" / "setup" / "init_db.py"
-SEED = DEMO_ROOT / "scripts" / "setup" / "seed_demo_kb.py"
 API_SCRIPT = DEMO_ROOT / "api" / "app.py"
 CELERY_APP = "workers.celery_app:celery_app"
 
@@ -95,13 +101,17 @@ async def run_command(name: str, *args: str, env: dict[str, str]) -> None:
 async def start_process(name: str, *args: str, env: dict[str, str], log_dir: Path) -> ManagedProcess:
     log_path = log_dir / f"{name}.log"
     log_file = open(log_path, "w", encoding="utf-8")
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        cwd=str(DEMO_ROOT),
-        env=env,
-        stdout=log_file,
-        stderr=asyncio.subprocess.STDOUT,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=str(DEMO_ROOT),
+            env=env,
+            stdout=log_file,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except Exception:
+        log_file.close()
+        raise
     return ManagedProcess(name=name, process=process, log_path=log_path, log_file=log_file)
 
 
@@ -121,6 +131,12 @@ async def stop_process(item: ManagedProcess) -> None:
             await item.process.wait()
     finally:
         item.log_file.close()
+
+
+async def stop_process_if_started(item: ManagedProcess | None) -> None:
+    if item is None:
+        return
+    await stop_process(item)
 
 
 async def wait_for_health(base_url: str, timeout_s: int = 30) -> None:
@@ -826,6 +842,170 @@ async def test_stale_result_does_not_advance_new_plan() -> dict:
     if result.get("active_plan_version") != 2:
         raise AssertionError(f"Stale result should return current state, got {result}")
     return {"task_id": task_id, "tail_events": tail_names}
+
+
+async def test_replan_creates_distinct_plan_and_reuses_completed_subtasks() -> dict:
+    runtime = build_runtime_bundle(use_task_engine=True)
+    graph_service = await build_global_graph_service_from_bundle(runtime, use_task_engine=True)
+    request_id = build_request_id("sess_integration_replan_reuse", "请帮我整理公司近 90 天差旅报销规则的变化")
+
+    async with runtime.session_factory() as session:
+        async with session.begin():
+            await runtime.session_service.ensure_session(
+                session,
+                session_id="sess_integration_replan_reuse",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                initial_query="请帮我整理公司近 90 天差旅报销规则的变化",
+            )
+            task = SearchTask(
+                request_id=request_id,
+                session_id="sess_integration_replan_reuse",
+                tenant_id="demo-tenant",
+                user_id="demo-user",
+                kb_code="default",
+                scope_json=None,
+                original_query="请帮我整理公司近 90 天差旅报销规则的变化",
+                resolved_query="请帮我整理公司近 90 天差旅报销规则的变化",
+                task_profile_json={},
+                status="PENDING",
+                active_plan_version=0,
+                budget_json={},
+                control_json={"waiting_reason": "NONE"},
+                replan_count=0,
+                clarification_count=0,
+                preplan_clarification_used=0,
+                postexec_clarification_used=0,
+                row_version=0,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            session.add(task)
+            await session.flush()
+            task_id = task.id
+            reuse_card_uid = f"EC-replan-reuse-{task_id}"
+            first_outcome = runtime.plan_service.create_plan(
+                original_query=task.original_query,
+                resolved_query=task.resolved_query,
+                allow_clarify=False,
+            )
+            await runtime.run_service.activate_plan(
+                session,
+                task=task,
+                plan_nodes=first_outcome.plan_nodes,
+                dag_fingerprint=first_outcome.dag_fingerprint,
+            )
+            st001 = await session.scalar(
+                select(Subtask)
+                .where(Subtask.task_id == task.id)
+                .where(Subtask.plan_version == task.active_plan_version)
+                .where(Subtask.subtask_code == "ST-001")
+            )
+            st002 = await session.scalar(
+                select(Subtask)
+                .where(Subtask.task_id == task.id)
+                .where(Subtask.plan_version == task.active_plan_version)
+                .where(Subtask.subtask_code == "ST-002")
+            )
+            if st001 is None or st002 is None:
+                raise AssertionError("Replan reuse test expected ST-001 and ST-002 in initial plan")
+            st001.status = "COMPLETED"
+            st001.final_score = 0.88
+            st001.key_findings = "ST-001: 已稳定收集到基础规则证据。"
+            st001.evidence_refs_json = [reuse_card_uid]
+            st001.result_snapshot_json = {"output_text": st001.key_findings}
+            st001.started_at = utcnow()
+            st001.completed_at = utcnow()
+            st002.status = "FAILED"
+            st002.last_error_code = "INSUFFICIENT_EVIDENCE"
+            st002.last_error_message = "补检后仍缺少足够证据"
+            session.add(
+                EvidenceCard(
+                    card_uid=reuse_card_uid,
+                    tenant_id=task.tenant_id,
+                    task_id=task.id,
+                    plan_version=task.active_plan_version,
+                    produced_by_subtask="ST-001",
+                    claim="一线城市住宿标准由 450 元调整为 500 元。",
+                    claim_type="DESCRIPTIVE",
+                    source_id="1:1:chunk-replan-reuse",
+                    source_type="VECTOR_DB",
+                    source_locator_json={
+                        "kb_code": "default",
+                        "document_id": 1,
+                        "version_id": 1,
+                        "chunk_uid": "chunk-replan-reuse",
+                    },
+                    reliability_tier="T1",
+                    data_freshness=utcnow().date(),
+                    retrieval_score=0.91,
+                    confidence=0.83,
+                    corroborated_by_json=[],
+                    conflicts_with_json=[],
+                    payload_json={},
+                    created_at=utcnow(),
+                )
+            )
+            task.status = "EXECUTING"
+            task.control_json = {
+                "waiting_reason": "NONE",
+                "historical_fingerprints": [first_outcome.dag_fingerprint],
+                "latest_escalation": {
+                    "reason": "insufficient_evidence",
+                    "suggested_global_action": "replan",
+                    "gap_type": "insufficient_evidence",
+                    "message": "ST-002 仍缺少足够证据",
+                },
+            }
+
+    await graph_service.replan_node({"task_id": task_id})
+    await graph_service.planner_node({"task_id": task_id})
+
+    async with runtime.session_factory() as session:
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+        if task is None:
+            raise AssertionError("Replan reuse test task missing")
+        plans = list(
+            (
+                await session.scalars(
+                    select(TaskPlan).where(TaskPlan.task_id == task_id).order_by(TaskPlan.plan_version.asc())
+                )
+            ).all()
+        )
+        reused_st001 = await session.scalar(
+            select(Subtask)
+            .where(Subtask.task_id == task_id)
+            .where(Subtask.plan_version == task.active_plan_version)
+            .where(Subtask.subtask_code == "ST-001")
+        )
+        expanded_node = await session.scalar(
+            select(Subtask)
+            .where(Subtask.task_id == task_id)
+            .where(Subtask.plan_version == task.active_plan_version)
+            .where(Subtask.subtask_code == "ST-004")
+        )
+    if len(plans) != 2:
+        raise AssertionError(f"Replan reuse test expected 2 plan versions, got {len(plans)}")
+    if plans[0].dag_fingerprint == plans[1].dag_fingerprint:
+        raise AssertionError("Replan should activate a different DAG fingerprint")
+    reused_payload = list(plans[1].reused_subtasks_json or [])
+    if not reused_payload or reused_payload[0].get("subtask_code") != "ST-001":
+        raise AssertionError(f"Replan should record reused completed subtasks, got {reused_payload}")
+    if reused_st001 is None or reused_st001.status != "COMPLETED":
+        raise AssertionError(f"Replanned ST-001 should stay COMPLETED via reuse, got {getattr(reused_st001, 'status', None)}")
+    expected_reused_refs = [f"EC-replan-reuse-{task_id}"]
+    if reused_st001.evidence_refs_json != expected_reused_refs:
+        raise AssertionError(f"Replanned ST-001 should retain evidence refs, got {reused_st001.evidence_refs_json}")
+    if expanded_node is None:
+        raise AssertionError("Replan should add an expanded reasoning node for the new plan")
+    if int(task.active_plan_version or 0) != 2:
+        raise AssertionError(f"Replan should activate plan_version=2, got {task.active_plan_version}")
+    return {
+        "request_id": request_id,
+        "active_plan_version": int(task.active_plan_version or 0),
+        "reused_subtasks": reused_payload,
+        "new_dag_fingerprint": plans[1].dag_fingerprint,
+    }
 
 
 async def test_fallback_ignores_late_result_and_staged_payload() -> dict:
@@ -1932,38 +2112,18 @@ async def test_offline_submit() -> dict:
 
 
 async def run_service_suite(base_url: str) -> dict[str, dict]:
-    return {
-        "http_completion": await test_http_completion(base_url),
-        "sse_sequence": await test_sse_sequence(base_url),
-        "sse_invalid_last_event_id": await test_sse_invalid_last_event_id(base_url),
-        "clarify_flow": await test_clarify_flow(base_url),
-        "duplicate_clarification": await test_duplicate_clarification_submission_returns_snapshot(base_url),
-        "expired_clarify_defaults": await test_expired_clarify_defaults(base_url),
-        "time_serialization_uses_utc": await test_time_serialization_uses_utc(base_url),
-        "sse_clarification_payload": await test_sse_clarification_payload_and_heartbeat(base_url),
-        "invalid_scope_validation": await test_invalid_scope_validation(base_url),
-        "step_gate_clarify_flow": await test_step_gate_clarify_flow(base_url),
-    }
+    summary: dict[str, dict] = {}
+    for spec in SERVICE_SUITE_CASE_SPECS:
+        runner = globals()[spec.runner_name]
+        summary[spec.key] = await runner(base_url) if spec.needs_base_url else await runner()
+    return summary
 
 
 async def run_offline_suite() -> dict[str, dict]:
-    return {
-        "offline_submit": await test_offline_submit(),
-        "duplicate_execution_id": await test_duplicate_execution_id_is_ignored(),
-        "stale_result_resume": await test_stale_result_does_not_advance_new_plan(),
-        "fallback_late_result_guard": await test_fallback_ignores_late_result_and_staged_payload(),
-        "maintenance_recovery": await test_maintenance_recovery_resumes_terminal_plan(),
-        "maintenance_recovery_planning_finalizing": await test_maintenance_recovery_resumes_planning_and_finalizing(),
-        "maintenance_recovery_ready_tasks": await test_maintenance_recovery_resumes_ready_tasks(),
-        "reaped_run_payload_guard": await test_reaped_run_payload_is_rejected(),
-        "checkpoint_resume_recovery": await test_checkpoint_resume_recovery(),
-        "redis_memory_layers": await test_redis_memory_layers(),
-        "dag_fingerprint_semantics": await test_dag_fingerprint_distinguishes_semantics(),
-        "invalid_citation_filtering": await test_final_answer_filters_invalid_citations(),
-        "fallback_partial_results": await test_fallback_returns_partial_results(),
-        "finalize_degraded_guidance": await test_finalize_degraded_includes_guidance(),
-        "checkpoint_env_isolation": await test_checkpoint_does_not_mutate_redis_url_env(),
-    }
+    summary: dict[str, dict] = {}
+    for spec in PRODUCTION_OFFLINE_CASE_SPECS:
+        summary[spec.key] = await globals()[spec.runner_name]()
+    return summary
 
 
 async def main() -> None:
@@ -1974,50 +2134,57 @@ async def main() -> None:
     env = base_env()
     env["DEEPSEARCH_DEMO_API_PORT"] = str(port)
 
-    await run_command("upstream_init", "uv", "run", "python", str(UPSTREAM_INIT), env=env)
-    await run_command("deep_init", "uv", "run", "python", str(DEEP_INIT), env=env)
-    await run_command("seed_demo_kb", "uv", "run", "python", str(SEED), env=env)
-    await run_command("purge_queue", "uv", "run", "celery", "-A", CELERY_APP, "purge", "-f", env=env)
-
-    worker = await start_process(
-        "worker",
-        "uv",
-        "run",
-        "celery",
-        "-A",
-        CELERY_APP,
-        "worker",
-        "-Q",
-        "orchestrate_jobs,subtask_jobs,persist_jobs,maintenance_jobs",
-        "-l",
-        "INFO",
-        env=env,
-        log_dir=log_dir,
-    )
-    beat = await start_process(
-        "beat",
-        "uv",
-        "run",
-        "celery",
-        "-A",
-        CELERY_APP,
-        "beat",
-        "-l",
-        "INFO",
-        env=env,
-        log_dir=log_dir,
-    )
-    api = await start_process(
-        "api",
+    await run_command(
+        "prepare_demo_env",
         "uv",
         "run",
         "python",
-        str(API_SCRIPT),
+        str(DEMO_ROOT / PREPARE_DEMO_ENV_SCRIPT.relative_path),
         env=env,
-        log_dir=log_dir,
     )
+    await run_command("purge_queue", "uv", "run", "celery", "-A", CELERY_APP, "purge", "-f", env=env)
 
+    worker: ManagedProcess | None = None
+    beat: ManagedProcess | None = None
+    api: ManagedProcess | None = None
     try:
+        worker = await start_process(
+            "worker",
+            "uv",
+            "run",
+            "celery",
+            "-A",
+            CELERY_APP,
+            "worker",
+            "-Q",
+            "orchestrate_jobs,subtask_jobs,persist_jobs,maintenance_jobs",
+            "-l",
+            "INFO",
+            env=env,
+            log_dir=log_dir,
+        )
+        beat = await start_process(
+            "beat",
+            "uv",
+            "run",
+            "celery",
+            "-A",
+            CELERY_APP,
+            "beat",
+            "-l",
+            "INFO",
+            env=env,
+            log_dir=log_dir,
+        )
+        api = await start_process(
+            "api",
+            "uv",
+            "run",
+            "python",
+            str(API_SCRIPT),
+            env=env,
+            log_dir=log_dir,
+        )
         await wait_for_health(base_url)
         await asyncio.sleep(2)
         summary = await run_service_suite(base_url)
@@ -2029,9 +2196,9 @@ async def main() -> None:
         }
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     finally:
-        await stop_process(api)
-        await stop_process(worker)
-        await stop_process(beat)
+        await stop_process_if_started(api)
+        await stop_process_if_started(worker)
+        await stop_process_if_started(beat)
 
 
 if __name__ == "__main__":

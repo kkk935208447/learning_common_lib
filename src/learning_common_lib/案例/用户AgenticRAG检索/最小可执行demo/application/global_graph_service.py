@@ -18,9 +18,9 @@ from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
-    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun
+    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskPlan
 except ImportError:
-    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun
+    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskPlan
 
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,74 @@ class GlobalGraphService:
         graph.add_conditional_edges("fallback", self.route_by_action)
         graph.add_edge("output", END)
         return graph.compile(checkpointer=checkpointer)
+
+    async def _build_replan_context(self, session: AsyncSession, *, task: SearchTask) -> dict[str, Any]:
+        subtasks = list(
+            (
+                await session.scalars(
+                    select(Subtask)
+                    .where(Subtask.task_id == task.id)
+                    .where(Subtask.plan_version == task.active_plan_version)
+                    .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
+                )
+            ).all()
+        )
+        active_plan = await session.scalar(
+            select(TaskPlan)
+            .where(TaskPlan.task_id == task.id)
+            .where(TaskPlan.plan_version == task.active_plan_version)
+        )
+        control_json = json_safe(task.control_json or {})
+        latest_escalation = dict(control_json.get("latest_escalation") or {})
+        failed_subtasks: list[dict[str, Any]] = []
+        completed_subtasks: list[dict[str, Any]] = []
+        for item in subtasks:
+            payload = {
+                "code": item.subtask_code,
+                "task_type": value_of(item.task_type),
+                "route_hints": json_safe(item.route_hints_json or []),
+            }
+            status = value_of(item.status)
+            if status == "COMPLETED":
+                completed_subtasks.append(
+                    {
+                        **payload,
+                        "final_score": float(item.final_score or 0.0),
+                    }
+                )
+            elif status == "FAILED":
+                failed_subtasks.append(
+                    {
+                        **payload,
+                        "error_code": item.last_error_code,
+                        "error_message": item.last_error_message,
+                    }
+                )
+        first_failed = failed_subtasks[0] if failed_subtasks else {}
+        trigger_reason = str(
+            latest_escalation.get("reason")
+            or latest_escalation.get("suggested_global_action")
+            or first_failed.get("error_code")
+            or "subtask_failed"
+        )
+        trigger_message = str(
+            latest_escalation.get("message")
+            or first_failed.get("error_message")
+            or "上一轮计划存在未收敛子任务，需要重规划。"
+        )
+        return {
+            "attempt_no": int(task.replan_count or 0),
+            "reason": trigger_message,
+            "trigger": {
+                "reason": trigger_reason,
+                "gap_type": latest_escalation.get("gap_type"),
+                "message": trigger_message,
+            },
+            "previous_plan_version": int(task.active_plan_version or 0),
+            "previous_dag_fingerprint": active_plan.dag_fingerprint if active_plan is not None else None,
+            "failed_subtasks": failed_subtasks,
+            "completed_subtasks": completed_subtasks,
+        }
 
     async def _terminate_inflight_subtasks(
         self,
@@ -312,16 +380,22 @@ class GlobalGraphService:
                 return {"next_action": "fallback", "error": "TASK_NOT_FOUND"}
 
             control_json = json_safe(task.control_json or {})
+            replan_context = control_json.get("replan_context") if int(task.replan_count or 0) > 0 else None
             resolved_query = apply_clarification_to_query(
                 task.resolved_query or task.original_query,
                 control_json.get("clarification_request"),
                 control_json.get("clarification_reply_selected"),
             )
-            allow_clarify = int(task.preplan_clarification_used or 0) < 1 and not control_json.get("clarification_reply_selected")
+            allow_clarify = (
+                replan_context is None
+                and int(task.preplan_clarification_used or 0) < 1
+                and not control_json.get("clarification_reply_selected")
+            )
             outcome = self.plan_service.create_plan(
                 original_query=task.original_query,
                 resolved_query=resolved_query,
                 allow_clarify=allow_clarify,
+                replan_context=replan_context,
             )
             task.resolved_query = outcome.resolved_query
             task.task_profile_json = {
@@ -345,6 +419,7 @@ class GlobalGraphService:
 
             control_json.pop("clarification_reply_selected", None)
             control_json.pop("pending_generated_clarification", None)
+            control_json.pop("replan_context", None)
             control_json["clarification_request"] = None
             fingerprints = list(control_json.get("historical_fingerprints") or [])
             if int(task.replan_count or 0) > 0 and outcome.dag_fingerprint in fingerprints:
@@ -360,12 +435,21 @@ class GlobalGraphService:
             fingerprints.append(outcome.dag_fingerprint)
             control_json["historical_fingerprints"] = fingerprints
             task.control_json = control_json
+            replan_reason = None
+            if replan_context:
+                trigger = dict(replan_context.get("trigger") or {})
+                replan_reason = str(
+                    trigger.get("message")
+                    or trigger.get("reason")
+                    or replan_context.get("reason")
+                    or "replan"
+                )
             plan_version = await self.run_service.activate_plan(
                 session,
                 task=task,
                 plan_nodes=outcome.plan_nodes,
                 dag_fingerprint=outcome.dag_fingerprint,
-                replan_reason="replan" if int(task.replan_count or 0) > 0 else None,
+                replan_reason=replan_reason,
             )
             await session.commit()
         return {"next_action": "schedule", "active_plan_version": plan_version}
@@ -536,15 +620,30 @@ class GlobalGraphService:
                 task.last_error_message = "超过最大重规划次数，进入降级输出。"
                 await session.commit()
                 return {"next_action": "fallback"}
+            replan_context = await self._build_replan_context(session, task=task)
             task.replan_count = int(task.replan_count or 0) + 1
             task.status = "PLANNING"
-            task.control_json = {**json_safe(task.control_json or {}), "latest_escalation": None, "waiting_reason": "NONE"}
+            task.control_json = {
+                **json_safe(task.control_json or {}),
+                "latest_escalation": None,
+                "waiting_reason": "NONE",
+                "replan_context": {
+                    **replan_context,
+                    "attempt_no": int(task.replan_count or 0),
+                },
+            }
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
                 task_id=task.id,
                 event_type="task_replanned",
-                payload_json={"status": "PLANNING", "message": f"开始第 {task.replan_count} 次重规划"},
+                payload_json={
+                    "status": "PLANNING",
+                    "message": f"开始第 {task.replan_count} 次重规划",
+                    "replan_reason": replan_context.get("reason"),
+                    "failed_subtasks": [item["code"] for item in list(replan_context.get("failed_subtasks") or [])],
+                    "completed_subtasks": [item["code"] for item in list(replan_context.get("completed_subtasks") or [])],
+                },
                 plan_version=task.active_plan_version,
             )
             await session.commit()
