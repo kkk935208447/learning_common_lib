@@ -12,6 +12,7 @@ from .celery_app import (
     get_celery_app,
     init_celery_app,
 )
+from .async_autoretry import async_autoretry
 from .celery_config import CeleryConfig
 from .distributed_lock import async_distributed_lock, distributed_lock, with_lock
 from .error_handling import (
@@ -49,6 +50,7 @@ __all__ = [
     "CUSTOM_AIO_POOL_CLASS",
     "async_delay",
     "async_apply",
+    "async_autoretry",
     "TaskError",
     "TaskRetryableError",
     "TaskFatalError",

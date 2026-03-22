@@ -24,83 +24,19 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from functools import wraps
-from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
+from typing import Any
 
 from celery import Celery, Task
-from celery.exceptions import Ignore, Retry
-from celery.utils.time import get_exponential_backoff_interval
+
+try:
+    from templates.async_autoretry import async_autoretry
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates.async_autoretry import async_autoretry  # type: ignore[no-redef]
 
 MODULE = "examples.06_error_handling.02_autoretry"
-P = ParamSpec("P")
-R = TypeVar("R")
-_MISSING = object()
-
-
-def async_autoretry(
-    *,
-    autoretry_for: tuple[type[Exception], ...],
-    dont_autoretry_for: tuple[type[Exception], ...] = (),
-    retry_kwargs: dict[str, Any] | None = None,
-) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """为 bind=True 的 async Celery 任务补上 await 期间的自动重试。"""
-    if not autoretry_for:
-        raise ValueError("autoretry_for 不能为空")
-
-    retry_kwargs_template = dict(retry_kwargs or {})
-
-    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-        if not inspect.iscoroutinefunction(func):
-            raise TypeError("@async_autoretry 只支持 async def 任务")
-
-        @wraps(func)
-        async def wrapper(self: Task, *args: P.args, **kwargs: P.kwargs) -> R:
-            if not isinstance(self, Task):
-                raise TypeError("@async_autoretry 要求任务声明为 @app.task(bind=True)")
-
-            retry_call_kwargs = dict(getattr(self, "retry_kwargs", {}) or {})
-            retry_call_kwargs.update(retry_kwargs_template)
-
-            try:
-                return await func(self, *args, **kwargs)
-            except Ignore:
-                raise
-            except Retry:
-                raise
-            except dont_autoretry_for:
-                raise
-            except autoretry_for as exc:
-                retry_backoff = float(getattr(self, "retry_backoff", False))
-                if retry_backoff:
-                    retry_call_kwargs["countdown"] = get_exponential_backoff_interval(
-                        factor=int(max(1.0, retry_backoff)),
-                        retries=self.request.retries,
-                        maximum=int(getattr(self, "retry_backoff_max", 600)),
-                        full_jitter=bool(getattr(self, "retry_jitter", True)),
-                    )
-
-                previous_override_max_retries = getattr(
-                    self,
-                    "override_max_retries",
-                    _MISSING,
-                )
-                if previous_override_max_retries is not _MISSING:
-                    retry_call_kwargs.setdefault("max_retries", previous_override_max_retries)
-
-                try:
-                    ret = self.retry(exc=exc, **retry_call_kwargs)
-                finally:
-                    if previous_override_max_retries is _MISSING:
-                        if hasattr(self, "override_max_retries"):
-                            delattr(self, "override_max_retries")
-                    else:
-                        self.override_max_retries = previous_override_max_retries
-                raise ret
-
-        return wrapper
-
-    return decorator
 
 app = Celery(
     MODULE,
