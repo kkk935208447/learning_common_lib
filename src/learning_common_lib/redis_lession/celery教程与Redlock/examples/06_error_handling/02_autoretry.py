@@ -1,8 +1,9 @@
 """
 目标: 用 async task 演示自动重试与退避策略 (Autoretry with async tasks)
 关键概念:
-  - `autoretry_for` 依旧可用于 async task
-  - `retry_backoff` / `retry_jitter` 的行为与同步 task 时代一致
+  - Celery 5.6.2 的内置 `autoretry_for` 只同步包装 `task.run`
+  - `celery-aio-pool` 会在 worker 中真正 `await` async task，因此异常发生点晚于内置包装
+  - 本示例额外提供 `@async_autoretry(...)` 装饰器，按需包住 async task
   - 回调类 Task 仍然有用，但任务实现本身可切到 async def
 关键 API: autoretry_for, retry_backoff, retry_jitter, on_failure, retry_backoff_max
 目录导航:
@@ -15,7 +16,7 @@
   Client:
     python examples/06_error_handling/02_autoretry.py
 预期现象:
-  - autoretry_for 异常自动重试，其他异常直接失败
+  - 经过 `@async_autoretry(...)` 包装后，可重试异常自动重试，其他异常直接失败
   - retry_backoff=True 时重试间隔呈指数增长
   - retry_jitter=True 时每次重试间隔有随机抖动
 """
@@ -23,11 +24,83 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import inspect
+from functools import wraps
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
 from celery import Celery, Task
+from celery.exceptions import Ignore, Retry
+from celery.utils.time import get_exponential_backoff_interval
 
 MODULE = "examples.06_error_handling.02_autoretry"
+P = ParamSpec("P")
+R = TypeVar("R")
+_MISSING = object()
+
+
+def async_autoretry(
+    *,
+    autoretry_for: tuple[type[Exception], ...],
+    dont_autoretry_for: tuple[type[Exception], ...] = (),
+    retry_kwargs: dict[str, Any] | None = None,
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    """为 bind=True 的 async Celery 任务补上 await 期间的自动重试。"""
+    if not autoretry_for:
+        raise ValueError("autoretry_for 不能为空")
+
+    retry_kwargs_template = dict(retry_kwargs or {})
+
+    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        if not inspect.iscoroutinefunction(func):
+            raise TypeError("@async_autoretry 只支持 async def 任务")
+
+        @wraps(func)
+        async def wrapper(self: Task, *args: P.args, **kwargs: P.kwargs) -> R:
+            if not isinstance(self, Task):
+                raise TypeError("@async_autoretry 要求任务声明为 @app.task(bind=True)")
+
+            retry_call_kwargs = dict(getattr(self, "retry_kwargs", {}) or {})
+            retry_call_kwargs.update(retry_kwargs_template)
+
+            try:
+                return await func(self, *args, **kwargs)
+            except Ignore:
+                raise
+            except Retry:
+                raise
+            except dont_autoretry_for:
+                raise
+            except autoretry_for as exc:
+                retry_backoff = float(getattr(self, "retry_backoff", False))
+                if retry_backoff:
+                    retry_call_kwargs["countdown"] = get_exponential_backoff_interval(
+                        factor=int(max(1.0, retry_backoff)),
+                        retries=self.request.retries,
+                        maximum=int(getattr(self, "retry_backoff_max", 600)),
+                        full_jitter=bool(getattr(self, "retry_jitter", True)),
+                    )
+
+                previous_override_max_retries = getattr(
+                    self,
+                    "override_max_retries",
+                    _MISSING,
+                )
+                if previous_override_max_retries is not _MISSING:
+                    retry_call_kwargs.setdefault("max_retries", previous_override_max_retries)
+
+                try:
+                    ret = self.retry(exc=exc, **retry_call_kwargs)
+                finally:
+                    if previous_override_max_retries is _MISSING:
+                        if hasattr(self, "override_max_retries"):
+                            delattr(self, "override_max_retries")
+                    else:
+                        self.override_max_retries = previous_override_max_retries
+                raise ret
+
+        return wrapper
+
+    return decorator
 
 app = Celery(
     MODULE,
@@ -50,12 +123,12 @@ call_counts: dict[str, int] = {}
 
 @app.task(
     bind=True,
-    autoretry_for=(TransientError,),
     max_retries=3,
     retry_backoff=False,
     default_retry_delay=1,
     name=f"{MODULE}.basic_autoretry",
 )
+@async_autoretry(autoretry_for=(TransientError,))
 async def basic_autoretry(self: Task, succeed_on: int = 3) -> str:
     task_key = f"basic_{self.request.id}"
     call_counts.setdefault(task_key, 0)
@@ -73,13 +146,13 @@ async def basic_autoretry(self: Task, succeed_on: int = 3) -> str:
 
 @app.task(
     bind=True,
-    autoretry_for=(TransientError,),
     max_retries=5,
     retry_backoff=True,
     retry_backoff_max=60,
     retry_jitter=False,
     name=f"{MODULE}.backoff_task",
 )
+@async_autoretry(autoretry_for=(TransientError,))
 async def backoff_task(self: Task) -> str:
     task_key = f"backoff_{self.request.id}"
     call_counts.setdefault(task_key, 0)
@@ -102,12 +175,12 @@ async def backoff_task(self: Task) -> str:
 
 @app.task(
     bind=True,
-    autoretry_for=(TransientError,),
     max_retries=3,
     retry_backoff=True,
     retry_jitter=True,
     name=f"{MODULE}.jitter_task",
 )
+@async_autoretry(autoretry_for=(TransientError,))
 async def jitter_task(self: Task) -> str:
     task_key = f"jitter_{self.request.id}"
     call_counts.setdefault(task_key, 0)
@@ -143,11 +216,11 @@ class MonitoredTask(Task):
 @app.task(
     base=MonitoredTask,
     bind=True,
-    autoretry_for=(TransientError,),
     max_retries=2,
     retry_backoff=True,
     name=f"{MODULE}.monitored_task",
 )
+@async_autoretry(autoretry_for=(TransientError,))
 async def monitored_task(self: Task, should_fail: bool = True) -> str:
     task_key = f"monitored_{self.request.id}"
     call_counts.setdefault(task_key, 0)
@@ -164,11 +237,11 @@ async def monitored_task(self: Task, should_fail: bool = True) -> str:
 
 @app.task(
     bind=True,
-    autoretry_for=(TransientError,),
     max_retries=3,
     retry_backoff=True,
     name=f"{MODULE}.selective_retry",
 )
+@async_autoretry(autoretry_for=(TransientError,))
 async def selective_retry(self: Task, error_type: str = "transient") -> str:
     task_key = f"selective_{self.request.id}"
     call_counts.setdefault(task_key, 0)
@@ -185,6 +258,7 @@ async def selective_retry(self: Task, error_type: str = "transient") -> str:
 async def main() -> None:
     print("🚀 自动重试 (autoretry) 示例（async task）\n")
     print("💡 producer 侧仍通过 to_thread 与 Celery 客户端交互，worker 侧已经切到 async-first\n")
+    print("💡 兼容说明: Celery 5.6.2 的内置 autoretry_for 只同步包装 run()；本示例改用额外装饰器处理 await 异常\n")
 
     print("── 基本 autoretry_for ──")
     r1 = await asyncio.to_thread(basic_autoretry.delay, 3)
@@ -231,8 +305,9 @@ async def main() -> None:
         print(f"  📋 {param:.<25} {desc}")
     print()
 
-    print("💡 autoretry_for 在 async task 中同样成立")
-    print("💡 复杂场景 (不同异常不同策略) 仍需手动 self.retry()")
+    print("💡 原生 autoretry_for 在 celery-aio-pool + async def 下接不住 await 期间抛出的异常")
+    print("💡 本示例通过 opt-in 的 @async_autoretry(...) 装饰器恢复 retry_backoff / retry_jitter 语义")
+    print("💡 这种写法不会影响同步任务；没有显式加装饰器的任务完全不变")
     print("💡 生产必备: retry_backoff=True + retry_jitter=True + 合理的 retry_backoff_max")
 
 
