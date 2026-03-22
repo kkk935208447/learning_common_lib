@@ -64,7 +64,7 @@ call_counts: dict[str, int] = {}
     default_retry_delay=1,
     name=f"{MODULE}.basic_autoretry",
 )
-@async_autoretry(autoretry_for=(TransientError,))
+@async_autoretry(autoretry_for=(TransientError,))   # 自定义的装饰器
 async def basic_autoretry(self: Task, succeed_on: int = 3) -> str:
     task_key = f"basic_{self.request.id}"
     call_counts.setdefault(task_key, 0)
