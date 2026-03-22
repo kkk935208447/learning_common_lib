@@ -52,7 +52,7 @@ uv sync
 | 13 | `examples/05_result_backend/01_async_result.py` | async task + AsyncResult 状态机、get/forget | 在 async-first worker 下继续理解状态语义 |
 | 14 | `examples/05_result_backend/02_result_expiry.py` | async task + result_expires 配置 | 防止 Redis 内存爆炸 |
 | 15 | `examples/06_error_handling/01_retry_basics.py` | async task + self.retry/max_retries/countdown | 任务失败不可怕，重试才是关键 |
-| 16 | `examples/06_error_handling/02_autoretry.py` | async task + autoretry_for/retry_backoff | 自动重试更省心 |
+| 16 | `examples/06_error_handling/02_autoretry.py` | async task + `@async_autoretry(...)` 装饰器/retry_backoff | 自动重试更省心 |
 
 > 每个示例需要两个终端：一个启动 worker，一个运行脚本。详见各文件顶部 docstring。
 

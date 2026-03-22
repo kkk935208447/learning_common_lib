@@ -116,10 +116,10 @@ celery教程与Redlock/
 ```bash
 cd src/learning_common_lib/redis_lession/celery教程与Redlock
 
-# 如果之前运行过其他示例，建议先清理 Redis：
+# 如果之前运行过其他示例，建议先清理 Redis（注意：该命令需要环境中已安装 redis-cli 工具），如果没有安装 redis-cli 工具，也可以使用上文 Python 代码清理 Redis 内容
 redis-cli -a 123456 -n 0 FLUSHDB && redis-cli -a 123456 -n 1 FLUSHDB
 
-# 终端 1: 启动 Worker
+# 终端 1: 启动 Worker。注意：如果没有启动 Worker 时，率先启动了客户端脚本，会导致任务积压到redis队列中，可能会对后面启动的 Worker 的任务进行污染。如何清理这些任务？使用命令 purge -f 例如：uv run celery -A examples.06_error_handling.01_retry_basics purge -f
 celery -A examples.01_app_and_config.01_celery_hello worker -l info -P solo
 
 # 终端 2: 运行示例
@@ -224,7 +224,7 @@ celery -A myproj worker -l info
 | 03 | 任务调用 | delay/apply_async、Signature、countdown/ETA |
 | 04 | Async Worker | `prefork → gevent → custom aio pool`、`asyncio.run()`、mixed deployment |
 | 05 | 结果后端 | `custom aio pool + async task` 下的 AsyncResult 状态机、result_expires |
-| 06 | 错误与重试 | `custom aio pool + async task` 下的 self.retry() / autoretry_for / 指数退避 |
+| 06 | 错误与重试 | `custom aio pool + async task` 下的 self.retry() / opt-in `@async_autoretry(...)` 装饰器 / 指数退避 |
 | 07 | 路由与队列 | 多队列分流、task_routes、优先级队列 |
 | 08 | 定时任务 | Celery Beat、crontab、动态调度 |
 | 09 | 工作流 | chain/group/chord/chunks |

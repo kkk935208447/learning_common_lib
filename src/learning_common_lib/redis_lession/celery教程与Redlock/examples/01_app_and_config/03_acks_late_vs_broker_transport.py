@@ -19,7 +19,8 @@
 生产提醒:
   - acks_late 解决不了幂等性问题；任务仍然需要设计成可重复执行
   - transport_options 也不等于可靠消费，它只是 broker 这一层的补充配置
-注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py
+**推荐：**你使用 purge -f 命令清理队伍里的任务，避免对后面启动的 Worker 的任务进行污染。命令为：uv run celery -A examples.01_app_and_config.03_acks_late_vs_broker_transport purge -f
 """
 
 from __future__ import annotations

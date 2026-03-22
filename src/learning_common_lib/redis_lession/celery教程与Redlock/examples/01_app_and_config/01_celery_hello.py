@@ -25,7 +25,8 @@
   - delay() 是 apply_async() 的快捷方式，等价于 apply_async(args, kwargs)
   - apply() 始终在当前进程执行，不经过 broker，用于测试
   - AsyncResult.get() 会阻塞直到任务完成或超时
-注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py 
+注意: 手动运行多个示例前建议清理 Redis: redis-cli -a 123456 -n 0 FLUSHDB 或者运行 src/learning_common_lib/redis_lession/celery教程与Redlock/examples/清理redis的代码.py
+**推荐：**你使用 purge -f 命令清理队伍里的任务，避免对后面启动的 Worker 的任务进行污染。命令为：uv run celery -A examples.01_app_and_config.01_celery_hello purge -f
 """
 
 from __future__ import annotations
