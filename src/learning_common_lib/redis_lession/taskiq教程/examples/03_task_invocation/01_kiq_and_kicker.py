@@ -73,7 +73,7 @@ broker = ListQueueBroker(
 async def process_order(
     order_id: int,
     amount: float,
-    context: Context = TaskiqDepends(),
+    context: Context = TaskiqDepends(),  # 它是 TaskIQ 的“依赖注入标记”。当 worker 执行到 process_order 任务时，TaskIQ 会自动构造并注入 Context 参数（里面包含当前任务的 message、labels、task_id 等信息），这样你不需要在客户端手动把这些元数据作为参数传进来
 ) -> dict:
     """处理订单 — 模拟业务逻辑。"""
     labels = dict(context.message.labels)
