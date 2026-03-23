@@ -46,6 +46,7 @@ import asyncio
 import os
 
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -62,6 +63,7 @@ _broker = ListQueueBroker(
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
     result_ex_time=3600,  # 结果过期时间：3600 秒 = 1 小时
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 
 # ⚠️ 关键：with_result_backend() 会原地更新当前 broker，并返回 self。
@@ -73,6 +75,7 @@ broker = _broker.with_result_backend(result_backend)
 
 # taskiq 与celery不同，celery task_name有一套完整自动拼接逻辑，而taskiq的自动拼接容易出错。
 # TaskIQ 中 task_name 必须在当前 broker 的任务注册表中保持唯一，且 producer / worker 两侧必须完全一致。对于会被直接运行的教程文件，建议显式指定稳定的 task_name，避免脚本作为 __main__ 运行时，默认 task_name 推导受启动方式影响。
+# 一套比较万金油的定义 task_name 的方式：模块名.xxx.xxx.模块名.函数名
 @broker.task(task_name="examples.01_broker_and_config.02_result_backend.add")
 async def add(x: int, y: int) -> int:
     """两数相加，返回结果将存储到 ResultBackend。"""
