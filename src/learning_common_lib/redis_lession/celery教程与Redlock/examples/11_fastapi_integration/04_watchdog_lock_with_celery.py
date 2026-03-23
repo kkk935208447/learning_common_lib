@@ -1,11 +1,12 @@
 """
 目标: 在 async-first worker 中对比“无看门狗”和“有看门狗” (Watchdog Comparison with async task)
 关键概念:
-  - 建议先运行 `03_python_redis_lock_watchdog_minimal.py`，先看懂 python-redis-lock 自己如何续期
+  - 建议先运行 `03_python_redis_lock_watchdog_minimal2.py`，先看懂纯异步看门狗自己如何续期
   - worker 侧任务已经切到 `custom aio pool + async def task`
   - `auto_renewal=False` 时，长任务中途可能失锁
   - `auto_renewal=True` 时，看门狗会持续续期
-关键 API: async_distributed_lock, auto_renewal, redis_lock.Lock, pttl()
+  - Redis 客户端使用 `redis.asyncio`，真实锁 key 为 `lock:{逻辑名}`
+关键 API: async_distributed_lock, AsyncRedisWatchdogLock, auto_renewal, pttl()
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
   - 从上级目录: cd examples/11_fastapi_integration
@@ -26,17 +27,23 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import redis
+import redis.asyncio as aioredis
 from celery import Celery, Task
 
 try:
-    from ...templates.distributed_lock import async_distributed_lock
+    from ...templates.distributed_lock_aio import (
+        AsyncRedisWatchdogLock,
+        async_distributed_lock,
+    )
 except ImportError:
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from templates.distributed_lock import async_distributed_lock  # type: ignore[no-redef]
+    from templates.distributed_lock_aio import (  # type: ignore[no-redef]
+        AsyncRedisWatchdogLock,
+        async_distributed_lock,
+    )
 
 MODULE = "examples.11_fastapi_integration.04_watchdog_lock_with_celery"
 WORK_SECONDS = 8
@@ -50,7 +57,13 @@ app = Celery(
 )
 app.conf.task_default_queue = "aio_watchdog"
 
-redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2, decode_responses=True)
+redis_client = aioredis.Redis(
+    host="localhost",
+    port=6379,
+    password="123456",
+    db=2,
+    decode_responses=True,
+)
 
 
 def print_section(title: str) -> None:
@@ -92,11 +105,11 @@ def describe_ttl(previous_ms: int | None, current_ms: int) -> str:
 
 
 async def clear_watchdog_keys(order_id: str) -> None:
-    await asyncio.to_thread(redis_client.delete, lock_key(order_id), lock_signal_key(order_id))
+    await redis_client.delete(lock_key(order_id), lock_signal_key(order_id))
 
 
 async def read_lock_pttl(order_id: str) -> int:
-    return await asyncio.to_thread(redis_client.pttl, lock_key(order_id))
+    return await redis_client.pttl(lock_key(order_id))
 
 
 @app.task(bind=True, name=f"{MODULE}.process_order_with_lock_mode")
@@ -127,19 +140,18 @@ async def process_order_with_lock_mode(
 
 
 async def probe_same_lock(order_id: str, expire_seconds: int, label: str) -> bool:
-    import redis_lock
-
     ttl_before = await read_lock_pttl(order_id)
-    probe = redis_lock.Lock(
+    probe = AsyncRedisWatchdogLock(
         redis_client,
         name=lock_resource_name(order_id),
-        expire=expire_seconds,
+        timeout=expire_seconds,
+        blocking_timeout=0.0,
         auto_renewal=False,
     )
-    acquired = await asyncio.to_thread(probe.acquire, blocking=False)
+    acquired = await probe.acquire()
     print(f"  {label}: ttl={format_pttl(ttl_before)}, acquired={acquired}")
     if acquired:
-        await asyncio.to_thread(probe.release)
+        await probe.release()
         print(f"  {label}: release=True")
     return acquired
 
@@ -245,7 +257,7 @@ async def main() -> None:
     print("  结论 1: 无看门狗时，长任务运行到一半就可能失锁。")
     print("  结论 2: 有看门狗时，TTL 会周期性回升，中途探测拿不到锁。")
     print("  结论 3: 两种模式在任务结束后都应该把锁释放掉。")
-    await asyncio.to_thread(redis_client.close)
+    await redis_client.aclose()
 
 
 if __name__ == "__main__":

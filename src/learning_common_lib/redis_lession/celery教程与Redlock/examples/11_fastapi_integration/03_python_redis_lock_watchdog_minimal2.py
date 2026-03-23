@@ -1,15 +1,16 @@
 """
 目标: AsyncRedisWatchdogLock / async_distributed_lock 的若干集成案例（需本地 Redis）
 关键概念:
-  - 与 `templates/distributed_lock_aio.py` 配套，验证异步锁、互斥、超时失败、看门狗续期
+  - 与 `templates/distributed_lock_aio.py` 配套，验证纯异步锁、互斥、超时失败、看门狗续期
   - 使用 `redis.asyncio`，与其它示例共用 host/port/password/db
+  - 模块内统一约定 Redis 中真实锁 key 为 `lock:{逻辑名}`
 关键 API: async_distributed_lock, AsyncRedisWatchdogLock, LockAcquireError, pttl()
 目录导航:
   - 从项目根目录: cd src/learning_common_lib/redis_lession/celery教程与Redlock
   - 从上级目录: cd examples/11_fastapi_integration
 运行方式:
   Client:
-    python examples/11_fastapi_integration/05_distributed_lock_aio_cases.py
+    python examples/11_fastapi_integration/03_python_redis_lock_watchdog_minimal2.py
 预期现象:
   - 案例 1：持锁期间 key 存在，退出后释放
   - 案例 2：两个协程串行通过同一把锁（第二个会等待）
@@ -58,8 +59,12 @@ def print_section(title: str) -> None:
     print(f"── {title} ──")
 
 
+def lock_key(name: str) -> str:
+    return f"lock:{name}"
+
+
 async def pttl_ms(r: aioredis.Redis, lock_name: str) -> int:
-    return await r.pttl(lock_name)
+    return await r.pttl(lock_key(lock_name))
 
 
 async def delete_if_any(r: aioredis.Redis, *names: str) -> None:
@@ -74,7 +79,7 @@ async def delete_if_any(r: aioredis.Redis, *names: str) -> None:
 
 async def case_basic_acquire_release(r: aioredis.Redis) -> None:
     name = f"{KEY_PREFIX}:basic"
-    await delete_if_any(r, name)
+    await delete_if_any(r, lock_key(name))
 
     async with async_distributed_lock(
         r,
@@ -100,7 +105,7 @@ async def case_basic_acquire_release(r: aioredis.Redis) -> None:
 
 async def case_two_coroutines_mutex(r: aioredis.Redis) -> None:
     name = f"{KEY_PREFIX}:mutex"
-    await delete_if_any(r, name)
+    await delete_if_any(r, lock_key(name))
 
     order: list[int] = []
 
@@ -138,7 +143,7 @@ async def case_two_coroutines_mutex(r: aioredis.Redis) -> None:
 
 async def case_acquire_timeout_raises(r_holder: aioredis.Redis, r_waiter: aioredis.Redis) -> None:
     name = f"{KEY_PREFIX}:busy"
-    await delete_if_any(r_holder, name)
+    await delete_if_any(r_holder, lock_key(name))
 
     lock = AsyncRedisWatchdogLock(
         r_holder,
@@ -179,7 +184,7 @@ async def case_acquire_timeout_raises(r_holder: aioredis.Redis, r_waiter: aiored
 
 async def case_watchdog_renews_ttl(r: aioredis.Redis) -> None:
     name = f"{KEY_PREFIX}:watchdog"
-    await delete_if_any(r, name)
+    await delete_if_any(r, lock_key(name))
 
     ttl_sec = 2.0
     renew_interval = ttl_sec * 2 / 3  # 与类默认值一致
@@ -221,7 +226,7 @@ async def case_watchdog_renews_ttl(r: aioredis.Redis) -> None:
 
 
 async def amain() -> None:
-    print_section("distributed_lock_aio 集成案例（需 Redis 可连）")
+    print_section("distributed_lock_aio 纯异步锁集成案例（需 Redis 可连）")
     r = aioredis.Redis(**REDIS_KWARGS)
     r2 = aioredis.Redis(**REDIS_KWARGS)
     try:

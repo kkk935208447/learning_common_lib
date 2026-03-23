@@ -59,7 +59,7 @@ pkill -9 -f celery
 | celery-aio-pool | 0.1.0rc8+ | 第 4 章 async worker / async task |
 | gevent | 25.5+ | 第 4 章官方 greenlet 中间态 |
 | redis | 5.0+ | redis-py（内置 Lock 支持） |
-| python-redis-lock | 4.0+ | 企业级分布式锁自动续期 |
+| python-redis-lock | 4.0+ | 同步 Redis 锁兼容模板（可选） |
 | flower | 2.0+ | 第 10 章监控 |
 | fastapi | 0.100+ | 第 11 章集成 |
 | uvicorn | 0.20+ | 第 11 章集成 |
@@ -74,7 +74,10 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # 应返回 PONG
 python -c "import redis; print(redis.Redis(host='localhost', port=6379, password='123456').ping())"
 
 # 2. 安装依赖
-uv add "celery[redis]" "celery-aio-pool>=0.1.0rc8" "gevent>=25.5.1" "redis>=5.0" "python-redis-lock>=4.0.0" flower fastapi uvicorn
+uv add "celery[redis]" "celery-aio-pool>=0.1.0rc8" "gevent>=25.5.1" "redis>=5.0" flower fastapi uvicorn
+
+# 如果你还需要同步 Redis / python-redis-lock 兼容模板，再额外安装
+uv add "python-redis-lock>=4.0.0"
 ```
 
 
@@ -107,7 +110,8 @@ celery教程与Redlock/
     ├── celery_app.py        ← async-first App 工厂 + producer 侧异步包装
     ├── error_handling.py    ← 异常层级树
     ├── task_base.py         ← async-first 任务基类
-    ├── distributed_lock.py  ← 企业级 python-redis-lock 分布式锁模板
+    ├── distributed_lock.py  ← 同步 Redis / python-redis-lock 兼容模板
+    ├── distributed_lock_aio.py ← 纯异步 Redis 看门狗锁模板
     └── fastapi_celery.py    ← FastAPI 集成
 ```
 
@@ -178,9 +182,12 @@ uv run python smoke/run_all_examples.py
 
 再补一条很容易混淆的边界：
 
-- 第 11 章里的 `send_task()`、`AsyncResult`、`async_distributed_lock()` 也都不是“底层 fully async 客户端”
-- 它们仍然分别建立在 Celery 同步客户端、同步结果客户端、`python-redis-lock` 同步锁之上
-- 教程里使用 `asyncio.to_thread(...)` 的目的，是让 async 调用侧不阻塞事件循环，而不是声称这些底层实现已经完成 async 化
+- 第 11 章里的 `send_task()`、`AsyncResult` 仍然不是“底层 fully async 客户端”
+- 它们仍然分别建立在 Celery 同步客户端、同步结果客户端之上
+- 但锁模板现在拆成两条线：
+  - `templates/distributed_lock_aio.py` 是原生 `redis.asyncio` 实现
+  - `templates/distributed_lock.py` 是同步 Redis / `python-redis-lock` 兼容实现
+- 教程里使用 `asyncio.to_thread(...)` 的目的，是让 async 调用侧不阻塞事件循环，而不是声称所有底层实现都已经完成 async 化
 
 ## 命名与启动的生产约定
 
@@ -234,7 +241,8 @@ celery -A myproj worker -l info
 第 11 章中的锁示例分为三层：
 - `02_distributed_lock.py`：基础篇，用上下文管理器演示“短任务固定 TTL 正常”与“长任务固定 TTL 失锁”，并打印客户端侧 TTL 时间轴
 - `03_python_redis_lock_watchdog_minimal.py`：最小看门狗篇，不引入 Celery，只看 `python-redis-lock` 的 `auto_renewal` 如何续期
-- `04_watchdog_lock_with_celery.py`：企业篇，把同样结论放进 `custom aio pool + async task` 的 worker 场景
+- `03_python_redis_lock_watchdog_minimal2.py`：纯异步看门狗篇，不引入 Celery，只看 `redis.asyncio` + asyncio 看门狗如何续期
+- `04_watchdog_lock_with_celery.py`：企业篇，把纯异步看门狗放进 `custom aio pool + async task` 的 worker 场景
 
 第 11 章默认先坚持上下文管理器视角：
 

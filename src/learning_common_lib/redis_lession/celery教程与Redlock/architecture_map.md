@@ -131,9 +131,9 @@ chunks:   [item1, item2, ..., itemN]
 - 使用 redis-py Lock 讲解 SET NX EX + 释放语义
 
 企业模板:
-- 使用 python-redis-lock
-- 支持 auto_renewal 看门狗续期
-- 更适合 Celery 长任务
+- 纯异步主路径使用 `redis.asyncio` + asyncio 看门狗
+- 同步兼容路径保留 `python-redis-lock`
+- 两条路径都适合 Celery 长任务，但 async 项目优先走纯异步模板
 ```
 
 ## Worker 生命周期

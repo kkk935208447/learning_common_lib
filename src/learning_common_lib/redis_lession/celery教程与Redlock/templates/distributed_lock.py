@@ -1,5 +1,5 @@
 """
-解决什么问题: 为分布式部署的多个服务实例提供基于单 Redis 的企业级分布式锁，防止同一资源被并发处理
+解决什么问题: 为仍在使用同步 Redis 客户端的项目提供基于单 Redis 的兼容型分布式锁，防止同一资源被并发处理
 输入输出约定: distributed_lock / async_distributed_lock 作为上下文管理器使用；
     @with_lock 装饰器只是可选语法糖（如 "order:{order_id}"）
 失败策略: 获取锁超时抛出 LockAcquireError（可重试异常），由 BaseTask 自动重试
@@ -9,12 +9,12 @@
     async_distributed_lock() 只是通过 asyncio.to_thread(...) 让 async 调用侧不阻塞事件循环，并不等于底层锁实现已经完全 async 化
 
 锁的三种使用方式:
-  1. async_distributed_lock()   — async-first 主路径，首选
-  2. distributed_lock()         — 同步上下文管理器（兼容同步场景）
+  1. distributed_lock()         — 同步上下文管理器（本模块主路径）
+  2. async_distributed_lock()   — 过渡兼容包装，只适合短期保留同步锁底座的 async 调用侧
   3. @with_lock(name_template)  — 补充语法糖，只在重复样板很多时再启用
 
 注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
-    对于异步场景，最好使用 纯异步锁
+    对于异步场景，最好使用 templates/distributed_lock_aio.py 里的纯异步锁
 """
 
 from __future__ import annotations
@@ -284,7 +284,7 @@ def _resolve_redis_client(arguments: dict[str, Any], redis_attr: str) -> Any:
 
 
 def _demo() -> None:
-    """演示：基于 python-redis-lock 的 async-first 企业级分布式锁用法。"""
+    """演示：基于 python-redis-lock 的同步兼容分布式锁用法。"""
     import redis
 
     print("🔒 === 企业级单 Redis 分布式锁演示（async-first） ===\n")

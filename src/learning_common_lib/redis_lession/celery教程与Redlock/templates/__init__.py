@@ -2,6 +2,9 @@
 Celery 企业级模板包。
 
 提供 async-first 的配置、App 工厂、任务基类、分布式锁与 FastAPI 集成能力。
+其中:
+- `distributed_lock.py` 负责同步 Redis / python-redis-lock 路径
+- `distributed_lock_aio.py` 负责 redis.asyncio 的纯异步看门狗锁路径
 """
 
 from .celery_app import (
@@ -14,7 +17,12 @@ from .celery_app import (
 )
 from .async_autoretry import async_autoretry
 from .celery_config import CeleryConfig
-from .distributed_lock import async_distributed_lock, distributed_lock, with_lock
+from .distributed_lock import distributed_lock, with_lock
+from .distributed_lock_aio import (
+    AsyncRedisWatchdogLock,
+    async_distributed_lock,
+    with_async_lock,
+)
 from .error_handling import (
     ExternalServiceError,
     LockAcquireError,
@@ -62,8 +70,10 @@ __all__ = [
     "BaseTask",
     "async_get_result",
     "distributed_lock",
+    "AsyncRedisWatchdogLock",
     "async_distributed_lock",
     "with_lock",
+    "with_async_lock",
 ]
 
 if celery_lifespan is not None:

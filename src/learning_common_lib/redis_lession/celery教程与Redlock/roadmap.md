@@ -96,8 +96,9 @@ uv sync
 | 30 | `templates/celery_app.py` | async-first App 工厂 + producer 侧兼容包装 |
 | 31 | `templates/error_handling.py` | 异常层级树 |
 | 32 | `templates/task_base.py` | async-first 任务基类 |
-| 33 | `templates/distributed_lock.py` | 企业级 python-redis-lock 分布式锁 |
-| 34 | `templates/fastapi_celery.py` | async-first worker 的 FastAPI 集成 |
+| 33 | `templates/distributed_lock_aio.py` | 企业级纯异步 Redis 看门狗锁 |
+| 34 | `templates/distributed_lock.py` | 同步 Redis / python-redis-lock 兼容锁模板 |
+| 35 | `templates/fastapi_celery.py` | async-first worker 的 FastAPI 集成 |
 
 ## 建议学习方式
 

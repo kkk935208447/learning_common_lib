@@ -102,8 +102,8 @@
 
 - 锁超时（timeout）必须大于任务最大执行时间，否则锁提前释放导致并发问题
 - 教程基础篇可先用 redis-py 内置 `Lock` 理解原理
-- 企业模板默认使用 `python-redis-lock`，优先开启 `auto_renewal=True`
-- `async_distributed_lock()` 的含义是“async 调用侧不阻塞事件循环”，不是“锁客户端已经 fully async”
+- 纯异步项目优先使用 `templates/distributed_lock_aio.py`，它是原生 `redis.asyncio` 看门狗实现
+- `templates/distributed_lock.py` 继续保留 `python-redis-lock` 同步兼容路径
 - 优先用 `async with async_distributed_lock(...)` / `with distributed_lock(...)` 明确标出临界区，装饰器只在重复样板很多时再上
 - 锁名使用业务语义：`lock:order:{order_id}`，不要用 UUID
 - 获取锁失败时快速失败（抛异常），不要无限等待
