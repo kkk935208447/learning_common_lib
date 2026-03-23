@@ -1,5 +1,6 @@
 """
 目标: 对比固定 TTL 锁在短任务与长任务中的表现 (Fixed TTL Lock Comparison)
+注意: 该文档演示的 redis 是同步的库，你也可以用 import redis.asyncio 来引入异步 Redis 客户端。
 关键概念:
   - 单 Redis 锁已经可以保护分布式部署的多个服务实例
   - 短任务 + 固定 TTL 通常够用
@@ -23,8 +24,7 @@ from typing import Any
 
 import redis
 
-# 与教程其他示例共用本地 Redis；decode_responses=True 便于直接打印字符串形式的 key/value
-# 该文档演示的 redis 是同步的库，你也可以用 import redis.asyncio 来引入异步 Redis 客户端。
+# 与教程其他示例共用本地 Redis；decode_responses=True 便于直接打印字符串形式的 key/value。 该文档演示的 redis 是同步的库，你也可以用 import redis.asyncio 来引入异步 Redis 客户端。
 redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2, decode_responses=True)
 
 

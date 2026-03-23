@@ -14,12 +14,13 @@
   3. @with_lock(name_template)  — 补充语法糖，只在重复样板很多时再启用
 
 注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
-    对于异步场景，最好使用 纯异步锁，如 aioredlock (pip install aioredlock）
+    对于异步场景，最好使用 纯异步锁
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import functools
 import inspect
 import logging
@@ -180,7 +181,7 @@ async def async_distributed_lock(
     基于 python-redis-lock 的线程池包装实现，适合在 async 代码中调用同步锁。
     它解决的是"async 调用侧不阻塞事件循环"，不是把底层 Redis 锁客户端变成原生 async。
     注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
-    对于异步场景，最好使用 纯异步锁，如 aioredlock (pip install aioredlock）
+    对于异步场景，最好使用 纯异步锁
     """
     lock = _build_lock(redis_client, name, timeout, auto_renewal=auto_renewal)
     acquired = await asyncio.to_thread(
