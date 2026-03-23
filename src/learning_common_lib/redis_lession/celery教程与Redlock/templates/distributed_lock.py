@@ -13,8 +13,8 @@
   2. async_distributed_lock()   — 过渡兼容包装，只适合短期保留同步锁底座的 async 调用侧
   3. @with_lock(name_template)  — 补充语法糖，只在重复样板很多时再启用
 
-注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
-    对于异步场景，最好使用 templates/distributed_lock_aio.py 里的纯异步锁
+注意：对于异步场景，最好使用 templates/distributed_lock_aio.py 里的纯异步锁。
+    本模块的 async 包装只是同步锁的线程池适配层，不承担纯异步看门狗主路径。
 """
 
 from __future__ import annotations
@@ -180,16 +180,29 @@ async def async_distributed_lock(
 
     基于 python-redis-lock 的线程池包装实现，适合在 async 代码中调用同步锁。
     它解决的是"async 调用侧不阻塞事件循环"，不是把底层 Redis 锁客户端变成原生 async。
-    注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，这里只是一种展示，该程序可能会存在锁释放异常。
-    对于异步场景，最好使用 纯异步锁
+    注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，
+    这里保留它只是为了兼容旧项目或过渡期接入。对于异步场景，最好使用纯异步锁。
+
+    设计说明:
+      1. 获取锁仍然调用同步 lock.acquire(...)，这里只是用 asyncio.to_thread(...) 把阻塞边界移出事件循环。
+      2. 释放锁时继续用 asyncio.to_thread(lock.release)；外层再包一层 asyncio.shield(...)，
+         尽量保证协程被取消时，真正的 release() 还能跑完。
+      3. 这并不能把底层线程看门狗变成 asyncio 原生能力，所以它依旧不适合当作异步锁主实现。
     """
+    # 这里构造出来的仍然是 python-redis-lock 的同步锁对象；
+    # 下面只是把 acquire/release 两个阻塞调用放进线程池，不改变锁对象本身的性质。
     lock = _build_lock(redis_client, name, timeout, auto_renewal=auto_renewal)
+
+    # 获取锁是同步阻塞调用。to_thread 的意义只是：
+    # “不要把事件循环卡在 lock.acquire(...) 上”，而不是“底层锁已经异步化”。
     acquired = await asyncio.to_thread(
         lock.acquire,
         blocking=True,
         timeout=blocking_timeout,
     )
     if not acquired:
+        # 获取失败直接抛出可重试异常，让上层任务框架决定是否重试，
+        # 不在这里做无限等待或静默吞掉失败。
         raise LockAcquireError(
             f"获取锁失败: {name}",
             detail={
@@ -204,7 +217,9 @@ async def async_distributed_lock(
         yield lock
     finally:
         try:
-            # ✅ shield 保护，防止二次 cancel 打断释放操作
+            # shield 保护的是“当前 await 不要被二次 cancel 打断”，
+            # to_thread 负责把同步 release() 放到工作线程里执行。
+            # 两者组合后的目标很明确：尽量把锁释放动作真正送达到底层同步客户端。
             await asyncio.shield(asyncio.to_thread(lock.release))
         except Exception as exc:
             _log_release_exception(

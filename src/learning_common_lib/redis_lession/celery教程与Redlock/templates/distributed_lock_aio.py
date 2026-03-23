@@ -274,14 +274,23 @@ class AsyncRedisWatchdogLock:
         """owner task 结束但锁仍未显式释放时，触发兜底清理。"""
         if not self._acquired:
             return
+
+        reason = self._describe_owner_done_reason(task)
+        self._schedule_owner_done_cleanup(reason)
+
+    def _describe_owner_done_reason(self, task: asyncio.Task[Any]) -> str:
+        """把 owner task 的结束原因转成日志友好的短字符串。"""
         if task.cancelled():
-            reason = "cancelled"
-        else:
-            exc = task.exception()
-            reason = type(exc).__name__ if exc is not None else "finished_without_release"
+            return "cancelled"
+
+        exc = task.exception()
+        if exc is None:
+            return "finished_without_release"
+        return type(exc).__name__
+
+    def _schedule_owner_done_cleanup(self, reason: str) -> None:
+        """把 owner-done 兜底释放调度成独立 task，避免把 await 链塞进回调函数。"""
         try:
-            # 不在 done callback 里直接同步清理，避免把复杂 await 链塞进回调；
-            # 这里改为调度一个独立 cleanup task 走正常的 release() 路径。
             self._owner_done_cleanup_task = asyncio.create_task(
                 self._release_after_owner_done(reason),
                 name=f"redis-lock-owner-cleanup:{self.redis_key}",
@@ -298,19 +307,25 @@ class AsyncRedisWatchdogLock:
             )
 
     async def _release_after_owner_done(self, reason: str) -> None:
-        if not self._acquired:
-            return
-        logger.warning(
-            "owner task 已结束但锁仍未释放，开始执行兜底释放: lock_name=%s reason=%s",
-            self.name,
-            reason,
-            extra={
-                "lock_name": self.name,
-                "lock_key": self.redis_key,
-                "owner_done_reason": reason,
-            },
-        )
-        await self.release()
+        try:
+            if not self._acquired:
+                return
+
+            logger.warning(
+                "owner task 已结束但锁仍未释放，开始执行兜底释放: lock_name=%s reason=%s",
+                self.name,
+                reason,
+                extra={
+                    "lock_name": self.name,
+                    "lock_key": self.redis_key,
+                    "owner_done_reason": reason,
+                },
+            )
+            # cleanup task 自己也可能被取消；这里再加一层 shield，
+            # 尽量保证真实的 release() 不被外层取消链打断。
+            await asyncio.shield(self.release())
+        finally:
+            self._owner_done_cleanup_task = None
 
     async def __aenter__(self) -> AsyncRedisWatchdogLock:
         acquired = await self.acquire()
