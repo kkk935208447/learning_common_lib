@@ -70,6 +70,10 @@ def build_stream_broker() -> RedisStreamBroker:
         queue_name=DEFAULT_STREAM,
         consumer_group_name=CONSUMER_GROUP_NAME,
         additional_streams={
+            # 这里的 ">" 直接传给 Redis XREADGROUP：
+            # 含义是“从这个 stream 中读取尚未投递给任何 consumer 的新消息”。
+            # 当前脚本要证明的是“default / high_priority / batch 都按正常新任务流转”，
+            # 所以 additional_streams 应该写 ">"，而不是 "0" / "0-0" 这种偏向 pending/历史消息语义的值。
             HIGH_PRIORITY_STREAM: ">",
             BATCH_STREAM: ">",
         },

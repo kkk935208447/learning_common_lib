@@ -62,6 +62,10 @@ def build_stream_broker() -> RedisStreamBroker:
         queue_name=DEFAULT_STREAM,
         consumer_group_name=CONSUMER_GROUP_NAME,
         additional_streams={
+            # 这里的 ">" 不是占位符，而是 Redis XREADGROUP 的特殊游标：
+            # 表示“读取这个 consumer group 里尚未投递给任何 consumer 的新消息”。
+            # 当前示例要演示的是“像正常队列一样消费 high / batch 的新任务”，
+            # 所以这里应该写 ">"，而不是 "0" / "0-0" 之类用于 pending/历史消息的起点。
             HIGH_PRIORITY_STREAM: ">",
             BATCH_STREAM: ">",
         },
