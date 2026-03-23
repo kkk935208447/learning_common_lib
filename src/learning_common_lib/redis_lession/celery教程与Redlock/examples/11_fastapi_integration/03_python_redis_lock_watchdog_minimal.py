@@ -1,5 +1,6 @@
 """
 目标: 用最小 python-redis-lock 示例看懂看门狗续期 (Minimal Watchdog Demo)
+# 注意：python-redis-lock 是同步的库。
 关键概念:
   - 这是纯 Redis 锁实验，不依赖 Celery worker
   - `auto_renewal=False` 时，TTL 会自然归零

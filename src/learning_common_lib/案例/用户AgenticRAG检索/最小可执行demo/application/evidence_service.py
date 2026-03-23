@@ -167,17 +167,17 @@ class EvidenceService:
         *,
         task_id: int,
         plan_version: int,
+        produced_by_subtasks: set[str] | None = None,
     ) -> list[dict[str, Any]]:
-        cards = list(
-            (
-                await session.scalars(
-                    select(EvidenceCard)
-                    .where(EvidenceCard.task_id == task_id)
-                    .where(EvidenceCard.plan_version == plan_version)
-                    .order_by(EvidenceCard.created_at.asc())
-                )
-            ).all()
+        stmt = (
+            select(EvidenceCard)
+            .where(EvidenceCard.task_id == task_id)
+            .where(EvidenceCard.plan_version == plan_version)
+            .order_by(EvidenceCard.created_at.asc())
         )
+        if produced_by_subtasks:
+            stmt = stmt.where(EvidenceCard.produced_by_subtask.in_(tuple(sorted(produced_by_subtasks))))
+        cards = list(((await session.scalars(stmt)).all()))
         return [
             {
                 "card_uid": card.card_uid,
@@ -194,6 +194,27 @@ class EvidenceService:
             }
             for card in cards
         ]
+
+    async def _load_reused_subtasks_by_plan(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+        plan_version: int,
+    ) -> dict[int, set[str]]:
+        task = await session.scalar(select(SearchTask).where(SearchTask.id == task_id))
+        if task is None:
+            return {}
+        control_json = json_safe(task.control_json or {})
+        reused_specs = list(control_json.get("reused_subtasks") or [])
+        by_plan: dict[int, set[str]] = {}
+        for item in reused_specs:
+            from_plan_version = int(item.get("from_plan_version") or 0)
+            subtask_code = str(item.get("subtask_code") or "").strip()
+            if from_plan_version <= 0 or from_plan_version >= plan_version or not subtask_code:
+                continue
+            by_plan.setdefault(from_plan_version, set()).add(subtask_code)
+        return by_plan
 
     async def load_plan_evidence_records(
         self,
@@ -215,6 +236,29 @@ class EvidenceService:
             plan_version=plan_version,
         ):
             merged[str(item["card_uid"])] = json_safe(item)
+        reused_subtasks_by_plan = await self._load_reused_subtasks_by_plan(
+            session,
+            task_id=task_id,
+            plan_version=plan_version,
+        )
+        for reused_plan_version, allowed_subtasks in reused_subtasks_by_plan.items():
+            for item in await self.load_evidence_pool(request_id, reused_plan_version):
+                produced_by = str(
+                    item.get("produced_by_subtask")
+                    or (item.get("payload_json") or {}).get("subtask_code")
+                    or ""
+                )
+                card_uid = str(item.get("card_uid") or "")
+                if not card_uid or produced_by not in allowed_subtasks:
+                    continue
+                merged[card_uid] = json_safe(item)
+            for item in await self.build_evidence_pool_items_from_db(
+                session,
+                task_id=task_id,
+                plan_version=reused_plan_version,
+                produced_by_subtasks=allowed_subtasks,
+            ):
+                merged[str(item["card_uid"])] = json_safe(item)
         records = list(merged.values())
         records.sort(
             key=lambda item: (
@@ -272,6 +316,16 @@ class EvidenceService:
             run.data_plane_flush_status = "FAILED"
             await session.flush()
             return {"inserted": 0, "task_id": None, "request_id": None, "plan_version": None}
+        if value_of(run.status) in {"FAILED", "STALE_IGNORED"}:
+            run.data_plane_flush_status = "FAILED"
+            await session.flush()
+            return {
+                "inserted": 0,
+                "task_id": run.task_id,
+                "request_id": payload.get("request_id"),
+                "plan_version": run.plan_version,
+                "stale": True,
+            }
         subtask = await session.scalar(
             select(Subtask)
             .where(Subtask.task_id == run.task_id)

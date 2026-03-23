@@ -133,32 +133,24 @@ export UV_CACHE_DIR=/tmp/uv-cache-deepsearch
 
 下面这些脚本会重建或覆写 demo 数据，不适合在你想保留现有样例数据时直接执行：
 
-1. `scripts/setup/init_db.py`
+1. `scripts/setup/prepare_demo_env.py`
 2. `scripts/demo/demo_flow.py`
-3. `test/setup/test_prepare_upstream.py`
-4. `test/setup/test_prepare_control_plane.py`
-5. `test/offline/run_all.py`
+3. `test/offline/run_all.py`
+4. `test/support/production_stack_suite.py`
 
 ## 初始化
 
-### 初始化上游知识投影与测试 fixture
+统一准备入口：
 
 ```bash
-uv run python test/setup/test_prepare_upstream.py
-```
-
-### 初始化 DeepSearch 控制面
-
-```bash
-uv run python test/setup/test_prepare_control_plane.py
+uv run python scripts/setup/prepare_demo_env.py
 ```
 
 说明：
 
-1. `test/setup/test_prepare_upstream.py` 会重建上游数据库管理 demo 的表，并按 `test/fixtures/knowledge/` 中的数据重新 seed 活动知识。
-2. `test/setup/test_prepare_control_plane.py` 会重建当前 DeepSearch 控制面表。
-3. FastAPI / Celery 启动流程不会自动建表；如果控制面表不存在，必须先执行初始化脚本。
-4. 如果你只想验证 API / worker，不要在已有样例数据上反复执行这些准备脚本。
+1. `scripts/setup/prepare_demo_env.py` 会统一执行两件事：重建上游数据库管理 demo 的表并按 `test/fixtures/knowledge/default_documents.json` 重新 seed 活动知识；然后重建当前 DeepSearch 控制面表。
+2. FastAPI / Celery 启动流程不会自动建表；如果控制面表不存在，必须先执行初始化脚本。
+3. 如果你只想验证 API / worker，不要在已有样例数据上反复执行这些准备脚本。
 
 ## 启动方式
 
@@ -202,7 +194,7 @@ uv run python scripts/demo/demo_flow.py
 
 额外说明：
 
-1. 这个脚本会调用 `reset_tables()` 并重新 seed 上游活动知识。
+1. 这个脚本会调用统一准备入口并直接复用正式服务层提交与澄清逻辑。
 2. 它更适合联调，不适合作为保留现场数据时的只读演示。
 
 当前预期：
@@ -252,10 +244,10 @@ uv run python scripts/demo/offline_submit_demo.py
 
 目录约定：
 
-1. `test/setup/`：初始化脚本
+1. `scripts/setup/`：统一初始化与 seed 入口
 2. `test/offline/`：离线回归脚本
 3. `test/contract/`：HTTP 契约回归脚本
-4. `test/support/`：共享 runner、场景适配器、准备逻辑和断言逻辑
+4. `test/support/`：共享 runner、场景适配器、测试注册表和断言逻辑
 5. `test/fixtures/knowledge/`：上游知识库测试数据
 6. `test/fixtures/scenarios/`：场景定义，控制虚拟 LLM、检索返回、故障注入和预期结果
 7. `test/results/`：测试执行输出目录
@@ -280,24 +272,28 @@ uv run python scripts/demo/offline_submit_demo.py
 1. 除 `test_checkpoint_degraded_recovery.py` 以外，其余脚本默认都使用你当前 `DEEPSEARCH_DEMO_REDIS_*` 配置去连接真实 Redis；如果 Redis 密码不是默认值，先显式导出环境变量。
 2. `test_checkpoint_degraded_recovery.py` 会在脚本进程内临时把 `DEEPSEARCH_DEMO_REDIS_PASSWORD` 改成错误值，用来验证 checkpoint 会自动降级到 memory backend。这个脚本打印 `backend=memory`、`degraded=true` 才是成功，不表示你的线上配置有问题。
 3. `test/offline/*.py` 里的大多数脚本都假设 `worker + beat` 已经运行；如果只启动了 API，没有启动 worker，任务会长时间停在 `PENDING / WAITING_SUBTASKS`。
-4. `test/offline/run_all.py` 会先重建上游数据和当前控制面表，然后再逐条执行离线脚本；它适合回归，不适合保留现场数据。
-5. `test/support/production_stack_suite.py` 会自己执行初始化、清队列、拉起 `worker + beat + api`，并在结束后关闭进程。运行它之前不要再手工保留一套同目录下的 API / worker 进程，避免日志和队列互相干扰。
-6. `test/support/production_stack_suite.py` 默认使用端口 `8097`，而日常 `api/app.py` 默认端口是 `8092`；如果你自己改过环境变量，先确认不会冲突。
-7. 如果你在受限环境中运行，建议统一加上 `UV_CACHE_DIR=/tmp/uv-cache`，避免 `uv` 尝试写用户目录缓存失败。
+4. `test/offline/run_all.py` 会先 purge 队列，再执行统一准备脚本，然后逐条执行离线脚本；它适合回归，不适合保留现场数据。
+5. 如果你是单独运行某一条 `test/offline/*.py`：
+   先确认只保留一套 `worker + beat`，不要混跑多套同目录 worker。
+   建议在执行前先手工 `uv run celery -A workers.celery_app:celery_app purge -f` 清理残留消息，避免旧消息命中新重建的数据表。
+   如果是临时为这一条脚本启动的 `worker + beat`，脚本跑完后请手工停止，避免 maintenance 继续投递任务影响下一轮单测。
+6. `test/support/production_stack_suite.py` 会自己执行初始化、清队列、拉起 `worker + beat + api`，并在结束后关闭进程。运行它之前不要再手工保留一套同目录下的 API / worker 进程，避免日志和队列互相干扰。
+7. `test/support/production_stack_suite.py` 默认使用端口 `8097`，而日常 `api/app.py` 默认端口是 `8092`；如果你自己改过环境变量，先确认不会冲突。
+8. 如果你在受限环境中运行，建议统一加上 `UV_CACHE_DIR=/tmp/uv-cache`，避免 `uv` 尝试写用户目录缓存失败。
+9. 这里更需要关注的是“子进程和文件句柄是否在异常路径被关闭”，而不是单纯的 Python 堆内存；当前 `production_stack_suite.py` 已在启动失败和正常退出两条路径上统一清理 `worker / beat / api` 进程与日志文件句柄。
 
 ## 推荐串行测试步骤
 
 ### 1. 准备数据
 
 ```bash
-uv run python test/setup/test_prepare_upstream.py
-uv run python test/setup/test_prepare_control_plane.py
+uv run python scripts/setup/prepare_demo_env.py
 ```
 
 补充说明：
 
-1. 这两条脚本会清空并重建表，执行前先确认不需要保留当前 demo 数据。
-2. `test_prepare_upstream.py` 只准备上游知识和投影，不会启动当前 deepsearch 的 worker。
+1. 这条脚本会清空并重建上游与当前控制面，执行前先确认不需要保留当前 demo 数据。
+2. 它不会启动当前 deepsearch 的 worker。
 3. 如果你希望完全复现仓库内置回归结果，建议在这一步之前先执行一次 `uv run celery -A workers.celery_app:celery_app purge -f` 清空残留消息。
 
 ### 2. 启动 Celery CLI 进程
@@ -328,26 +324,18 @@ DEEPSEARCH_DEMO_CELERY_EAGER=0 uv run celery -A workers.celery_app:celery_app be
 
 ```bash
 uv run python test/offline/test_offline_happy_path.py
-uv run python test/offline/test_preplan_clarify.py
-uv run python test/offline/test_step_gate_clarify.py
-uv run python test/offline/test_subtask_retry.py
 uv run python test/offline/test_replan_flow.py
-uv run python test/offline/test_stale_result_fencing.py
-uv run python test/offline/test_dispatch_gap_recovery.py
-uv run python test/offline/test_runtime_cache_rebuild.py
-uv run python test/offline/test_checkpoint_degraded_recovery.py
 uv run python test/offline/test_checkpoint_resume_recovery.py
-uv run python test/offline/test_fallback_partial_result.py
-uv run python test/offline/test_invalid_citation_filter.py
 ```
 
 执行注意事项：
 
 1. 这些脚本全部是单次执行、标准输出 JSON；适合直接在终端串行跑，也适合被外层 CI / shell 包裹。
-2. `test_checkpoint_degraded_recovery.py` 不依赖 worker / beat，它只验证构建 graph service 时的 checkpoint 降级行为。
-3. `test_checkpoint_resume_recovery.py` 依赖真实 Redis checkpointer；它会先人为制造一个“planner 已执行但 graph 尚未继续”的 checkpoint，再通过 maintenance 恢复流程验证系统会从 checkpoint 的 `next` 节点继续，而不是重新从 MySQL 推断入口。
-4. `test_replan_flow.py` 当前预期允许 `DEGRADED`，因为 demo 里 planner 模板相对稳定，最终通常会命中 `REPLAN_LOOP_DETECTED` 安全收口。
-5. `test_dispatch_gap_recovery.py`、`test_runtime_cache_rebuild.py`、`test_checkpoint_resume_recovery.py` 都会主动构造恢复场景，执行时看到 maintenance 相关事件数增加是正常的。
+2. 单个离线脚本的规范顺序建议固定为：`purge queue -> prepare_demo_env.py -> 启动一套 worker + beat -> 执行目标脚本 -> 停止临时 worker + beat`。
+3. `test_checkpoint_degraded_recovery.py` 不依赖 worker / beat，它只验证构建 graph service 时的 checkpoint 降级行为。
+4. `test_checkpoint_resume_recovery.py` 依赖真实 Redis checkpointer；它会先人为制造一个“planner 已执行但 graph 尚未继续”的 checkpoint，再通过 maintenance 恢复流程验证系统会从 checkpoint 的 `next` 节点继续，而不是重新从 MySQL 推断入口。
+5. `test_dispatch_gap_recovery.py`、`test_runtime_cache_rebuild.py`、`test_checkpoint_resume_recovery.py` 都会主动构造恢复场景，执行时看到 maintenance 相关事件数增加是正常现象。
+6. 单个离线脚本、离线总脚本、生产式总套件的权威清单都统一放在 `test/support/test_registry.py`，后续新增或调整测试项请优先修改那里。
 
 ### 4. 启动 FastAPI，再执行服务契约测试
 
@@ -381,53 +369,22 @@ uv run python test/offline/run_all.py
 
 补充说明：
 
-1. 这个脚本会先自动执行 `test_prepare_upstream.py` 和 `test_prepare_control_plane.py`，然后按固定顺序调用各个离线脚本。
+1. 这个脚本会先 purge 队列，再执行 `scripts/setup/prepare_demo_env.py`，然后按 `test/support/test_registry.py` 中的离线脚本顺序执行。
 2. 它要求外部 `worker + beat` 已经启动；它自己不会负责拉起 Celery 进程。
 3. 如果你想要“一条命令自己拉起进程并跑完整服务/离线套件”，使用 `test/support/production_stack_suite.py` 更合适。
 
-## 每个测试脚本覆盖的行为
+## 测试清单
 
-1. `test/offline/test_offline_happy_path.py`
-说明：标准离线提交、规划、分发、汇总闭环
+权威测试清单以 `test/support/test_registry.py` 为准：
 
-2. `test/offline/test_preplan_clarify.py`
-说明：`PREPLAN` Clarify 请求、回复、恢复
+1. `OFFLINE_SCRIPT_SPECS`
+说明：定义单个离线脚本的顺序与说明，`test/offline/run_all.py` 直接复用这一份清单。
 
-3. `test/offline/test_step_gate_clarify.py`
-说明：`STEP_GATE` Clarify 与用户口径选择
+2. `SERVICE_SUITE_CASE_SPECS`
+说明：定义 API / SSE 服务契约测试项，`test/contract/test_service_contract.py` 与 `production_stack_suite.py` 共用这一份清单。
 
-4. `test/offline/test_subtask_retry.py`
-说明：通过场景 fixture 模拟“首次检索证据不足，补检后完成”
-
-5. `test/offline/test_replan_flow.py`
-说明：通过场景 fixture 模拟“首次执行失败，进入 Replan 分支”；当前 demo 会因为 planner 模板稳定而命中 `REPLAN_LOOP_DETECTED` 降级收口，但 `task_replanned` 分支可被稳定验证
-
-6. `test/offline/test_stale_result_fencing.py`
-说明：验证旧执行结果只会写 `STALE_IGNORED`，不会推进新计划
-
-7. `test/offline/test_dispatch_gap_recovery.py`
-说明：验证 `CLAIMED/DISPATCHED` 缺口可由 maintenance 补发
-
-8. `test/offline/test_runtime_cache_rebuild.py`
-说明：验证清空 Redis 热缓存后可按 MySQL 重建
-
-9. `test/offline/test_checkpoint_degraded_recovery.py`
-说明：验证 checkpoint Redis 不可用时会降级到 memory backend
-
-10. `test/offline/test_checkpoint_resume_recovery.py`
-说明：验证 maintenance 恢复时会优先从现有 checkpoint 的 `next` 节点继续执行，而不是简单按 MySQL 状态重新推断入口
-
-11. `test/offline/test_fallback_partial_result.py`
-说明：验证降级输出仍保留部分结果、引用和不确定性说明
-
-12. `test/offline/test_invalid_citation_filter.py`
-说明：验证最终引用会过滤掉不属于证据卡集合的 citation
-
-13. `test/contract/test_service_contract.py`
-说明：验证 HTTP + SSE 对外契约，包括 `Last-Event-ID`、Clarify、heartbeat 和服务端口径
-
-14. `test/support/production_stack_suite.py`
-说明：一键拉起完整生产式栈并执行服务契约 + 离线恢复测试总套件，适合做最终验收
+3. `PRODUCTION_OFFLINE_CASE_SPECS`
+说明：定义生产式总套件中的离线断言项，`production_stack_suite.py` 直接复用这一份清单。
 
 ## 场景与数据说明
 
@@ -460,11 +417,11 @@ uv run python test/offline/run_all.py
 说明：首次检索固定返回空结果，只有出现“补充检索”时才返回有效 evidence，用来保证本地补检分支被真实走到
 
 2. `offline_replan_flow.json`
-说明：前 4 轮检索固定失败，用来保证 `task_replanned` 分支被走到；当前 demo 的 planner 模板固定，后续会命中 `REPLAN_LOOP_DETECTED`
+说明：前 4 轮检索固定失败，用来保证 `task_replanned` 分支被走到；进入 Replan 后会切换到扩展补检 DAG，并在后续检索轮次中收敛到完成态
 
 场景与脚本的关系说明：
 
-1. `offline_happy_path / offline_preplan_clarify / offline_step_gate_clarify / offline_subtask_retry / offline_replan_flow` 这 5 个脚本会通过 `setup_test_env(scenario_id=...)` 自动激活对应场景。
+1. `offline_happy_path / offline_preplan_clarify / offline_step_gate_clarify / offline_subtask_retry / offline_replan_flow` 这些脚本会通过 `setup_test_env(scenario_id=...)` 自动激活对应场景。
 2. `test_stale_result_fencing.py`、`test_dispatch_gap_recovery.py`、`test_runtime_cache_rebuild.py`、`test_checkpoint_resume_recovery.py`、`test_fallback_partial_result.py`、`test_invalid_citation_filter.py` 主要通过直接构造数据库状态来验证恢复和收口逻辑，不依赖 `fixtures/scenarios/*.json`。
 
 ## 测试结果与日志
@@ -522,7 +479,7 @@ SSE 负载补充约定：
 1. `uv run` 报依赖或缓存错误：先执行 `uv sync`，必要时更换 `UV_CACHE_DIR`
 2. MySQL 认证失败：检查 `DEEPSEARCH_DEMO_MYSQL_*` 与 `MIN_RAG_*` 环境变量
 3. Redis 认证或连接失败：检查 `DEEPSEARCH_DEMO_REDIS_*` 环境变量
-4. 表不存在：先执行上游 `init_db.py`、`scripts/setup/seed_demo_kb.py` 和当前目录 `scripts/setup/init_db.py`
+4. 表不存在或数据不一致：优先执行 `scripts/setup/prepare_demo_env.py`
 5. 离线测试脚本长时间停在非终态：先确认 `worker + beat` 已用 CLI 正常启动
 6. 服务测试脚本无法连接：先确认 `api/app.py` 已启动并通过 `/api/v1/health`
 7. `test_checkpoint_degraded_recovery.py` 输出 `backend=memory`：这是脚本预期，不需要把 Redis 配置改回去；脚本退出后环境变量不会污染其他进程

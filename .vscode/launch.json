@@ -4,13 +4,37 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
             "name": "Python 调试程序: 当前文件",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Celery: UV AsyncIOPool",
+            "type": "debugpy",
+            "request": "launch",
+            // 指向 uv 默认生成的虚拟环境路径
+            "python": "${workspaceFolder}/.venv/bin/python", 
+            "module": "celery",
+            "cwd": "${workspaceFolder}/src/learning_common_lib/redis_lession/celery教程与redlock",
+            "args": [
+                "-A", "examples.06_error_handling.01_retry_basics",
+                "worker",
+                "-l", "info",
+                "-P", "custom",
+                "-Q", "aio_retries",
+                "-c", "20"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                // 确保模块搜索路径包含项目子目录
+                "PYTHONPATH": "${workspaceFolder}/src/learning_common_lib/redis_lession/celery教程与redlock",
+                // 确保 Celery 使用自定义的异步池
+                "CELERY_CUSTOM_WORKER_POOL": "celery_aio_pool.pool:AsyncIOPool"
+            }
         }
     ]
 }

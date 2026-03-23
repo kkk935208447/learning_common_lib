@@ -1,13 +1,15 @@
 """
 解决什么问题: 提供 async-first 的 Celery 任务基类，统一生命周期回调（成功/失败/重试）、结构化日志、异常重试决策
 输入输出约定: 继承 BaseTask 的 async def 任务自动获得 on_failure/on_retry/on_success 回调和结构化日志；
-    任务体可通过 await self.safe_run(..., handler=...) 统一捕获异常并按策略重试
+    任务体可通过 await self.safe_run(..., handler=...) 统一捕获异常并按策略重试；
+    如果希望任务体直接抛出可重试异常并自动转成 self.retry()，请叠加 @async_autoretry(...)
 失败策略: TaskRetryableError → 自动 self.retry()；TaskFatalError → 记录日志后放弃；
     未知异常 → 记录日志后放弃（保守策略，避免无限重试）
 不适用场景: 不需要统一日志和重试策略的简单一次性任务
 
 使用方式:
     @app.task(base=BaseTask, bind=True, max_retries=3)
+    @async_autoretry(autoretry_for=(TaskRetryableError,))
     async def my_task(self, order_id: str) -> dict:
         ...
 """
@@ -22,11 +24,13 @@ from typing import Any
 from celery import Task
 
 try:
+    from .async_autoretry import async_autoretry
     from .error_handling import TaskError, TaskRetryableError, TaskFatalError, is_retryable
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from templates.async_autoretry import async_autoretry  # type: ignore[no-redef]
     from templates.error_handling import (  # type: ignore[no-redef]
         TaskError, TaskRetryableError, TaskFatalError, is_retryable,
     )
@@ -37,7 +41,8 @@ logger = logging.getLogger(__name__)
 class BaseTask(Task):
     """Celery 任务基类，提供统一的生命周期回调和结构化日志。"""
 
-    # 默认重试参数（子任务可覆盖）
+    # 默认重试参数（子任务可覆盖）。如果 async def 任务依赖“异常直接冒泡后自动重试”，
+    # 仍需叠加 @async_autoretry(...)；Celery 内置 autoretry_for 无法捕获 await 期间抛出的异常。
     autoretry_for: tuple[type[Exception], ...] = (TaskRetryableError,)
     max_retries: int = 3
     default_retry_delay: int = 60  # 秒
@@ -181,6 +186,7 @@ def _demo() -> None:
 
     # 3. 定义带异常分类的 async 任务
     @app.task(base=BaseTask, bind=True, name="demo.risky_task", max_retries=2)
+    @async_autoretry(autoretry_for=(TaskRetryableError,))
     async def risky_task(self: BaseTask, should_fail: str) -> str:
         await asyncio.sleep(0.05)
         if should_fail == "retryable":
@@ -192,6 +198,7 @@ def _demo() -> None:
 
     print(f"\n📦 注册任务: {risky_task.name}")
     print(f"  max_retries: {risky_task.max_retries}")
+    print("  retry mode: @async_autoretry + TaskRetryableError")
 
     # 4. 演示异常分类（不执行任务，仅展示分类逻辑）
     print("\n🎯 === 异常分类展示 ===")

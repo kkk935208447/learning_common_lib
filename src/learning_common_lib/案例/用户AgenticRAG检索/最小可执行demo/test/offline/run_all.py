@@ -11,42 +11,37 @@ if str(TEST_ROOT) not in sys.path:
 
 try:
     from ..support.bootstrap import demo_root, setup_test_env
+    from ..support.test_registry import OFFLINE_SCRIPT_SPECS, PREPARE_DEMO_ENV_SCRIPT
 except ImportError:
     from support.bootstrap import demo_root, setup_test_env
+    from support.test_registry import OFFLINE_SCRIPT_SPECS, PREPARE_DEMO_ENV_SCRIPT
 
 setup_test_env()
-
-
-SCRIPT_ORDER = [
-    "test_offline_happy_path.py",
-    "test_preplan_clarify.py",
-    "test_step_gate_clarify.py",
-    "test_subtask_retry.py",
-    "test_replan_flow.py",
-    "test_stale_result_fencing.py",
-    "test_dispatch_gap_recovery.py",
-    "test_runtime_cache_rebuild.py",
-    "test_checkpoint_degraded_recovery.py",
-    "test_checkpoint_resume_recovery.py",
-    "test_fallback_partial_result.py",
-    "test_invalid_citation_filter.py",
-]
 
 
 def main() -> None:
     root = demo_root() / "test" / "offline"
     summary: dict[str, object] = {}
-    prepare_root = demo_root() / "test" / "setup"
-    for script_name in ("test_prepare_upstream.py", "test_prepare_control_plane.py"):
-        subprocess.run(
-            [sys.executable, str(prepare_root / script_name)],
-            cwd=str(demo_root()),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    for script_name in SCRIPT_ORDER:
-        path = root / script_name
+    # 离线总套件依赖外部 worker/beat。
+    # 每轮开始前先 purge，避免上一轮残留消息引用已被重建的新表数据。
+    subprocess.run(
+        ["uv", "run", "celery", "-A", "workers.celery_app:celery_app", "purge", "-f"],
+        cwd=str(demo_root()),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    # 初始化入口统一走 scripts/setup/prepare_demo_env.py，
+    # run_all 和 production_stack_suite 都从同一套准备逻辑拿数据。
+    subprocess.run(
+        [sys.executable, str(demo_root() / PREPARE_DEMO_ENV_SCRIPT.relative_path)],
+        cwd=str(demo_root()),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for spec in OFFLINE_SCRIPT_SPECS:
+        path = demo_root() / spec.relative_path
         result = subprocess.run(
             [sys.executable, str(path)],
             cwd=str(demo_root()),
@@ -54,7 +49,7 @@ def main() -> None:
             capture_output=True,
             text=True,
         )
-        summary[script_name] = json.loads(result.stdout)
+        summary[path.name] = json.loads(result.stdout)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

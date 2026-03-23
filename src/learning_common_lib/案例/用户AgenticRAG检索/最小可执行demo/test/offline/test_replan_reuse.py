@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -15,10 +16,10 @@ except ImportError:
 setup_test_env()
 
 try:
-    from ..support.prepare_support import prepare_control_plane, run_async
+    from ..support.offline_suite import test_replan_reuse_flow
 except ImportError:
-    from 最小可执行demo.test.support.prepare_support import prepare_control_plane, run_async
+    from 最小可执行demo.test.support.offline_suite import test_replan_reuse_flow
 
 
 if __name__ == "__main__":
-    print_result(run_async(prepare_control_plane()))
+    print_result(asyncio.run(test_replan_reuse_flow()))

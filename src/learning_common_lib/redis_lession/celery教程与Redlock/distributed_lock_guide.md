@@ -3,7 +3,9 @@
 配套文件：
 - 基础示例：`examples/11_fastapi_integration/02_distributed_lock.py`
 - 最小看门狗示例：`examples/11_fastapi_integration/03_python_redis_lock_watchdog_minimal.py`
+- 纯异步看门狗示例：`examples/11_fastapi_integration/03_python_redis_lock_watchdog_minimal2.py`
 - 企业示例：`examples/11_fastapi_integration/04_watchdog_lock_with_celery.py`
+- 纯异步模板：`templates/distributed_lock_aio.py`
 - 企业模板：`templates/distributed_lock.py`
 
 ## Part 1: Redis 分布式锁原理
@@ -75,14 +77,14 @@ with lock:
 - 引入多节点 Redlock 会明显提高理解与运维复杂度
 - 因此本教程主线聚焦单 Redis 分布式锁，把多节点方案作为扩展阅读
 
-### 为什么企业模板选 python-redis-lock
+### 为什么现在保留两条企业模板路径
 
 - Celery 长任务经常明显超过初始锁 TTL
 - 固定 TTL 容易在任务未完成时提前失锁
-- `python-redis-lock` 的 `auto_renewal=True` 能通过后台线程持续续期
-- 它的锁实现和 Redis 客户端本身仍是同步的；模板里的 `async_distributed_lock()` 只是用 `asyncio.to_thread(...)` 把这个同步边界包起来
-- 因此教程基础篇用 `redis-py` 讲原理，企业模板直接用 `python-redis-lock`
-- 模板代码默认优先推荐 `async_distributed_lock()` / `distributed_lock()` 上下文管理器，再按需使用 `@with_lock`
+- `distributed_lock_aio.py` 用 `redis.asyncio` + `asyncio` 看门狗解决纯异步路径的续期问题
+- `distributed_lock.py` 继续保留 `python-redis-lock` 兼容实现，服务于仍在使用同步 Redis 客户端的项目
+- 因此教程基础篇继续用 `redis-py Lock` 讲原理，企业模板则明确拆分成“纯异步主路径”和“同步兼容路径”
+- 模板代码默认优先推荐 `distributed_lock_aio.py` 里的 `async_distributed_lock()`，同步代码再使用 `distributed_lock()` / `@with_lock`
 
 ### async-first 模板的准确边界
 
@@ -90,21 +92,27 @@ with lock:
 
 1. `custom aio pool + async def task`
    这是真正跑在 asyncio worker 执行层上的主线。
-2. `task.delay()` / `AsyncResult.get()` / `python-redis-lock`
+2. `task.delay()` / `AsyncResult.get()`
    这些接口本身仍然是同步客户端。
-3. `asyncio.to_thread(...)`
+3. `distributed_lock_aio.py`
+   这是原生 `redis.asyncio` 锁客户端，不需要 `to_thread(...)`。
+4. `distributed_lock.py`
+   这是同步 Redis / `python-redis-lock` 兼容路径。
+5. `asyncio.to_thread(...)`
    它解决的是“在 async 调用侧不阻塞事件循环”，不是把底层客户端改造成原生 async。
 
 所以在第 11 章里，正确理解应当是：
 
 - worker 内部业务协程是 async 的
-- 锁和结果查询这些边界仍然是同步客户端，只是包装成了 async-friendly 调用
+- 结果查询这些边界仍然是同步客户端，只是包装成了 async-friendly 调用
+- 锁则同时提供原生 async 实现和同步兼容实现两条路径
 
 ### 教程里的对比主线
 
 - `02_distributed_lock.py`: 先证明固定 TTL 在短任务里是够用的
 - `02_distributed_lock.py`: 再证明同样的固定 TTL 放到长任务里会中途失锁
 - `03_python_redis_lock_watchdog_minimal.py`: 先用最小脚本看懂 `python-redis-lock` 的 `auto_renewal` 会如何续期
+- `03_python_redis_lock_watchdog_minimal2.py`: 再看纯异步看门狗如何在事件循环里续期
 - `04_watchdog_lock_with_celery.py`: 最后在 Celery async worker 中对比 `auto_renewal=False/True`
 
 ### 最小可视化流程（建议先看）
@@ -127,15 +135,15 @@ async with async_distributed_lock(
     auto_renewal=True,
 ):
     for _ in range(5):
-        ttl_ms = await asyncio.to_thread(redis_client.pttl, "lock:order:123")
+        ttl_ms = await redis_client.pttl("lock:order:123")
         print("ttl:", ttl_ms)
         await asyncio.sleep(1)
 ```
 
 说明：
 
-- `redis-py Lock` 的 key 就是你传入的锁名，例如 `demo:order:123`
-- `python-redis-lock` 的真实锁 key 会带 `lock:` 前缀，例如 `lock:order:123`
+- 教程基础篇里，`redis-py Lock` 的 key 就是你传入的锁名，例如 `demo:order:123`
+- `distributed_lock_aio.py` 与 `distributed_lock.py` 都把真实锁 key 统一成 `lock:{name}`
 - 因此企业篇读取 TTL 时，要观察的是 `lock:{name}`
 
 ## Part 2: Celery 队列与分布式锁的关系
@@ -234,7 +242,7 @@ report_app = Celery(broker="redis://report-redis:6379/0")
 
 ## 总结
 
-1. **分布式锁**: 教程基础篇用 `redis-py Lock` 讲原理，企业模板用 `python-redis-lock` 提供自动续期
+1. **分布式锁**: 教程基础篇用 `redis-py Lock` 讲原理；企业模板同时提供纯异步看门狗实现和同步兼容实现
 2. **队列与锁**: 技术上正交，建议 db 隔离（broker=0, backend=1, lock=2）
 3. **多队列**: 逻辑隔离满足大多数场景，物理隔离仅用于特殊需求
 4. **生产建议**: 合理设置锁超时，监控 Redis 内存使用，定期清理过期数据

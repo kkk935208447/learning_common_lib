@@ -1,23 +1,26 @@
 """
-解决什么问题: 为分布式部署的多个服务实例提供基于单 Redis 的企业级分布式锁，防止同一资源被并发处理
+解决什么问题: 为仍在使用同步 Redis 客户端的项目提供基于单 Redis 的兼容型分布式锁，防止同一资源被并发处理
 输入输出约定: distributed_lock / async_distributed_lock 作为上下文管理器使用；
     @with_lock 装饰器只是可选语法糖（如 "order:{order_id}"）
 失败策略: 获取锁超时抛出 LockAcquireError（可重试异常），由 BaseTask 自动重试
 不适用场景: 单进程内的并发用 threading.Lock 即可；如果业务不希望依赖后台续期线程，
     或持锁逻辑跨系统事务边界太长，仍应拆分更小的临界区
 实现边界: python-redis-lock 和底层 redis 客户端本身仍是同步实现；
-    async_distributed_lock() 只是通过 asyncio.to_thread(...) 让 async 调用侧不阻塞事件循环，
-    并不等于底层锁实现已经完全 async 化
+    async_distributed_lock() 只是通过 asyncio.to_thread(...) 让 async 调用侧不阻塞事件循环，并不等于底层锁实现已经完全 async 化
 
 锁的三种使用方式:
-  1. async_distributed_lock()   — async-first 主路径，首选
-  2. distributed_lock()         — 同步上下文管理器（兼容同步场景）
+  1. distributed_lock()         — 同步上下文管理器（本模块主路径）
+  2. async_distributed_lock()   — 过渡兼容包装，只适合短期保留同步锁底座的 async 调用侧
   3. @with_lock(name_template)  — 补充语法糖，只在重复样板很多时再启用
+
+注意：对于异步场景，最好使用 templates/distributed_lock_aio.py 里的纯异步锁。
+    本模块的 async 包装只是同步锁的线程池适配层，不承担纯异步看门狗主路径。
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import functools
 import inspect
 import logging
@@ -177,14 +180,29 @@ async def async_distributed_lock(
 
     基于 python-redis-lock 的线程池包装实现，适合在 async 代码中调用同步锁。
     它解决的是"async 调用侧不阻塞事件循环"，不是把底层 Redis 锁客户端变成原生 async。
+    注意：在异步代码中 python-redis-lock 看门狗的续期线程与 asyncio 调度器之间存在线程安全隐患，
+    这里保留它只是为了兼容旧项目或过渡期接入。对于异步场景，最好使用纯异步锁。
+
+    设计说明:
+      1. 获取锁仍然调用同步 lock.acquire(...)，这里只是用 asyncio.to_thread(...) 把阻塞边界移出事件循环。
+      2. 释放锁时继续用 asyncio.to_thread(lock.release)；外层再包一层 asyncio.shield(...)，
+         尽量保证协程被取消时，真正的 release() 还能跑完。
+      3. 这并不能把底层线程看门狗变成 asyncio 原生能力，所以它依旧不适合当作异步锁主实现。
     """
+    # 这里构造出来的仍然是 python-redis-lock 的同步锁对象；
+    # 下面只是把 acquire/release 两个阻塞调用放进线程池，不改变锁对象本身的性质。
     lock = _build_lock(redis_client, name, timeout, auto_renewal=auto_renewal)
+
+    # 获取锁是同步阻塞调用。to_thread 的意义只是：
+    # “不要把事件循环卡在 lock.acquire(...) 上”，而不是“底层锁已经异步化”。
     acquired = await asyncio.to_thread(
         lock.acquire,
         blocking=True,
         timeout=blocking_timeout,
     )
     if not acquired:
+        # 获取失败直接抛出可重试异常，让上层任务框架决定是否重试，
+        # 不在这里做无限等待或静默吞掉失败。
         raise LockAcquireError(
             f"获取锁失败: {name}",
             detail={
@@ -199,7 +217,10 @@ async def async_distributed_lock(
         yield lock
     finally:
         try:
-            await asyncio.to_thread(lock.release)
+            # shield 保护的是“当前 await 不要被二次 cancel 打断”，
+            # to_thread 负责把同步 release() 放到工作线程里执行。
+            # 两者组合后的目标很明确：尽量把锁释放动作真正送达到底层同步客户端。
+            await asyncio.shield(asyncio.to_thread(lock.release))
         except Exception as exc:
             _log_release_exception(
                 name=name,
@@ -278,7 +299,7 @@ def _resolve_redis_client(arguments: dict[str, Any], redis_attr: str) -> Any:
 
 
 def _demo() -> None:
-    """演示：基于 python-redis-lock 的 async-first 企业级分布式锁用法。"""
+    """演示：基于 python-redis-lock 的同步兼容分布式锁用法。"""
     import redis
 
     print("🔒 === 企业级单 Redis 分布式锁演示（async-first） ===\n")
@@ -347,7 +368,7 @@ def _demo() -> None:
                 redis_client,
                 "order:conflict",
                 timeout=5,
-                blocking_timeout=0.1,
+                blocking_timeout=1,
                 auto_renewal=True,
             ):
                 pass

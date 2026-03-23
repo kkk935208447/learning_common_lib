@@ -19,12 +19,10 @@
   },
   "retrieval_script": {
     "vector": {
-      "sequence": [
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
+      "rules": [
         {
+          "match": "延续已稳定主线",
+          "consume": false,
           "hits": [
             {
               "chunk_uid": "scenario:travel:vector:1",
@@ -61,6 +59,8 @@
           ]
         },
         {
+          "match": "定向缺口恢复检索",
+          "consume": false,
           "hits": [
             {
               "chunk_uid": "scenario:travel:vector:1",
@@ -97,6 +97,8 @@
           ]
         },
         {
+          "match": "补充佐证、变化依据或对比信息",
+          "consume": false,
           "hits": [
             {
               "chunk_uid": "scenario:travel:vector:1",
@@ -133,53 +135,19 @@
           ]
         },
         {
-          "hits": [
-            {
-              "chunk_uid": "scenario:travel:vector:1",
-              "version_id": 1,
-              "document_id": 1,
-              "external_doc_key": "travel_policy_v1",
-              "source_type": "VECTOR_DB",
-              "score": 0.96,
-              "content": "一线城市住宿标准由 450 元调整为 500 元，高铁商务座必须由总监审批。",
-              "metadata": {},
-              "locator": {
-                "kb_code": "default",
-                "document_id": 1,
-                "version_id": 1,
-                "chunk_uid": "scenario:travel:vector:1"
-              }
-            },
-            {
-              "chunk_uid": "scenario:travel:vector:2",
-              "version_id": 2,
-              "document_id": 2,
-              "external_doc_key": "travel_policy_compare",
-              "source_type": "VECTOR_DB",
-              "score": 0.94,
-              "content": "对比上一版，住宿标准有所上调，并对高铁商务座增加了审批要求。",
-              "metadata": {},
-              "locator": {
-                "kb_code": "default",
-                "document_id": 2,
-                "version_id": 2,
-                "chunk_uid": "scenario:travel:vector:2"
-              }
-            }
-          ]
+          "match": "基础规则与关键定义",
+          "consume": false,
+          "hits": []
         }
       ]
     },
     "search": {
-      "sequence": [
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []},
-        {"hits": []}
+      "rules": [
+        {
+          "match": "子任务：",
+          "consume": false,
+          "hits": []
+        }
       ]
     }
   },
@@ -192,7 +160,7 @@
     "force_replan_count": 1
   },
   "expected": {
-    "final_status": "DEGRADED",
+    "final_status": "COMPLETED",
     "replan_count": 1
   }
 }

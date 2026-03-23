@@ -34,16 +34,20 @@ app = Celery(
 )
 app.conf.task_default_queue = "default"
 
+# Exchange 可以理解为“消息先投递到哪里再决定进哪个队列”。direct 类型表示：routing_key 精确匹配哪个队列绑定键，就把消息投到哪个队列。
 default_exchange = Exchange("default", type="direct")
 
+# task_queues 显式声明“系统里有哪些合法队列，以及它们和 exchange/routing_key 的绑定关系”。这在 RabbitMQ 一类 broker 中尤其直观；在 Redis broker 下也能帮助你把路由拓扑写清楚。这里 4 个队列都挂在同一个 direct exchange 上，只是绑定的 routing_key 不同。
 app.conf.task_queues = (
-    Queue("default", default_exchange, routing_key="default"),
-    Queue("email_queue", default_exchange, routing_key="email"),
+    Queue("default", default_exchange, routing_key="default"),     # 没命中专用路由规则的任务，默认走这个队列。
+    Queue("email_queue", default_exchange, routing_key="email"),   # send_email 命中 routing_key="email" 时进入 email_queue。
     Queue("report_queue", default_exchange, routing_key="report"),
     Queue("notification_queue", default_exchange, routing_key="notification"),
 )
+
+# task_routes 决定“某个任务名发布出去时默认带什么 queue/routing_key”。没有命中规则的任务，才回退到 app.conf.task_default_queue。
 app.conf.task_routes = {
-    f"{MODULE}.send_email": {"queue": "email_queue", "routing_key": "email"},
+    f"{MODULE}.send_email": {"queue": "email_queue", "routing_key": "email"},  # "routing_key": "email" 与 上文的 routing_key="email" 要对应
     f"{MODULE}.generate_report": {"queue": "report_queue", "routing_key": "report"},
     f"{MODULE}.push_notification": {"queue": "notification_queue", "routing_key": "notification"},
 }

@@ -24,6 +24,7 @@ try:
         test_maintenance_recovery_resumes_planning_and_finalizing,
         test_maintenance_recovery_resumes_ready_tasks,
         test_maintenance_recovery_resumes_terminal_plan,
+        test_replan_creates_distinct_plan_and_reuses_completed_subtasks,
         test_redis_memory_layers,
         test_stale_result_does_not_advance_new_plan,
     )
@@ -45,6 +46,7 @@ except ImportError:
         test_maintenance_recovery_resumes_planning_and_finalizing,
         test_maintenance_recovery_resumes_ready_tasks,
         test_maintenance_recovery_resumes_terminal_plan,
+        test_replan_creates_distinct_plan_and_reuses_completed_subtasks,
         test_redis_memory_layers,
         test_stale_result_does_not_advance_new_plan,
     )
@@ -140,8 +142,8 @@ async def test_offline_replan_flow() -> dict:
         query="请帮我整理公司近 90 天差旅报销规则的变化",
     )
     snapshot = await poll_offline_snapshot(request_id, timeout_s=90)
-    if snapshot["status"] not in {"DEGRADED", "COMPLETED"}:
-        raise AssertionError(f"offline replan flow expected DEGRADED or COMPLETED, got {snapshot['status']}")
+    if snapshot["status"] != "COMPLETED":
+        raise AssertionError(f"offline replan flow expected COMPLETED after real replan, got {snapshot['status']}")
     runtime = build_runtime_bundle(use_task_engine=True)
     async with runtime.session_factory() as session:
         task = await session.scalar(select(SearchTask).where(SearchTask.request_id == request_id))
@@ -166,6 +168,10 @@ async def test_offline_replan_flow() -> dict:
         "final_status": snapshot["status"],
         "replan_count": int(task.replan_count or 0),
     }
+
+
+async def test_replan_reuse_flow() -> dict:
+    return await test_replan_creates_distinct_plan_and_reuses_completed_subtasks()
 
 
 async def test_dispatch_gap_recovery() -> dict:

@@ -18,12 +18,15 @@ from ..infrastructure.settings import get_settings
 from .common import json_safe, utcnow, value_of
 
 try:
-    from ..infrastructure.models import SearchTask, Subtask
+    from ..infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskPlan
 except ImportError:
-    from 最小可执行demo.infrastructure.models import SearchTask, Subtask
+    from 最小可执行demo.infrastructure.models import SearchTask, Subtask, SubtaskRun, TaskPlan
 
 
 logger = logging.getLogger(__name__)
+
+
+RUN_TERMINAL_STATUSES = {"COMPLETED", "FAILED", "ESCALATED", "STALE_IGNORED"}
 
 
 class GlobalGraphService:
@@ -73,6 +76,102 @@ class GlobalGraphService:
         graph.add_conditional_edges("fallback", self.route_by_action)
         graph.add_edge("output", END)
         return graph.compile(checkpointer=checkpointer)
+
+    async def _build_replan_context(self, session: AsyncSession, *, task: SearchTask) -> dict[str, Any]:
+        subtasks = list(
+            (
+                await session.scalars(
+                    select(Subtask)
+                    .where(Subtask.task_id == task.id)
+                    .where(Subtask.plan_version == task.active_plan_version)
+                    .order_by(Subtask.priority.asc(), Subtask.subtask_code.asc())
+                )
+            ).all()
+        )
+        active_plan = await session.scalar(
+            select(TaskPlan)
+            .where(TaskPlan.task_id == task.id)
+            .where(TaskPlan.plan_version == task.active_plan_version)
+        )
+        control_json = json_safe(task.control_json or {})
+        latest_escalation = dict(control_json.get("latest_escalation") or {})
+        failed_subtasks: list[dict[str, Any]] = []
+        completed_subtasks: list[dict[str, Any]] = []
+        for item in subtasks:
+            payload = {
+                "code": item.subtask_code,
+                "task_type": value_of(item.task_type),
+                "route_hints": json_safe(item.route_hints_json or []),
+            }
+            status = value_of(item.status)
+            if status == "COMPLETED":
+                completed_subtasks.append(
+                    {
+                        **payload,
+                        "final_score": float(item.final_score or 0.0),
+                    }
+                )
+            elif status == "FAILED":
+                failed_subtasks.append(
+                    {
+                        **payload,
+                        "error_code": item.last_error_code,
+                        "error_message": item.last_error_message,
+                    }
+                )
+        first_failed = failed_subtasks[0] if failed_subtasks else {}
+        trigger_reason = str(
+            latest_escalation.get("reason")
+            or latest_escalation.get("suggested_global_action")
+            or first_failed.get("error_code")
+            or "subtask_failed"
+        )
+        trigger_message = str(
+            latest_escalation.get("message")
+            or first_failed.get("error_message")
+            or "上一轮计划存在未收敛子任务，需要重规划。"
+        )
+        return {
+            "attempt_no": int(task.replan_count or 0),
+            "reason": trigger_message,
+            "trigger": {
+                "reason": trigger_reason,
+                "gap_type": latest_escalation.get("gap_type"),
+                "message": trigger_message,
+            },
+            "previous_plan_version": int(task.active_plan_version or 0),
+            "previous_dag_fingerprint": active_plan.dag_fingerprint if active_plan is not None else None,
+            "failed_subtasks": failed_subtasks,
+            "completed_subtasks": completed_subtasks,
+        }
+
+    async def _terminate_inflight_subtasks(
+        self,
+        session: AsyncSession,
+        *,
+        task: SearchTask,
+        subtasks: list[Subtask],
+        subtask_error_code: str,
+        subtask_error_message: str,
+        run_error_code: str,
+    ) -> None:
+        for item in subtasks:
+            if value_of(item.status) in {"COMPLETED", "FAILED", "SKIPPED"}:
+                continue
+            execution_id = item.current_execution_id
+            item.status = "FAILED"
+            item.last_error_code = subtask_error_code
+            item.last_error_message = subtask_error_message
+            item.current_execution_id = None
+            item.updated_at = utcnow()
+            if execution_id is None:
+                continue
+            run = await session.scalar(select(SubtaskRun).where(SubtaskRun.execution_id == execution_id))
+            if run is None or value_of(run.status) in RUN_TERMINAL_STATUSES:
+                continue
+            run.status = "FAILED"
+            run.error_code = run_error_code
+            run.finished_at = utcnow()
 
     async def _apply_result_envelope(self, result_envelope: dict[str, Any]) -> bool:
         try:
@@ -281,16 +380,22 @@ class GlobalGraphService:
                 return {"next_action": "fallback", "error": "TASK_NOT_FOUND"}
 
             control_json = json_safe(task.control_json or {})
+            replan_context = control_json.get("replan_context") if int(task.replan_count or 0) > 0 else None
             resolved_query = apply_clarification_to_query(
                 task.resolved_query or task.original_query,
                 control_json.get("clarification_request"),
                 control_json.get("clarification_reply_selected"),
             )
-            allow_clarify = int(task.preplan_clarification_used or 0) < 1 and not control_json.get("clarification_reply_selected")
+            allow_clarify = (
+                replan_context is None
+                and int(task.preplan_clarification_used or 0) < 1
+                and not control_json.get("clarification_reply_selected")
+            )
             outcome = self.plan_service.create_plan(
                 original_query=task.original_query,
                 resolved_query=resolved_query,
                 allow_clarify=allow_clarify,
+                replan_context=replan_context,
             )
             task.resolved_query = outcome.resolved_query
             task.task_profile_json = {
@@ -314,6 +419,7 @@ class GlobalGraphService:
 
             control_json.pop("clarification_reply_selected", None)
             control_json.pop("pending_generated_clarification", None)
+            control_json.pop("replan_context", None)
             control_json["clarification_request"] = None
             fingerprints = list(control_json.get("historical_fingerprints") or [])
             if int(task.replan_count or 0) > 0 and outcome.dag_fingerprint in fingerprints:
@@ -329,12 +435,21 @@ class GlobalGraphService:
             fingerprints.append(outcome.dag_fingerprint)
             control_json["historical_fingerprints"] = fingerprints
             task.control_json = control_json
+            replan_reason = None
+            if replan_context:
+                trigger = dict(replan_context.get("trigger") or {})
+                replan_reason = str(
+                    trigger.get("message")
+                    or trigger.get("reason")
+                    or replan_context.get("reason")
+                    or "replan"
+                )
             plan_version = await self.run_service.activate_plan(
                 session,
                 task=task,
                 plan_nodes=outcome.plan_nodes,
                 dag_fingerprint=outcome.dag_fingerprint,
-                replan_reason="replan" if int(task.replan_count or 0) > 0 else None,
+                replan_reason=replan_reason,
             )
             await session.commit()
         return {"next_action": "schedule", "active_plan_version": plan_version}
@@ -505,15 +620,30 @@ class GlobalGraphService:
                 task.last_error_message = "超过最大重规划次数，进入降级输出。"
                 await session.commit()
                 return {"next_action": "fallback"}
+            replan_context = await self._build_replan_context(session, task=task)
             task.replan_count = int(task.replan_count or 0) + 1
             task.status = "PLANNING"
-            task.control_json = {**json_safe(task.control_json or {}), "latest_escalation": None, "waiting_reason": "NONE"}
+            task.control_json = {
+                **json_safe(task.control_json or {}),
+                "latest_escalation": None,
+                "waiting_reason": "NONE",
+                "replan_context": {
+                    **replan_context,
+                    "attempt_no": int(task.replan_count or 0),
+                },
+            }
             await self.progress_service.append_event(
                 session,
                 tenant_id=task.tenant_id,
                 task_id=task.id,
                 event_type="task_replanned",
-                payload_json={"status": "PLANNING", "message": f"开始第 {task.replan_count} 次重规划"},
+                payload_json={
+                    "status": "PLANNING",
+                    "message": f"开始第 {task.replan_count} 次重规划",
+                    "replan_reason": replan_context.get("reason"),
+                    "failed_subtasks": [item["code"] for item in list(replan_context.get("failed_subtasks") or [])],
+                    "completed_subtasks": [item["code"] for item in list(replan_context.get("completed_subtasks") or [])],
+                },
                 plan_version=task.active_plan_version,
             )
             await session.commit()
@@ -533,31 +663,53 @@ class GlobalGraphService:
                     )
                 ).all()
             )
-            for item in subtasks:
-                if value_of(item.status) not in {"COMPLETED", "FAILED", "SKIPPED"}:
-                    item.status = "FAILED"
-                    item.last_error_code = "FINALIZE_UNFINISHED"
-                    item.last_error_message = "任务在最终收口阶段结束，节点未继续执行。"
+            await self._terminate_inflight_subtasks(
+                session,
+                task=task,
+                subtasks=subtasks,
+                subtask_error_code="FINALIZE_UNFINISHED",
+                subtask_error_message="任务在最终收口阶段结束，节点未继续执行。",
+                run_error_code="FINALIZE_UNFINISHED",
+            )
             assembled = await self.evidence_service.assemble_final_answer(session, task_id=task.id, plan_version=task.active_plan_version)
-            task.final_answer = assembled["answer"]
-            task.status = "DEGRADED" if assembled["coverage_summary"]["uncovered"] else "COMPLETED"
+            uncovered_points = list(assembled["coverage_summary"].get("uncovered") or [])
+            degraded_reason = None
+            next_step = None
+            final_answer = assembled["answer"]
+            if uncovered_points:
+                degraded_reason = f"仍有未覆盖信息点：{'、'.join(str(item) for item in uncovered_points[:4])}"
+                next_step = "建议补充关键信息、缩小检索范围，或补充知识后重试。"
+                if "不确定性说明：" not in final_answer:
+                    final_answer = (
+                        f"{final_answer}\n\n"
+                        f"不确定性说明：{degraded_reason}\n"
+                        f"下一步建议：{next_step}"
+                    )
+                task.status = "DEGRADED"
+                task.last_error_code = "PARTIAL_COVERAGE"
+                task.last_error_message = degraded_reason
+            else:
+                task.status = "COMPLETED"
+                task.last_error_code = None
+                task.last_error_message = None
+            task.final_answer = final_answer
             task.final_citations_json = assembled["citations"]
             task.coverage_summary_json = assembled["coverage_summary"]
             task.completed_at = utcnow()
-            task.last_error_code = None
-            task.last_error_message = None
             task.control_json = {
                 **json_safe(task.control_json or {}),
                 "waiting_reason": "NONE",
                 "final_citations": assembled["citations"],
                 "coverage_summary": assembled["coverage_summary"],
                 "final_input": assembled["final_input"],
+                "degraded_reason": degraded_reason,
+                "next_step": next_step,
             }
             await self.session_service.append_answer_turn(
                 session,
                 session_id=task.session_id,
                 task_id=task.id,
-                answer=assembled["answer"],
+                answer=final_answer,
                 citations=assembled["citations"],
                 coverage_summary=assembled["coverage_summary"],
             )
@@ -583,13 +735,16 @@ class GlobalGraphService:
                             .where(Subtask.task_id == task.id)
                             .where(Subtask.plan_version == task.active_plan_version)
                         )
-                    ).all()
+                ).all()
+            )
+                await self._terminate_inflight_subtasks(
+                    session,
+                    task=task,
+                    subtasks=subtasks,
+                    subtask_error_code="FALLBACK_UNFINISHED",
+                    subtask_error_message="任务进入降级输出，节点未继续执行。",
+                    run_error_code="FALLBACK_TERMINATED",
                 )
-                for item in subtasks:
-                    if value_of(item.status) not in {"COMPLETED", "FAILED", "SKIPPED"}:
-                        item.status = "FAILED"
-                        item.last_error_code = "FALLBACK_UNFINISHED"
-                        item.last_error_message = "任务进入降级输出，节点未继续执行。"
                 coverage_summary = {"covered": [], "uncovered": ["全部任务"]}
                 citations: list[str] = []
                 answer = "当前无法稳定完成全部深搜步骤。"

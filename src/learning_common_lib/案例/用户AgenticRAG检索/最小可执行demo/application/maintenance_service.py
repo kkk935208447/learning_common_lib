@@ -106,6 +106,8 @@ class MaintenanceService:
                         subtask.status = "FAILED"
                         subtask.last_error_code = "STUCK_RUN_TIMEOUT"
                         subtask.last_error_message = "执行超时，等待全局控制面恢复"
+                        subtask.current_execution_id = None
+                        subtask.updated_at = utcnow()
                     await self.progress_service.append_event(
                         session,
                         tenant_id=task.tenant_id,
