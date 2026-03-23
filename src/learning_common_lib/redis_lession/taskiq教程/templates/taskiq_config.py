@@ -3,6 +3,8 @@
 输入输出约定: TaskiqConfig dataclass 实例即配置项，通过 create_broker() / create_result_backend() 工厂方法创建组件
 失败策略: 配置本身不会失败；运行时由 TaskIQ 框架根据 broker/result_backend 配置执行
 不适用场景: worker 进程数、threadpool/process pool 这类运行参数应放到 taskiq worker CLI，而不是 Broker 配置对象里
+实现边界: 当前模板主线固定使用 ListQueueBroker；
+    如果业务需要 RedisStreamBroker 的 ACK / reclaim / Consumer Group 能力，请参考 examples/08_redis_stream_broker/
 
 配置分组:
   Broker 连接: broker_url, queue_name
@@ -59,7 +61,11 @@ class TaskiqConfig:
     # ------------------------------------------------------------------
 
     def create_broker(self) -> ListQueueBroker:
-        """创建 ListQueueBroker 实例，使用当前配置的 broker_url 和 queue_name。"""
+        """创建 ListQueueBroker 实例，使用当前配置的 broker_url 和 queue_name。
+
+        这里故意不把模板默认 broker 扩展成 RedisStreamBroker。
+        教学层已经单独提供了 Stream 小章节；模板层先保持最小、稳定、低认知负担的主线。
+        """
         return ListQueueBroker(
             url=self.broker_url,
             queue_name=self.queue_name,

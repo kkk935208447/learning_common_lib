@@ -2,16 +2,25 @@
 
 ## 1. Broker 选型
 
-- **ListQueueBroker**（推荐默认）：基于 Redis List，竞争消费，适合任务队列场景
+- **ListQueueBroker**（教程默认）：基于 Redis List，竞争消费，适合最小接入和教学主线
+- **RedisStreamBroker**（生产优先评估）：基于 Redis Stream + Consumer Group，支持 ACK / reclaim，更适合可靠性要求高的任务队列
 - **PubSubBroker**：基于 Redis Pub/Sub，广播模式，适合事件通知、缓存失效
-- 不确定时选 ListQueueBroker，它覆盖 90% 的任务队列需求
+- 不确定时可以先用 ListQueueBroker 把 TaskIQ 跑通；进入生产稳定期后再认真评估 RedisStreamBroker
 
 ```python
-# ✅ 推荐：任务队列用 ListQueueBroker
+# ✅ 教学主线：任务队列用 ListQueueBroker
 from taskiq_redis import ListQueueBroker
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
     queue_name="my-service:default",
+)
+
+# ✅ 生产可靠性更强：RedisStreamBroker
+from taskiq_redis import RedisStreamBroker
+stream_broker = RedisStreamBroker(
+    url="redis://default:123456@localhost:6379/0",
+    queue_name="my-service:default",
+    consumer_group_name="my-service",
 )
 
 # ✅ 广播场景用 PubSubBroker
@@ -26,6 +35,12 @@ pubsub = PubSubBroker(
 - 同一组同构 worker 可以共享一个 `queue_name` 做横向扩容
 - 不同服务、不同教程案例、不同职责的 worker 应显式使用不同 `queue_name`
 - `task_name` 只决定 worker 拿到消息后如何分发，不负责 broker 层的消费隔离
+- `ListQueueBroker` 也支持 producer 侧 `queue_name` 动态路由，但 worker 侧仍只监听自身 `queue_name`
+- 可以把它记成一句话：
+  `ListQueueBroker` 支持“发到多个队列”，不支持“单 worker 同时监听多个队列”
+- `RedisStreamBroker` 还要额外规划 `consumer_group_name`、`maxlen`、pending reclaim 和监控策略
+- `RedisStreamBroker` 则同时支持：
+  producer 侧动态 `queue_name` 路由 + worker 侧通过 `additional_streams` 一次监听多个 stream
 
 ## 2. Result Backend 配置
 

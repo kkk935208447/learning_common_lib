@@ -36,7 +36,7 @@ pkill -9 -f celery
 
 ## 定位
 
-从零掌握 TaskIQ 异步任务队列框架，覆盖 Broker 配置、任务定义、调用、依赖注入、中间件、错误处理、定时任务、生命周期、Broker 模式、FastAPI 集成共 10 章渐进式示例，外加一套企业级可复用模板。
+从零掌握 TaskIQ 异步任务队列框架，覆盖 Broker 配置、任务定义、调用、依赖注入、中间件、错误处理、定时任务、生命周期、RedisStreamBroker 深拆、Broker 模式、FastAPI 集成共 10+1 组渐进式示例，外加一套企业级可复用模板。
 
 TaskIQ 是 Python 原生 async-first 的任务队列框架，相比 Celery 的优势：
 - 原生 async/await（无需 celery-aio-pool 等 workaround）
@@ -109,6 +109,7 @@ taskiq教程/
 │   ├── 06_error_handling/      ← 错误处理
 │   ├── 07_scheduling/          ← 定时任务
 │   ├── 08_events_and_lifecycle/ ← 事件与生命周期
+│   ├── 08_redis_stream_broker/ ← RedisStreamBroker 深度拆解（插入 09 章之前）
 │   ├── 09_broker_patterns/     ← Broker 模式
 │   └── 10_fastapi_integration/ ← FastAPI 集成
 ├── templates/
@@ -189,8 +190,14 @@ uv run python -m templates.task_base
 | 06 | 错误处理 | reject/requeue、智能重试 + 指数退避 |
 | 07 | 定时任务 | RedisScheduleSource、cron 表达式、间隔调度 |
 | 08 | 事件与生命周期 | WORKER_STARTUP/SHUTDOWN、broker.on_event、TaskiqState |
-| 09 | Broker 模式 | PubSubBroker vs ListQueueBroker、多队列路由 |
+| 08+ | RedisStreamBroker 深拆 | Stream 基础、ACK、reclaim、单 broker 动态 `queue_name` 路由 |
+| 09 | Broker 模式 | PubSubBroker vs ListQueueBroker、多 broker 多队列路由、单 broker 动态 stream/list 路由总结 |
 | 10 | FastAPI 集成 | lifespan 管理、共享依赖、统一响应格式 |
+
+插入小章节：
+
+- `examples/08_redis_stream_broker/README.md`
+  解释 `RedisStreamBroker`、`ListQueueBroker`、动态 `queue_name` 路由、Consumer Group / ACK / `XAUTOCLAIM` 的差异与生产取舍。
 
 ## Redis 连接约定
 
