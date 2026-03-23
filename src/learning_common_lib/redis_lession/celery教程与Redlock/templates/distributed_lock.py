@@ -28,6 +28,7 @@ from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from math import ceil
 from typing import Any, Callable, TypeVar
+import redis
 
 try:
     from .error_handling import LockAcquireError
@@ -59,7 +60,7 @@ def _normalize_expire(timeout: float) -> int:
 
 
 def _build_lock(
-    redis_client: Any,
+    redis_client: redis.Redis,   # 同步 Redis 底座
     name: str,
     timeout: float,
     auto_renewal: bool,
@@ -69,7 +70,7 @@ def _build_lock(
         redis_client,
         name=name,
         expire=_normalize_expire(timeout),
-        auto_renewal=auto_renewal,
+        auto_renewal=auto_renewal,           # 看门狗， 是否自动续期
     )
 
 
@@ -114,7 +115,7 @@ def _log_release_exception(
 
 @contextmanager
 def distributed_lock(
-    redis_client: Any,
+    redis_client: redis.Redis,
     name: str,
     timeout: float = 30.0,
     blocking_timeout: float = 5.0,
@@ -170,11 +171,11 @@ def distributed_lock(
 
 @asynccontextmanager
 async def async_distributed_lock(
-    redis_client: Any,
-    name: str,
-    timeout: float = 30.0,
-    blocking_timeout: float = 5.0,
-    auto_renewal: bool = True,
+    redis_client: redis.Redis,          # 同步 Redis 底座
+    name: str,                          # 锁名称，建议用业务前缀如 "order:12345"
+    timeout: float = 30.0,              # 锁的基础过期时间（秒）
+    blocking_timeout: float = 5.0,      # 获取锁的最大等待时间（秒）
+    auto_renewal: bool = True,          # 是否开启后台自动续期，看门狗机制
 ) -> AsyncGenerator[Any, None]:
     """异步分布式锁上下文管理器。
 
@@ -303,7 +304,7 @@ def _demo() -> None:
     import redis
 
     print("🔒 === 企业级单 Redis 分布式锁演示（async-first） ===\n")
-
+    # 创建 Redis 同步客户端。
     redis_client = redis.Redis(host="localhost", port=6379, password="123456", db=2)
     try:
         redis_client.ping()
@@ -326,7 +327,7 @@ def _demo() -> None:
                 timeout=3,
                 auto_renewal=True,
             ):
-                print("  📦 async 临界区: 持锁处理订单 12345")
+                print("  📦 async 临界区: 模拟持锁处理订单 12345")
                 await asyncio.sleep(4)
 
         async def monitor() -> None:
