@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
+from taskiq.exceptions import NoResultError
 
 try:
     from .error_handling import is_retryable
@@ -134,6 +135,9 @@ class RetryMiddleware(TaskiqMiddleware):
     从 message.labels 读取 max_retries（默认 3）和 retry_delay（默认 1.0）。
     仅对 is_retryable(err) 为 True 的异常进行重试。
     退避公式: delay = base_delay * (2 ** retry_count) + random.uniform(0, 1)
+    注意: 这里的重试是“重新排队”，不是“立刻重试”。
+    如果沿用同一个 task_id，必须阻止这次中间失败写入 result_backend，
+    否则 wait_result() 会提前读到失败，且旧失败结果还可能覆盖最终成功结果。
     """
 
     async def on_error(
@@ -175,7 +179,14 @@ class RetryMiddleware(TaskiqMiddleware):
             delay,
         )
         await asyncio.sleep(delay)
+
+        # 对 ListQueueBroker 来说，这一步是重新排队，真实等待时间会叠加队列积压。
         await self.broker.kick(self.broker.formatter.dumps(message))
+
+        # TaskIQ 会在 on_error 返回后继续保存当前这次失败的 result。
+        # 这里必须显式跳过保存，否则调用方会过早看到中间失败，
+        # 且较晚到达的旧失败结果可能覆盖后面已经写入的成功结果。
+        result.error = NoResultError()
 
 
 # ---------------------------------------------------------------------------
