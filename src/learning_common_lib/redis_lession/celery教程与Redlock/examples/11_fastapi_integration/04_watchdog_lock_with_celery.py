@@ -18,6 +18,8 @@
     python examples/11_fastapi_integration/04_watchdog_lock_with_celery.py
 预期现象:
   - 相同参数下，无看门狗时 TTL 会自然归零，中途可被抢锁
+  - 无看门狗场景下，worker 退出锁上下文时可能记录 `LockNotOwnedError` warning；
+    这是因为锁早已过期或被后续探测者重新获取，不代表纯异步锁实现本身有 bug
   - 开启看门狗后，TTL 会被周期性拉回安全区，中途不可被抢锁
   - 两个场景在任务结束后都应释放锁
 """
@@ -120,6 +122,9 @@ async def process_order_with_lock_mode(
     expire_seconds: int = EXPIRE_SECONDS,
     auto_renewal: bool = False,
 ) -> dict[str, Any]:
+    # 这个示例的目的就是对比“锁过期”和“锁被续期”两种路径。
+    # 当 auto_renewal=False 且工作时长明显大于 TTL 时，
+    # 任务退出上下文时已经不再拥有这把锁，release() 记录 warning 是预期现象。
     async with async_distributed_lock(
         redis_client,
         lock_resource_name(order_id),

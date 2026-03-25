@@ -9,6 +9,8 @@
 - 优先保留薄封装，避免把教学演示逻辑混入生产骨架
 - 默认值强调稳定性和可读性，不追求过度抽象
 - 每个模块都保留 `_demo()`，方便 smoke 和人工单独验证
+- 当前模板主线默认使用 `ListQueueBroker`；如果你需要 `RedisStreamBroker` 的 ACK / reclaim / Consumer Group 能力，
+  请先阅读 `examples/08_redis_stream_broker/`
 
 ## 模块职责
 
@@ -62,6 +64,11 @@ async def main():
 | `TASKIQ_RESULT_EX_TIME` | `3600` | 结果过期时间（秒） |
 
 Worker 并发、threadpool、大型 CPU 任务建议通过 `taskiq worker` CLI 参数控制，而不是塞进 Broker 配置对象。
+
+如果业务需要更可靠的 Redis 队列语义：
+
+- 当前教程主线模板仍然保持 `ListQueueBroker`
+- `RedisStreamBroker` 的详细知识点和路由方式请参考 `examples/08_redis_stream_broker/`
 
 `broker_session(...)` 更适合作为模板层和中后期教程里的收敛写法；前期教程仍然建议先理解显式 `startup()` / `shutdown()`。
 

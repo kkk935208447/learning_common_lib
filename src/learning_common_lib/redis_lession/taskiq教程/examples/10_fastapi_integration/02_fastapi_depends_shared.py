@@ -12,7 +12,7 @@ FastAPI 和 TaskIQ 共享依赖 — 无需 taskiq-fastapi 包。
 关键 API:
     - FastAPI Depends              — FastAPI 依赖注入
     - TaskiqDepends                — TaskIQ 依赖注入
-    - broker.on_event("startup")   — Worker 启动事件
+    - broker.on_event(TaskiqEvents.WORKER_STARTUP)   — Worker 启动事件
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/redis_lession/taskiq教程
@@ -20,7 +20,7 @@ FastAPI 和 TaskIQ 共享依赖 — 无需 taskiq-fastapi 包。
 
 运行方式:
     Worker:
-        taskiq worker examples.10_fastapi_integration.02_fastapi_depends_shared:broker
+        taskiq worker examples.10_fastapi_integration.02_fastapi_depends_shared:broker --workers 1
     Server:
         uvicorn examples.10_fastapi_integration.02_fastapi_depends_shared:app --reload
 
@@ -48,8 +48,9 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
-from taskiq import TaskiqDepends
+from taskiq import TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -59,6 +60,7 @@ QUEUE_NAME = os.getenv(
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
@@ -98,32 +100,40 @@ async def get_app_config() -> dict:
 @broker.task(task_name="examples.10_fastapi_integration.02_fastapi_depends_shared.background_process")
 async def background_process(
     order_id: int,
-    redis_pool: dict = TaskiqDepends(get_redis_pool),
-    config: dict = TaskiqDepends(get_app_config),
+    state: TaskiqState = TaskiqDepends(),  # 重量级依赖，worker 启动时，会执行 on_worker_startup 事件，然后将 state 传入，这里读取到的 state 就是 on_worker_startup 中初始化的资源
+    config: dict = TaskiqDepends(get_app_config),   # 轻量级依赖，每次任务执行时，都会执行 get_app_config 函数，获取最新的配置
 ) -> dict:
     """后台处理订单 — 通过 TaskiqDepends 注入共享依赖。"""
     print(f"📦 [Worker] 处理订单: order_id={order_id}")
-    print(f"   Redis 连接池: {redis_pool}")
+    print(f"   Redis 连接池: {state.redis_info}")
     print(f"   应用配置: {config}")
     return {
         "order_id": order_id,
         "app": config["app_name"],
-        "redis_connected": redis_pool["connected"],
+        "redis_connected": state.redis_info["connected"],
         "status": "completed",
     }
 
 
-# ── 4. Worker startup 事件 — 初始化共享资源 ──
+# ── 4. Worker 事件 — 初始化共享资源 ──
 
 
-@broker.on_event("startup")
-async def on_worker_startup(state) -> None:
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def on_worker_startup(state: TaskiqState) -> None:
     """Worker 启动时初始化共享资源。"""
     print("🚀 [Worker] 启动事件: 初始化共享资源...")
     # 在生产环境中，这里可以初始化连接池、加载模型等
     state.redis_info = await get_redis_pool()
     state.config = await get_app_config()
     print("✅ [Worker] 共享资源已就绪")
+
+@broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
+async def on_worker_shutdown(state: TaskiqState) -> None:
+    """Worker 关闭时清理共享资源。"""
+    print("🚀 [Worker] 关闭事件: 清理共享资源...")
+    state.redis_info = None
+    state.config = None
+    print("✅ [Worker] 共享资源已清理")
 
 
 # ── 5. FastAPI lifespan ──

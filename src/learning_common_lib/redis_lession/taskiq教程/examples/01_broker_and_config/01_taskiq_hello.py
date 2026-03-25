@@ -53,7 +53,7 @@ QUEUE_NAME = os.getenv(
 )
 
 # ── 1. 创建 Broker ──
-# ListQueueBroker 使用 Redis List 作为消息队列，多个 Worker 竞争消费（类似 Celery）
+# ListQueueBroker 使用 Redis List 作为消息队列，多个 Worker 竞争消费（类似 Celery）。  default 是 Redis 默认用户，密码为 123456
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
     queue_name=QUEUE_NAME,

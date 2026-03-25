@@ -30,8 +30,8 @@ from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, Callable, TypeVar
 
-import redis.asyncio as aioredis
-from redis.asyncio.lock import Lock
+import redis.asyncio as aioredis      # 引入异步 Redis 底座
+from redis.asyncio.lock import Lock   # 引入异步锁
 
 try:
     from .error_handling import LockAcquireError
@@ -78,6 +78,9 @@ def _validate_non_negative(name: str, value: float) -> None:
 
 
 def _resolve_renew_interval(timeout: float, renew_interval: float | None) -> float:
+    """
+    解析并验证锁的续期间隔，默认续期间隔设置为 timeout 的 2/3，确保在锁过期前完成续期操作
+    """
     if renew_interval is None:
         return timeout * 2 / 3
     if renew_interval >= timeout:
@@ -89,10 +92,10 @@ def _resolve_renew_interval(timeout: float, renew_interval: float | None) -> flo
 
 
 def _build_lock(
-    redis_client: aioredis.Redis,
-    name: str,
-    timeout: float,
-    blocking_timeout: float,
+    redis_client: aioredis.Redis,     # 异步 redis 底座
+    name: str,                        # 锁名称，建议用业务前缀如 "order:12345"
+    timeout: float,                   # 锁的基础过期时间（秒）
+    blocking_timeout: float,          # 获取锁的最大等待时间（秒）
 ) -> Lock:
     return redis_client.lock(
         _lock_key(name),
@@ -103,9 +106,9 @@ def _build_lock(
 
 def _log_release_exception(
     *,
-    name: str,
-    timeout: float,
-    auto_renewal: bool,
+    name: str,                  # 锁名称，建议用业务前缀如 "order:12345"
+    timeout: float,             # 锁的基础过期时间（秒）
+    auto_renewal: bool,         # 是否开启后台自动续期，看门狗机制
     boundary: str,
     exc: Exception,
 ) -> None:
@@ -153,13 +156,13 @@ class AsyncRedisWatchdogLock:
 
     def __init__(
         self,
-        redis_client: aioredis.Redis,
-        name: str,
-        timeout: float = 30.0,
-        blocking_timeout: float = 5.0,
-        auto_renewal: bool = True,
-        renew_interval: float | None = None,
-        max_watchdog_failures: int = 3,
+        redis_client: aioredis.Redis,              # 异步 Redis 底座
+        name: str,                                 # 锁名称，建议用业务前缀如 "order:12345"
+        timeout: float = 30.0,                     # 锁的基础过期时间（秒）
+        blocking_timeout: float = 5.0,             # 获取锁的最大等待时间（秒）
+        auto_renewal: bool = True,                 # 是否开启后台自动续期，看门狗机制
+        renew_interval: float | None = None,       # 看门狗间隔（秒）
+        max_watchdog_failures: int = 3,            # 看门狗失败最大次数
     ) -> None:
         _validate_positive("timeout", timeout)
         _validate_non_negative("blocking_timeout", blocking_timeout)
@@ -174,12 +177,12 @@ class AsyncRedisWatchdogLock:
         self.renew_interval = _resolve_renew_interval(timeout, renew_interval)
         self.max_watchdog_failures = max_watchdog_failures
 
-        self._lock: Lock | None = None
-        self._watchdog_task: asyncio.Task[None] | None = None
-        self._watchdog_stop = asyncio.Event()
-        self._owner_task: asyncio.Task[Any] | None = None
-        self._owner_done_cleanup_task: asyncio.Task[None] | None = None
-        self._acquired = False
+        self._lock: Lock | None = None  # 当前 Redis 分布式锁对象；未获取时为 None
+        self._watchdog_task: asyncio.Task[None] | None = None  # 看门狗续期协程任务；未启动为 None
+        self._watchdog_stop = asyncio.Event()  # 看门狗停止信号；释放/清理时会触发（set）
+        self._owner_task: asyncio.Task[Any] | None = None  # 绑定当前持锁的 owner task，用于兜底清理
+        self._owner_done_cleanup_task: asyncio.Task[None] | None = None  # owner 结束后的清理任务，避免“永生锁”
+        self._acquired = False     # 是否已经成功 acquire 这把锁
 
     @property
     def redis_key(self) -> str:
@@ -280,7 +283,7 @@ class AsyncRedisWatchdogLock:
 
     def _describe_owner_done_reason(self, task: asyncio.Task[Any]) -> str:
         """把 owner task 的结束原因转成日志友好的短字符串。"""
-        if task.cancelled():
+        if task.cancelled():    # 任务被撤销
             return "cancelled"
 
         exc = task.exception()
@@ -404,6 +407,7 @@ class AsyncRedisWatchdogLock:
                 pass
 
             try:
+                # 尝试续期锁
                 await lock.extend(self.timeout, replace_ttl=True)
                 if consecutive_failures > 0:
                     logger.info(

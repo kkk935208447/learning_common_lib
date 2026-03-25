@@ -32,7 +32,7 @@ TaskIQ 内置中间件基类与 6 个钩子方法 — 理解中间件生命周�
     - Worker 控制台显示每个钩子的触发日志
     - Client 控制台显示 pre_send 和 post_send 的触发日志
     - 正常任务触发顺序: pre_execute → post_execute → post_save
-    - 异常任务触发顺序: pre_execute → on_error → post_save
+    - 异常任务触发顺序: pre_execute → on_error → post_execute → post_save
 
 生产提醒:
     - 中间件适合做横切关注点：日志、监控、鉴权、限流等
@@ -53,6 +53,8 @@ import os
 
 from taskiq import TaskiqMessage, TaskiqMiddleware, TaskiqResult
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
+from typing import Any
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -75,13 +77,13 @@ class SimpleLogMiddleware(TaskiqMiddleware):
     async def pre_send(self, message: TaskiqMessage) -> TaskiqMessage:
         """任务发送前（client 侧）。必须返回 message，可在此修改消息。"""
         step = self._next_hook_step(message, "pre_send")
-        print(f"🔵 [{step}] 即将发送任务: {message.task_name}")
+        print(f"🔵 [{step}] client 即将发送任务: {message.task_name}")
         return message
 
     async def post_send(self, message: TaskiqMessage) -> None:
         """任务发送后（client 侧）。无需返回值。"""
         step = self._next_hook_step(message, "post_send")
-        print(f"🟢 [{step}] 任务已发送: {message.task_name}")
+        print(f"🟢 [{step}] client 任务已发送: {message.task_name}")
 
     async def pre_execute(self, message: TaskiqMessage) -> TaskiqMessage:
         """任务执行前（worker 侧）。必须返回 message，可在此修改消息。"""
@@ -95,7 +97,7 @@ class SimpleLogMiddleware(TaskiqMiddleware):
         """任务执行后（worker 侧）。可读取执行结果。"""
         step = self._next_hook_step(message, "post_execute")
         print(
-            f"🟣 [{step}] 执行完成: {message.task_name}, "
+            f"🟣 [{step}] Worker 执行完成: {message.task_name}, "
             f"is_err={result.is_err}"
         )
 
@@ -121,6 +123,7 @@ class SimpleLogMiddleware(TaskiqMiddleware):
 # with_middlewares() 返回新 broker 实例，不修改原 broker
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
@@ -138,6 +141,11 @@ async def say_hello(name: str) -> str:
     """简单问候任务 — 用于触发中间件钩子。"""
     print(f"📦 Worker 正在执行: say_hello({name!r})")
     return f"Hello, {name}!"
+
+@broker.task(task_name="examples.05_middlewares.01_builtin_middleware.say_goodbye")
+async def say_goodbye(name: str) -> Any:
+    """用于触发异常"""
+    raise ValueError("故意抛出一个异常")
 
 
 # ── 4. 客户端发送任务 ──
@@ -161,10 +169,19 @@ async def main() -> None:
         print(f"✅ 任务已发送! task_id={handle.task_id}")
         print(f"✅ 任务结果   = {result.return_value}")
         print()
+
+        print("🚀 发送任务: say_goodbye('TaskIQ')")
+        print("=" * 50)
+        handle = await say_goodbye.kiq("TaskIQ")
+        result = await handle.wait_result(timeout=10)
+        print(f"✅ 故意错误任务已发送！task_id={handle.task_id}")
+        print(f"✅ 是否存在异常 = {result.is_err}")
+        print(f"✅ 异常后的结果  = {result.error}    {result.error!r}")
+
         print("钩子执行顺序说明:")
         print("  Client 侧: pre_send -> [发送到队列] -> post_send")
         print("  Worker 侧: pre_execute -> [执行任务] -> post_execute -> post_save")
-        print("  异常情况: pre_execute -> [执行任务] -> on_error -> post_save")
+        print("  异常情况: pre_execute -> [执行任务] -> on_error -> post_execute -> post_save")
     finally:
         await broker.shutdown()
 

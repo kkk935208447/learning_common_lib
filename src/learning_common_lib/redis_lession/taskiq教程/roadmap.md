@@ -53,8 +53,14 @@
 | 17 | `examples/07_scheduling/02_cron_and_interval.py` | Cron 与间隔调度 |
 | 18 | `examples/08_events_and_lifecycle/01_startup_shutdown.py` | 生命周期事件 |
 | 19 | `examples/08_events_and_lifecycle/02_broker_events.py` | Broker 事件与 State |
-| 20 | `examples/09_broker_patterns/01_pubsub_broker.py` | PubSub vs List 模式 |
-| 21 | `examples/09_broker_patterns/02_multiple_queues.py` | 多队列路由 |
+| 20 | `examples/08_redis_stream_broker/01_stream_data_structure_basics.py` | Stream 基础：XADD / XREADGROUP / XACK |
+| 21 | `examples/08_redis_stream_broker/02_list_vs_stream_reliability.py` | List vs Stream 可靠性对比 |
+| 22 | `examples/08_redis_stream_broker/03_taskiq_redis_stream_hello.py` | 最小 TaskIQ RedisStreamBroker |
+| 23 | `examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py` | 单 broker + 动态 queue_name + Stream 路由 |
+| 24 | `examples/09_broker_patterns/01_pubsub_broker.py` | PubSub vs List 模式 |
+| 25 | `examples/09_broker_patterns/02_multiple_queues.py` | 多 broker 多队列路由 |
+| 26 | `examples/09_broker_patterns/03_single_broker_dynamic_queues_stream.py` | 单 broker 动态 stream 路由总结与路由证明 |
+| 27 | `examples/09_broker_patterns/04_single_broker_dynamic_queue_name_list.py` | ListQueueBroker 动态 queue_name 路由证明 |
 
 ## 阶段六：FastAPI 集成
 
@@ -62,8 +68,8 @@
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 22 | `examples/10_fastapi_integration/01_fastapi_taskiq.py` | FastAPI + TaskIQ 基础集成 |
-| 23 | `examples/10_fastapi_integration/02_fastapi_depends_shared.py` | 共享依赖模式 |
+| 28 | `examples/10_fastapi_integration/01_fastapi_taskiq.py` | FastAPI + TaskIQ 基础集成 |
+| 29 | `examples/10_fastapi_integration/02_fastapi_depends_shared.py` | 共享依赖模式 |
 
 ## 阶段七：企业模板
 
@@ -71,12 +77,12 @@
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 24 | `templates/taskiq_config.py` | 生产级配置对象 |
-| 25 | `templates/taskiq_app.py` | Broker 工厂 + 单例管理 |
-| 26 | `templates/error_handling.py` | 异常层级树 |
-| 27 | `templates/task_base.py` | 任务装饰器工厂 |
-| 28 | `templates/middleware_stack.py` | 生产级中间件栈 |
-| 29 | `templates/fastapi_taskiq.py` | FastAPI 集成模板 |
+| 30 | `templates/taskiq_config.py` | 生产级配置对象 |
+| 31 | `templates/taskiq_app.py` | Broker 工厂 + 单例管理 |
+| 32 | `templates/error_handling.py` | 异常层级树 |
+| 33 | `templates/task_base.py` | 任务装饰器工厂 |
+| 34 | `templates/middleware_stack.py` | 生产级中间件栈 |
+| 35 | `templates/fastapi_taskiq.py` | FastAPI 集成模板 |
 
 ## 建议学习方式
 

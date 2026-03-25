@@ -18,6 +18,11 @@
                     │  ├─ LPUSH/BRPOP     │
                     │  └─ 竞争消费         │
                     │                      │
+                    │  RedisStreamBroker   │
+                    │  ├─ XADD/XREADGROUP │
+                    │  ├─ XACK/XAUTOCLAIM │
+                    │  └─ Consumer Group  │
+                    │                      │
                     │  PubSubBroker        │
                     │  ├─ PUBLISH/SUB     │
                     │  └─ 广播模式         │
@@ -132,8 +137,14 @@ Producer                    Broker                     Worker
 | Cron/Interval | `07_scheduling/02_cron_and_interval.py` | — |
 | 生命周期 | `08_events_and_lifecycle/01_startup_shutdown.py` | — |
 | Broker 事件 | `08_events_and_lifecycle/02_broker_events.py` | — |
+| Stream 基础 | `08_redis_stream_broker/01_stream_data_structure_basics.py` | — |
+| List vs Stream 可靠性 | `08_redis_stream_broker/02_list_vs_stream_reliability.py` | — |
+| 最小 Stream Broker | `08_redis_stream_broker/03_taskiq_redis_stream_hello.py` | — |
+| 单 broker 动态路由 | `08_redis_stream_broker/04_single_broker_dynamic_queue_name.py` | — |
 | PubSub/List | `09_broker_patterns/01_pubsub_broker.py` | — |
 | 多队列 | `09_broker_patterns/02_multiple_queues.py` | — |
+| Stream 动态路由总结 | `09_broker_patterns/03_single_broker_dynamic_queues_stream.py` | — |
+| List 动态路由证明 | `09_broker_patterns/04_single_broker_dynamic_queue_name_list.py` | — |
 | FastAPI 集成 | `10_fastapi_integration/01_fastapi_taskiq.py` | `templates/fastapi_taskiq.py` |
 | 共享依赖 | `10_fastapi_integration/02_fastapi_depends_shared.py` | `templates/fastapi_taskiq.py` |
 | Broker 工厂 | — | `templates/taskiq_app.py` |
@@ -142,3 +153,4 @@ Producer                    Broker                     Worker
 - `smoke/run_all_examples.py` 会同时验证 `examples/` 与 `templates/`
 - 需要 worker 的 example 会在 smoke 中注入独立 `queue_name`，避免不同案例互相抢队列
 - `TaskiqConfig.queue_name` 负责 broker 级消费隔离；`task_name` 只负责 worker 本地分发
+- `RedisStreamBroker` 额外引入了 `consumer_group_name`、ACK、pending reclaim 等消费状态管理

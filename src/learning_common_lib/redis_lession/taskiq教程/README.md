@@ -36,7 +36,7 @@ pkill -9 -f celery
 
 ## 定位
 
-从零掌握 TaskIQ 异步任务队列框架，覆盖 Broker 配置、任务定义、调用、依赖注入、中间件、错误处理、定时任务、生命周期、Broker 模式、FastAPI 集成共 10 章渐进式示例，外加一套企业级可复用模板。
+从零掌握 TaskIQ 异步任务队列框架，覆盖 Broker 配置、任务定义、调用、依赖注入、中间件、错误处理、定时任务、生命周期、RedisStreamBroker 深拆、Broker 模式、FastAPI 集成共 10+1 组渐进式示例，外加一套企业级可复用模板。
 
 TaskIQ 是 Python 原生 async-first 的任务队列框架，相比 Celery 的优势：
 - 原生 async/await（无需 celery-aio-pool 等 workaround）
@@ -51,6 +51,54 @@ TaskIQ 是 Python 原生 async-first 的任务队列框架，相比 Celery 的�
 - 需要在项目中引入 async-first 后台任务队列
 - 希望快速搭建生产级 TaskIQ 骨架
 - 从 Celery 迁移到 TaskIQ 的开发者
+
+## Broker 对照速查
+
+如果你是从 Celery 迁移过来的，最值得先建立的心智模型是：
+
+- `Celery + Redis` 更像“Redis transport + visibility_timeout”
+- `TaskIQ + RedisStreamBroker` 更像“Redis Stream + Consumer Group + ACK/reclaim”
+- `Celery + RabbitMQ` 则是 Celery 更典型、更成熟的可靠 broker 主线
+
+### Celery Redis broker vs TaskIQ RedisStreamBroker
+
+| 维度 | Celery Redis broker | TaskIQ RedisStreamBroker |
+|------|---------------------|--------------------------|
+| 底层模型 | Redis transport，围绕 `visibility_timeout` 重投递 | Redis Stream + Consumer Group |
+| ACK 语义 | 偏“可见性超时后再投递” | 显式 ACK，未 ACK 可 reclaim |
+| 单 worker 多队列 | `celery worker -Q foo,bar` | 一个 broker 通过 `additional_streams` 监听多个 stream |
+| producer 路由 | `task_routes` / `apply_async(queue=...)` | `queue_name` label |
+| 对 Redis 原生模型的贴合度 | 较低，更偏 Celery transport | 高，直接就是 Stream 语义 |
+| 更适合什么 | 已有 Celery + Redis 体系，继续沿用 | async-first + Redis-only + 更清晰的 ACK/reclaim 语义 |
+
+重复执行风险补充：
+
+- `Celery + Redis` 更容易因为长任务超过 `visibility_timeout` 而触发重复执行
+- `TaskIQ + RedisStreamBroker` 也可能重复执行，但更像“未 ACK 消息被 reclaim 接管”，通常更可观测
+- 两者都不应假设 exactly-once；任务逻辑依然要做幂等
+
+### Celery RabbitMQ broker vs TaskIQ RedisStreamBroker
+
+| 维度 | Celery RabbitMQ broker | TaskIQ RedisStreamBroker |
+|------|-------------------------|--------------------------|
+| 核心模型 | AMQP broker（exchange / queue / routing_key） | Redis Stream + Consumer Group |
+| 确认机制 | RabbitMQ consumer ack / nack / requeue | Stream ACK / reclaim |
+| 路由能力 | 强，Celery 原生强项 | 够用，依赖 `queue_name` + `additional_streams` |
+| 多队列 worker | 原生支持，`-Q foo,bar` 很成熟 | 通过 broker 配置监听多个 stream |
+| 优先级支持 | 更成熟，RabbitMQ 原生优先级更强 | 没有 RabbitMQ 那种 broker 原生优先级主模型 |
+| 更适合什么 | Celery 正统生产主线、复杂路由和资源隔离 | Redis-only 栈、原生 async、想保留 Redis 流式消费语义 |
+
+重复执行风险补充：
+
+- `Celery + RabbitMQ` 也可能重复执行，但更常见触发点是 consumer/channel 失联，而不是单纯任务过长
+- `TaskIQ + RedisStreamBroker` 的重复执行通常对应 idle timeout / pending reclaim
+- 如果你最担心“长短任务参差不齐导致天然重复执行”，RabbitMQ 一般比 Celery Redis 更稳
+
+补充理解：
+
+- 如果你只是想把 Celery + Redis 迁到 TaskIQ，不要直接把两者当成同一种 Redis broker
+- 如果你想保留 Redis，但同时得到更接近可靠消息流的语义，优先评估 `RedisStreamBroker`
+- 如果你继续用 Celery 且非常看重 broker 能力，RabbitMQ 仍然是更典型的主线选择
 
 ## 三层职责
 
@@ -109,6 +157,7 @@ taskiq教程/
 │   ├── 06_error_handling/      ← 错误处理
 │   ├── 07_scheduling/          ← 定时任务
 │   ├── 08_events_and_lifecycle/ ← 事件与生命周期
+│   ├── 08_redis_stream_broker/ ← RedisStreamBroker 深度拆解（插入 09 章之前）
 │   ├── 09_broker_patterns/     ← Broker 模式
 │   └── 10_fastapi_integration/ ← FastAPI 集成
 ├── templates/
@@ -189,8 +238,14 @@ uv run python -m templates.task_base
 | 06 | 错误处理 | reject/requeue、智能重试 + 指数退避 |
 | 07 | 定时任务 | RedisScheduleSource、cron 表达式、间隔调度 |
 | 08 | 事件与生命周期 | WORKER_STARTUP/SHUTDOWN、broker.on_event、TaskiqState |
-| 09 | Broker 模式 | PubSubBroker vs ListQueueBroker、多队列路由 |
+| 08+ | RedisStreamBroker 深拆 | Stream 基础、ACK、reclaim、单 broker 动态 `queue_name` 路由 |
+| 09 | Broker 模式 | PubSubBroker vs ListQueueBroker、多 broker 多队列路由、单 broker 动态 stream/list 路由总结 |
 | 10 | FastAPI 集成 | lifespan 管理、共享依赖、统一响应格式 |
+
+插入小章节：
+
+- `examples/08_redis_stream_broker/README.md`
+  解释 `RedisStreamBroker`、`ListQueueBroker`、动态 `queue_name` 路由、Consumer Group / ACK / `XAUTOCLAIM` 的差异与生产取舍。
 
 ## Redis 连接约定
 

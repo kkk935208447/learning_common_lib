@@ -21,7 +21,7 @@ TaskIQ 事件装饰器与 TaskiqState — @broker.on_event 结合共享状态。
 
 运行方式:
     Worker:
-        taskiq worker examples.08_events_and_lifecycle.02_broker_events:broker
+        taskiq worker examples.08_events_and_lifecycle.02_broker_events:broker --workers 1
     Client:
         python examples/08_events_and_lifecycle/02_broker_events.py
 

@@ -83,6 +83,16 @@ async def process_order():
 - 如果 `worker_a` 和 `worker_b` 都注册了 `a.send_email`，那它们共享同一个队列就是正常的竞争消费
 - 问题不在于“多个 worker”，而在于“多个不兼容的 worker”
 
+**再补一条很容易混淆的边界**:
+- `ListQueueBroker` 也支持 producer 侧 `queue_name` 动态路由
+- 但这不等于“一个 worker 可以同时监听多个 queue”
+- 原因很直接：`kick()` 会根据 `labels["queue_name"]` 选择写入哪个 list，
+  但 `listen()` 仍然只会 `BRPOP(self.queue_name)`
+- 所以对 `ListQueueBroker` 来说：
+  - “发到多个队列”是成立的
+  - “单 worker 同时消费多个队列”不成立
+- 如果你需要这两件事同时成立，请看 `RedisStreamBroker` + `additional_streams`
+
 **正确做法**:
 - 同一组同构 worker 可以共享一个 `queue_name`
 - 不同服务、不同教程案例、不同职责边界的 worker 不要长期共享同一个队列

@@ -50,6 +50,54 @@ pkill -9 -f celery
 - 需要在项目中引入后台任务队列或分布式锁
 - 希望快速搭建生产级 Celery 骨架
 
+## Broker 对照速查
+
+在 Redis / RabbitMQ / TaskIQ 之间切换时，最容易混淆的是：
+
+- `Celery + Redis` 更像“Redis transport + visibility_timeout”
+- `TaskIQ + RedisStreamBroker` 更像“Redis Stream + Consumer Group + ACK/reclaim”
+- `Celery + RabbitMQ` 则是 Celery 更典型、也更成熟的可靠 broker 主线
+
+### Celery Redis broker vs TaskIQ RedisStreamBroker
+
+| 维度 | Celery Redis broker | TaskIQ RedisStreamBroker |
+|------|---------------------|--------------------------|
+| 底层模型 | Redis transport，围绕 `visibility_timeout` 重投递 | Redis Stream + Consumer Group |
+| ACK 语义 | 偏“可见性超时后再投递” | 显式 ACK，未 ACK 可 reclaim |
+| 多队列 worker | `celery worker -Q foo,bar` | 一个 broker 通过 `additional_streams` 监听多个 stream |
+| producer 路由 | `task_routes` / `apply_async(queue=...)` | `queue_name` label |
+| 对 Redis 原生模型的贴合度 | 较低，更偏 Celery transport | 高，直接就是 Stream 语义 |
+| 更适合什么 | 已有 Celery + Redis 体系，继续沿用 | async-first + Redis-only + 更清晰的 ACK/reclaim 语义 |
+
+重复执行风险补充：
+
+- `Celery + Redis` 更容易因为长任务超过 `visibility_timeout` 而触发重复执行
+- `TaskIQ + RedisStreamBroker` 也可能重复执行，但更像“未 ACK 消息被 reclaim 接管”，通常比 Celery Redis 更可观测
+- 两者都应按 at-least-once 语义设计任务幂等
+
+### Celery RabbitMQ broker vs TaskIQ RedisStreamBroker
+
+| 维度 | Celery RabbitMQ broker | TaskIQ RedisStreamBroker |
+|------|-------------------------|--------------------------|
+| 核心模型 | AMQP broker（exchange / queue / routing_key） | Redis Stream + Consumer Group |
+| 确认机制 | RabbitMQ consumer ack / nack / requeue | Stream ACK / reclaim |
+| 路由能力 | 强，Celery 原生强项 | 够用，依赖 `queue_name` + `additional_streams` |
+| 多队列 worker | 原生支持，`-Q foo,bar` 很成熟 | 通过 broker 配置监听多个 stream |
+| 优先级支持 | 更成熟，RabbitMQ 原生优先级更强 | 没有 RabbitMQ 那种 broker 原生优先级主模型 |
+| 更适合什么 | Celery 正统生产主线、复杂路由和资源隔离 | Redis-only 栈、原生 async、想保留 Redis 流式消费语义 |
+
+重复执行风险补充：
+
+- `Celery + RabbitMQ` 也可能重复执行，但更常见触发点是 consumer/channel 失联，而不是单纯任务过长
+- `TaskIQ + RedisStreamBroker` 的重复执行通常对应 idle timeout / pending reclaim
+- 从“长任务天然触发重复执行”的角度看，RabbitMQ 通常比 Celery Redis 更稳
+
+补充理解：
+
+- 如果你继续用 Celery，但追求更成熟的 broker 语义，通常优先考虑 RabbitMQ
+- 如果你想在 Redis 里拿到更“原生消息流”的模型，TaskIQ 的 `RedisStreamBroker` 更贴近这个方向
+- 本教程主线仍然以 Celery + Redis 为例，但你可以把上面两张表当成选型背景板
+
 ## 环境要求
 
 | 依赖 | 版本 | 用途 |

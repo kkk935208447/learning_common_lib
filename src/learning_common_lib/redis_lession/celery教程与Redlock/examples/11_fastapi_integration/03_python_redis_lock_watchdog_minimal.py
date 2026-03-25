@@ -183,7 +183,7 @@ async def run_case(order_id: str, *, auto_renewal: bool) -> dict[str, Any]:
         "after_finish_probe_acquired": after_finish_probe_acquired,
         "after_finish_ttl": format_pttl(after_finish_ttl),
         **holder_result,
-    }
+    } 
 
 
 async def main() -> None:

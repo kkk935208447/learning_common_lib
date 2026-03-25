@@ -6,7 +6,8 @@ TaskIQ 多队列路由 — 通过多个 broker.queue_name 隔离不同优先级�
 
 关键概念:
     - taskiq_redis 真正用于路由的是 queue_name
-    - 不同队列通常对应不同 broker 对象，而不是一个 broker 靠 CLI 参数切换
+    - 在当前教程与本地 TaskIQ 版本里，多队列最直观的做法是“不同队列对应不同 broker 入口”
+    - 如果你想看“单 broker + 动态 queue_name + additional_streams”路线，请对照 `examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py`
     - 不同 worker 分别监听各自 broker.queue_name，实现优先级和资源隔离
 
 关键 API:
@@ -42,6 +43,7 @@ TaskIQ 多队列路由 — 通过多个 broker.queue_name 隔离不同优先级�
     - TaskIQ 没有 Celery 那样的 `-Q` 队列切换参数
     - `--tasks-pattern` / `-fsd` 是任务发现参数，不是队列路由参数
     - 如果要临时改队列，目标 worker 也必须认识该 task_name
+    - “多 broker 隔离”和“单 broker 动态路由”都是可行路线，只是权衡点不同
 """
 
 from __future__ import annotations

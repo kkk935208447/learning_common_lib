@@ -46,7 +46,7 @@ def async_autoretry(
 
             try:
                 return await func(self, *args, **kwargs)
-            except Ignore:
+            except Ignore:  # 不可恢复（直接丢弃）
                 raise
             except Retry:
                 raise
@@ -61,7 +61,7 @@ def async_autoretry(
                         maximum=int(getattr(self, "retry_backoff_max", 600)),
                         full_jitter=bool(getattr(self, "retry_jitter", True)),
                     )
-
+                # 刪除 override_max_retries 防止对其他任务造成影响
                 previous_override_max_retries = getattr(
                     self,
                     "override_max_retries",

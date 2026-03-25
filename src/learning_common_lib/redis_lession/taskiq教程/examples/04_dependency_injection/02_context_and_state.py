@@ -24,7 +24,7 @@ TaskIQ Context 对象和 TaskiqState — 访问消息元数据和 worker 级共�
 
 运行方式:
     Worker:
-        taskiq worker examples.04_dependency_injection.02_context_and_state:broker
+        taskiq worker examples.04_dependency_injection.02_context_and_state:broker --workers 1
     Client:
         python examples/04_dependency_injection/02_context_and_state.py
 
@@ -47,8 +47,9 @@ from __future__ import annotations
 import asyncio
 import os
 
-from taskiq import Context, TaskiqDepends, TaskiqState
+from taskiq import Context, TaskiqDepends, TaskiqEvents, TaskiqState
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -58,6 +59,7 @@ QUEUE_NAME = os.getenv(
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
@@ -68,7 +70,7 @@ broker = ListQueueBroker(
 # ── 2. Startup 事件 — 初始化 worker 级共享状态 ──
 
 
-@broker.on_event("startup")
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def startup(state: TaskiqState) -> None:
     """Worker 启动时执行 — 初始化共享资源。"""
     print("🔧 [Startup] 初始化 worker 共享状态...")
@@ -79,7 +81,7 @@ async def startup(state: TaskiqState) -> None:
     print("✅ [Startup] 共享状态初始化完成")
 
 
-@broker.on_event("shutdown")
+@broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
 async def shutdown(state: TaskiqState) -> None:
     """Worker 关闭时执行 — 清理共享资源。"""
     print("🔧 [Shutdown] 清理 worker 共享状态...")
@@ -93,7 +95,7 @@ async def shutdown(state: TaskiqState) -> None:
 @broker.task(task_name="examples.04_dependency_injection.02_context_and_state.task_with_context")
 async def task_with_context(
     order_id: int,
-    context: Context = TaskiqDepends(),
+    context: Context = TaskiqDepends(),  # 它是 TaskIQ 的“依赖注入标记”。当 worker 执行到 process_order 任务时，TaskIQ 会自动构造并注入 Context 参数（里面包含当前任务的 message、labels、task_id 等信息），这样你不需要在客户端手动把这些元数据作为参数传进来
 ) -> dict:
     """演示 Context 注入 — 访问消息元数据。"""
     message = context.message

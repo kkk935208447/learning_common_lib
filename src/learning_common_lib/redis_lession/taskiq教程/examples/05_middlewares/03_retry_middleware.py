@@ -38,6 +38,9 @@ TaskIQ 指数退避重试中间件 — 在 on_error 中实现自动重试。
 技术要点:
     - on_error 钩子在任务抛出异常时触发
     - broker.kick(broker.formatter.dumps(message)) 重新发送消息到队列
+    - ListQueueBroker 的重试本质是“重新排队”，不是“立刻重试”，仍会受队列积压影响
+    - 如果沿用同一个 task_id，必须跳过这次中间失败的结果保存；否则 wait_result() 会提前读到失败，
+      且较晚写回的旧失败结果还可能覆盖已经写入的最终成功结果
     - 退避公式: delay = base * 2^retry_count + random(0, 1)
     - labels 中的值必须是字符串类型
 """
@@ -49,7 +52,9 @@ import os
 import random
 
 from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
+from taskiq.exceptions import NoResultError
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -116,20 +121,33 @@ class RetryMiddleware(TaskiqMiddleware):
         )
         await asyncio.sleep(backoff)
 
-        # 重新发送消息到队列
+        # ListQueueBroker 的 kick() 会把消息重新放回队列，等待后续 worker 消费。
+        # 这不是“同步立即重试”，真实等待时间 = backoff + 队列排队时间。
         serialized_message = self.broker.formatter.dumps(message)
         await self.broker.kick(serialized_message)
+
+        # TaskIQ 会先构造当前失败的 TaskiqResult，再执行 on_error；
+        # on_error 返回后，worker 仍会继续把这份 result 写入 result_backend。
+        #
+        # 如果这里不显式改成 NoResultError：
+        # 1. client.wait_result() 会把这次中间失败当成“最终结果”提前返回；
+        # 2. 这次较晚写回的旧失败结果，还可能覆盖已经写入的最终成功结果。
+        #
+        # 另外，TaskiqResult(labels=message.labels) 在构造时会复制 labels，
+        # 所以 Redis 中看到的 _retry_count 往往是“本次失败发生时”的旧快照。
+        result.error = NoResultError()
 
 
 # ── 3. 创建 Broker + 注册重试中间件 ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
     queue_name=QUEUE_NAME,
 ).with_result_backend(result_backend).with_middlewares(
-    RetryMiddleware(),
+    RetryMiddleware(), # 注册重试中间件
 )
 
 # ── 4. 模拟不稳定任务 ──

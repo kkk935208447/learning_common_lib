@@ -47,6 +47,9 @@ NO_WORKER_NEEDED = {
     "examples/01_broker_and_config/03_config_patterns.py",
     "examples/07_scheduling/01_redis_schedule_source.py",
     "examples/07_scheduling/02_cron_and_interval.py",
+    "examples/08_redis_stream_broker/01_stream_data_structure_basics.py",
+    "examples/08_redis_stream_broker/02_list_vs_stream_reliability.py",
+    "examples/09_broker_patterns/04_single_broker_dynamic_queue_name_list.py",
     "examples/10_fastapi_integration/01_fastapi_taskiq.py",
     "examples/10_fastapi_integration/02_fastapi_depends_shared.py",
 }
@@ -61,9 +64,17 @@ EXAMPLE_TIMEOUT_OVERRIDES = {
     "examples/05_middlewares/03_retry_middleware.py": 40,
     "examples/06_error_handling/01_reject_and_requeue.py": 40,
     "examples/06_error_handling/02_smart_retry_with_backoff.py": 45,
+    "examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py": 45,
+    "examples/09_broker_patterns/03_single_broker_dynamic_queues_stream.py": 45,
 }
 
 WORKER_SPECS = {
+    "examples/08_redis_stream_broker/03_taskiq_redis_stream_hello.py": [
+        {"entrypoint": "broker"},
+    ],
+    "examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py": [
+        {"entrypoint": "broker"},
+    ],
     "examples/09_broker_patterns/01_pubsub_broker.py": [
         {"entrypoint": "list_broker"},
     ],
@@ -75,6 +86,11 @@ WORKER_SPECS = {
 }
 
 QUEUE_ENV_ENTRYPOINTS = {
+    "examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py": [
+        "broker",
+        "high_priority",
+        "batch",
+    ],
     "examples/09_broker_patterns/01_pubsub_broker.py": [
         "list_broker",
         "pubsub_broker",
@@ -83,6 +99,16 @@ QUEUE_ENV_ENTRYPOINTS = {
         "default_broker",
         "high_priority_broker",
         "batch_broker",
+    ],
+    "examples/09_broker_patterns/03_single_broker_dynamic_queues_stream.py": [
+        "broker",
+        "high_priority",
+        "batch",
+    ],
+    "examples/09_broker_patterns/04_single_broker_dynamic_queue_name_list.py": [
+        "broker",
+        "high_priority",
+        "batch",
     ],
 }
 
@@ -180,14 +206,14 @@ def build_queue_env(path: Path, base: Path, worker_specs: list[dict[str, object]
     rel_path = str(path.relative_to(base)).replace(os.sep, "/")
     env: dict[str, str] = {}
 
-    if not worker_specs:
-        return env
-
     override_entrypoints = QUEUE_ENV_ENTRYPOINTS.get(rel_path)
     if override_entrypoints is not None:
         for entrypoint in override_entrypoints:
             env_key = f"TASKIQ_QUEUE_NAME_{normalize_env_suffix(entrypoint)}"
             env[env_key] = build_smoke_queue_name(rel_path, entrypoint)
+        return env
+
+    if not worker_specs:
         return env
 
     if len(worker_specs) == 1 and str(worker_specs[0].get("entrypoint", "broker")) == "broker":

@@ -37,6 +37,9 @@ TaskIQ 智能重试策略 — 结合中间件 + labels 实现指数退避重试�
 技术要点:
     - labels 中的 max_retries/retry_delay 由中间件读取
     - 退避公式: delay = base_delay * 2^count + random(0, 1)
+    - ListQueueBroker 的重试本质是“重新排队”，不是“立刻重试”，仍会受队列积压影响
+    - 如果沿用同一个 task_id，必须跳过这次中间失败的结果保存；否则 wait_result() 会提前读到失败，
+      且较晚写回的旧失败结果还可能覆盖已经写入的最终成功结果
     - 可重试异常才触发重试，致命异常直接失败
 """
 
@@ -46,7 +49,9 @@ import asyncio
 import os
 
 from taskiq import Context, TaskiqDepends, TaskiqMessage, TaskiqMiddleware, TaskiqResult
+from taskiq.exceptions import NoResultError
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -124,16 +129,23 @@ class SmartRetryMiddleware(TaskiqMiddleware):
         # 等待退避延迟
         await asyncio.sleep(delay)
 
-        # 重新发送原始消息，保持同一个 task_id，便于 client 继续 wait_result()
+        # 重新发送原始消息，保持同一个 task_id，便于 client 继续 wait_result()。
+        # 这里依然是“重新排队”，不是跳过队列直接执行。
         message.labels["_retry_count"] = str(new_count)
         serialized_message = self.broker.formatter.dumps(message)
         await self.broker.kick(serialized_message)
+
+        # TaskIQ 会先构造当前失败的 TaskiqResult，再执行 on_error；
+        # 如果不把 error 改成 NoResultError，当前这次中间失败仍会被写入 result_backend。
+        # 结果就是：wait_result() 提前返回失败，且旧失败结果还可能反向覆盖后面的成功结果。
+        result.error = NoResultError()
         print(f"✅ [重试] 任务已重新入队: {task_name}")
 
 
 # ── 3. 创建 Broker + Result Backend + 注册中间件 ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",

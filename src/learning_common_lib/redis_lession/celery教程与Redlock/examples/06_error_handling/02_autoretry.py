@@ -29,7 +29,7 @@ from typing import Any
 from celery import Celery, Task
 
 try:
-    from templates.async_autoretry import async_autoretry
+    from ...templates.async_autoretry import async_autoretry
 except ImportError:
     import sys
     from pathlib import Path

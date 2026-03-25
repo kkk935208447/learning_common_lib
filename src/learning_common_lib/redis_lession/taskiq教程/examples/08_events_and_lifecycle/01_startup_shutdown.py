@@ -21,7 +21,7 @@ TaskIQ 生命周期事件 — Worker 和 Client 的 startup/shutdown。
 
 运行方式:
     Worker:
-        taskiq worker examples.08_events_and_lifecycle.01_startup_shutdown:broker
+        taskiq worker examples.08_events_and_lifecycle.01_startup_shutdown:broker --workers 1
     Client:
         python examples/08_events_and_lifecycle/01_startup_shutdown.py
 
