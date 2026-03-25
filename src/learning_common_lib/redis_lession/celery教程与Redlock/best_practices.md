@@ -13,6 +13,7 @@
 - 设置 `result_expires`（推荐 3600s），防止 Redis 内存无限增长
 - `task_acks_late` 与 `broker_transport_options` 分开理解：前者是 ack 时机，后者是 broker 传输层行为
 - Redis broker 可按需设置 `broker_transport_options = {"visibility_timeout": 3600}`
+- `visibility_timeout` 不是 worker 生死探测器；它只是 Redis transport 判断“多久后允许再次投递”的窗口
 - 设置 `task_soft_time_limit` 和 `task_time_limit`，防止任务永远挂起
 
 ## 2. 任务定义
@@ -57,7 +58,8 @@
   ```
 - 使用指数退避重试：`retry_backoff=True, retry_backoff_max=600`
 - 设置合理的 `max_retries`（推荐 3-5 次），避免无限重试
-- `acks_late=True` + `reject_on_worker_lost=True`：worker 崩溃时任务重新入队
+- `acks_late=True` + `reject_on_worker_lost=True`：worker 崩溃时更容易触发重新投递，但这依然是 at-least-once，不是 exactly-once
+- 重复投递是 broker 语义，副作用去重仍然要靠业务幂等
 
 ## 6. 队列与路由
 
@@ -110,6 +112,7 @@
 - 长任务不要只依赖固定 TTL；要先演示“固定 TTL 的失败态”，再引入看门狗续期
 - 教学上优先打印 TTL 时间轴，再引入封装；否则很容易把“续期”理解成黑盒魔法
 - 看门狗解决的是“长任务期间持续续期”，不是把所有锁问题都自动消灭
+- 分布式锁解决的是“执行互斥”，不是“消息恢复”或“副作用幂等”
 - 锁释放阶段如果出现“锁已过期 / owner 不匹配 / Redis 异常”，业务层可以不二次抛错，但必须保留结构化日志
 
 ## 11. FastAPI 集成

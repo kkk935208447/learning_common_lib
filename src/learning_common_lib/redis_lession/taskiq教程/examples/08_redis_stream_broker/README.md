@@ -29,3 +29,6 @@
   - 通过不同 broker 入口隔离不同 queue/stream
   - 或者通过一个 `RedisStreamBroker` 的 `queue_name + additional_streams` 同时监听多个 stream
 - producer 侧动态路由依赖的不是 CLI，而是 message labels 里的 `queue_name`
+- `RedisStreamBroker` 提供的是更清晰的 at-least-once + crash recoverable 语义，不是 exactly-once
+- `XAUTOCLAIM` 的接管依据是 pending idle time，不是 worker 生死；如果想区分“慢但活着”和“真的挂了”，需要额外的应用层心跳
+- Redis Stream 没有 RabbitMQ 风格的 `NACK` 原语；拿到消息但暂时不处理时，常见做法是暂不 `XACK`，让消息继续留在 PEL，后续再 reclaim / 重试

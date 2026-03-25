@@ -290,18 +290,23 @@ taskiq worker myapp.broker:broker
 from myapp.broker import broker
 ```
 
-## 10. `on_error` 中重新发送导致无限循环
+## 10. `on_error` 中重新发送导致无限循环或错误结果
 
-**现象**: 任务不断重试，永不停止，Redis 队列堆积。
+**现象**:
+- 任务不断重试，永不停止，Redis 队列堆积
+- 或者 `wait_result()` 提前返回中间失败
+- 或者较晚写回的旧失败结果覆盖最终成功结果
 
-**原因**: 重试中间件没有设置最大重试次数，或者重试计数器没有正确递增。
+**原因**:
+- 重试中间件没有设置最大重试次数，或者重试计数器没有正确递增
+- 如果沿用同一个 `task_id` 重试，但没有跳过本次中间失败的结果保存，TaskIQ 仍会把这次失败写进 result backend
 
 ```python
 # ❌ 错误：无限重试
 async def on_error(self, message, result, error):
     await self.broker.kick(message)
 
-# ✅ 正确：限制重试次数
+# ❌ 也不完整：虽然限制了次数，但中间失败仍会被保存
 async def on_error(self, message, result, error):
     retry_count = int(message.labels.get("_retry_count", "0"))
     max_retries = int(message.labels.get("max_retries", "3"))
@@ -311,7 +316,26 @@ async def on_error(self, message, result, error):
         await self.broker.kick(serialized)
     else:
         logger.error("重试耗尽: %s", error)
+
+# ✅ 正确：限制重试次数，并跳过这次中间失败的结果保存
+from taskiq.exceptions import NoResultError
+
+async def on_error(self, message, result, error):
+    retry_count = int(message.labels.get("_retry_count", "0"))
+    max_retries = int(message.labels.get("max_retries", "3"))
+    if retry_count < max_retries:
+        message.labels["_retry_count"] = str(retry_count + 1)
+        serialized = self.broker.formatter.dumps(message)
+        await self.broker.kick(serialized)
+        result.error = NoResultError()   # 跳过本次中间失败的结果保存
+    else:
+        logger.error("重试耗尽: %s", error)
 ```
+
+补充:
+
+- `ListQueueBroker.kick()` 的语义是“重新排队”，不是“立即重试”
+- 如果你需要更可靠的 pending / ack / reclaim 语义，请优先评估 `RedisStreamBroker`
 
 ## 11. 忘记在 FastAPI lifespan 中管理 broker
 

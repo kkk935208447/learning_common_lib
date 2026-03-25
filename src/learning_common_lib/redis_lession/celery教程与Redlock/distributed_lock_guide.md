@@ -152,6 +152,14 @@ async with async_distributed_lock(
 
 **队列和锁是完全正交的概念，可以用同一个 Redis 实例，但应使用不同的 db。**
 
+再补一条生产上最容易混淆的边界：
+
+- broker / queue 负责“任务怎么投递、怎么恢复”
+- 分布式锁负责“同一业务键是否允许进入临界区”
+- 幂等设计负责“即使重复执行，也不产生重复副作用”
+
+它们是配合关系，不是互相替代。
+
 ### 技术分析
 
 #### 数据结构差异
@@ -189,6 +197,35 @@ lock_client = redis.Redis(
     password="123456", db=2
 )
 ```
+
+## Part 2.5: 可靠性边界不要混成一层
+
+如果你在生产环境里真正想同时得到：
+
+1. worker crash 后任务仍可恢复
+2. 同一业务键不并发执行
+3. 重复投递时不产生重复副作用
+
+更准确的拆法是：
+
+| 层 | 负责什么 | 常见手段 |
+|----|----------|----------|
+| 投递恢复层 | at-least-once、worker crash 后的重新投递/接管 | Celery: `task_acks_late` + `task_reject_on_worker_lost` + `visibility_timeout` |
+| 执行互斥层 | 防止两个 worker 同时进入同一业务临界区 | Redis 锁 / 看门狗锁 |
+| 副作用幂等层 | 防止重复扣款、重复写单、重复发通知 | 幂等 key、唯一约束、upsert、去重表 |
+
+这意味着：
+
+- 锁不能替代 ack / 重投递机制
+- ack / 重投递机制也不能替代业务幂等
+- 看门狗只能解决“长任务期间锁别过期”，不能把重复投递和副作用重复一并消灭
+
+如果你未来切到 Redis Streams / TaskIQ，一样遵循这条分层原则，只是“投递恢复层”的实现从 `visibility_timeout` 变成 pending + `XACK` + `XAUTOCLAIM`。
+
+这里还要补两个容易被误写的点：
+
+- `Redis Streams` 不是 exactly-once，更不是绝对意义上的“不丢任务”；更准确的说法是“在单 Redis 可用前提下提供更清晰的 at-least-once + crash recoverable 语义”
+- `XAUTOCLAIM` 判断的是消息 idle time，不是 worker 是否真的死了；如果你想区分“慢但还活着”和“真的挂了”，心跳是应用层增强，而不是 Stream 自带语义
 
 ## Part 3: 教程中多队列使用的合理性
 
