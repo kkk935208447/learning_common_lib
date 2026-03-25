@@ -54,8 +54,8 @@ pkill -9 -f celery
 
 在 Redis / RabbitMQ / TaskIQ 之间切换时，最容易混淆的是：
 
-- `Celery + Redis` 更像“Redis transport + visibility_timeout”
-- `TaskIQ + RedisStreamBroker` 更像“Redis Stream + Consumer Group + ACK/reclaim”
+- `Celery + Redis` 更像“Celery 确认时机 + Redis transport + visibility_timeout”
+- `TaskIQ + RedisStreamBroker` 更像“Redis Stream + Consumer Group + pending/XACK/XAUTOCLAIM”
 - `Celery + RabbitMQ` 则是 Celery 更典型、也更成熟的可靠 broker 主线
 
 ### Celery Redis broker vs TaskIQ RedisStreamBroker
@@ -63,7 +63,7 @@ pkill -9 -f celery
 | 维度 | Celery Redis broker | TaskIQ RedisStreamBroker |
 |------|---------------------|--------------------------|
 | 底层模型 | Redis transport，围绕 `visibility_timeout` 重投递 | Redis Stream + Consumer Group |
-| ACK 语义 | 偏“可见性超时后再投递” | 显式 ACK，未 ACK 可 reclaim |
+| ACK / 重投递语义 | Celery 确认时机 + Redis `visibility_timeout` 共同决定重投递窗口 | Consumer Group pending + `XACK` / `XAUTOCLAIM` |
 | 多队列 worker | `celery worker -Q foo,bar` | 一个 broker 通过 `additional_streams` 监听多个 stream |
 | producer 路由 | `task_routes` / `apply_async(queue=...)` | `queue_name` label |
 | 对 Redis 原生模型的贴合度 | 较低，更偏 Celery transport | 高，直接就是 Stream 语义 |
@@ -73,6 +73,7 @@ pkill -9 -f celery
 
 - `Celery + Redis` 更容易因为长任务超过 `visibility_timeout` 而触发重复执行
 - `TaskIQ + RedisStreamBroker` 也可能重复执行，但更像“未 ACK 消息被 reclaim 接管”，通常比 Celery Redis 更可观测
+- `RedisStreamBroker` 的 reclaim 依据是“pending idle 超时”，不是“原 worker 已被确认死亡”；`idle_timeout` 过短时，慢任务也可能被过早接管
 - 两者都应按 at-least-once 语义设计任务幂等
 
 ### Celery RabbitMQ broker vs TaskIQ RedisStreamBroker
@@ -80,7 +81,7 @@ pkill -9 -f celery
 | 维度 | Celery RabbitMQ broker | TaskIQ RedisStreamBroker |
 |------|-------------------------|--------------------------|
 | 核心模型 | AMQP broker（exchange / queue / routing_key） | Redis Stream + Consumer Group |
-| 确认机制 | RabbitMQ consumer ack / nack / requeue | Stream ACK / reclaim |
+| 确认机制 | RabbitMQ consumer ack / nack / requeue | Consumer Group pending + `XACK` / `XAUTOCLAIM` |
 | 路由能力 | 强，Celery 原生强项 | 够用，依赖 `queue_name` + `additional_streams` |
 | 多队列 worker | 原生支持，`-Q foo,bar` 很成熟 | 通过 broker 配置监听多个 stream |
 | 优先级支持 | 更成熟，RabbitMQ 原生优先级更强 | 没有 RabbitMQ 那种 broker 原生优先级主模型 |
@@ -97,6 +98,39 @@ pkill -9 -f celery
 - 如果你继续用 Celery，但追求更成熟的 broker 语义，通常优先考虑 RabbitMQ
 - 如果你想在 Redis 里拿到更“原生消息流”的模型，TaskIQ 的 `RedisStreamBroker` 更贴近这个方向
 - 本教程主线仍然以 Celery + Redis 为例，但你可以把上面两张表当成选型背景板
+
+## 可靠性边界：ACK、互斥、幂等不是一回事
+
+如果你在生产环境里追求的是：
+
+- 尽量不丢任务
+- worker crash 后可恢复
+- 同一业务键不并发执行
+- 重复投递时不产生重复副作用
+
+不要把这四件事都压到 broker ACK 上。更准确的拆法是：
+
+| 层 | 负责什么 | 常见手段 |
+|----|----------|----------|
+| 投递恢复层 | 在 broker 仍可用前提下实现 at-least-once、worker crash 后可再投递/接管 | Celery: `task_acks_late` + `task_reject_on_worker_lost` + `visibility_timeout`；Redis Stream: pending + `XACK` + `XAUTOCLAIM` |
+| 执行互斥层 | 防止同一业务键被多个 worker 同时进入临界区 | Redis 分布式看门狗锁 / 执行锁 |
+| 副作用幂等层 | 防止重复扣款、重复写单、重复发通知 | 幂等 key、唯一约束、upsert、去重表 |
+| 判活/降噪层 | 区分“worker 只是慢”与“worker 真的挂了”，减少过早接管 | 可选的应用层心跳、进度心跳、锁 TTL 观测 |
+
+需要特别纠正几个容易写错的点：
+
+- `Redis Streams` 不是 “exactly-once”，更不是绝对意义上的“不丢任务”。更准确的说法是：在单 Redis 可用前提下，它能提供更清晰的 at-least-once + crash recoverable 语义。
+- 看门狗锁不负责消息恢复；它只负责“当前是否允许进入临界区”。
+- 幂等 key 不阻止消息重投；它负责把重复执行的副作用收敛到业务边界。
+- Redis Stream 没有 RabbitMQ 风格的 `NACK` 原语。没拿到执行锁时，常见做法是“先不 `XACK`，让消息继续留在 PEL，后续再 reclaim / 重试”。
+- `XAUTOCLAIM` 判断的是 message idle time，不是进程生死；如果你想区分“慢但活着”和“真的挂了”，心跳是应用层增强，而不是 Stream 自带语义。
+
+一个更准确的生产级组合可以概括为：
+
+- broker / stream 负责“消息投递恢复”
+- 看门狗锁负责“执行期互斥”
+- 幂等 key 负责“副作用去重”
+- 心跳负责“reclaim 判活与降噪”（可选增强，不是 Stream 内建语义）
 
 ## 环境要求
 

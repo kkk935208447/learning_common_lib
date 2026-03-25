@@ -3,7 +3,7 @@
 ## 1. Broker 选型
 
 - **ListQueueBroker**（教程默认）：基于 Redis List，竞争消费，适合最小接入和教学主线
-- **RedisStreamBroker**（生产优先评估）：基于 Redis Stream + Consumer Group，支持 ACK / reclaim，更适合可靠性要求高的任务队列
+- **RedisStreamBroker**（生产优先评估）：基于 Redis Stream + Consumer Group，支持 pending / `XACK` / reclaim，更适合可靠性要求高的任务队列
 - **PubSubBroker**：基于 Redis Pub/Sub，广播模式，适合事件通知、缓存失效
 - 不确定时可以先用 ListQueueBroker 把 TaskIQ 跑通；进入生产稳定期后再认真评估 RedisStreamBroker
 
@@ -39,6 +39,8 @@ pubsub = PubSubBroker(
 - 可以把它记成一句话：
   `ListQueueBroker` 支持“发到多个队列”，不支持“单 worker 同时监听多个队列”
 - `RedisStreamBroker` 还要额外规划 `consumer_group_name`、`maxlen`、pending reclaim 和监控策略
+- `RedisStreamBroker` 提供的是更清晰的 at-least-once + crash recoverable 语义，不是 exactly-once
+- `RedisStreamBroker` 的 reclaim 依据是 pending idle time，不是 worker 生死；`idle_timeout` 过短时，慢任务也可能被过早接管
 - `RedisStreamBroker` 则同时支持：
   producer 侧动态 `queue_name` 路由 + worker 侧通过 `additional_streams` 一次监听多个 stream
 
@@ -98,13 +100,16 @@ async def get_heavy_model():
 - 可重试异常：网络超时、限流、临时资源不可用
 - 致命异常：数据格式错误、业务逻辑错误、权限不足
 - 使用 `is_retryable(exc)` 统一判断
+- 如果你在 `on_error()` 中沿用同一个 `task_id` 重新发送消息，必须阻止这次中间失败写入 result backend
+- `ListQueueBroker` 的 `kick()` 是“重新排队”，不是“立即绕过队列执行”；真实等待时间 = backoff + 队列排队时间
 
 ```python
 # ✅ 推荐：异常分类
 if is_retryable(error):
-    # 重试：指数退避
+    # 重试：指数退避 + 重新排队
     await asyncio.sleep(delay)
     await broker.kick(broker.formatter.dumps(message))
+    result.error = NoResultError()  # 跳过这次中间失败的结果保存
 else:
     # 致命：记录日志，不重试
     logger.error(f"致命错误: {error}")
