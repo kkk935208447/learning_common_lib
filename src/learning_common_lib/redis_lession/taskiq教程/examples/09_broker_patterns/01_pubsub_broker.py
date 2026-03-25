@@ -19,7 +19,10 @@ TaskIQ Broker 模式对比 — PubSubBroker 广播 vs ListQueueBroker 竞争消�
 
 运行方式:
     Worker:
+        1. 队列模式：
         taskiq worker examples.09_broker_patterns.01_pubsub_broker:list_broker
+        2. 广播模式：
+        taskiq worker examples.09_broker_patterns.01_pubsub_broker:pubsub_broker
     Client:
         python examples/09_broker_patterns/01_pubsub_broker.py
 
@@ -45,6 +48,7 @@ import asyncio
 import os
 
 from taskiq_redis import ListQueueBroker, PubSubBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 try:
     from ...templates.taskiq_app import broker_session
 except ImportError:
@@ -68,6 +72,7 @@ PUBSUB_QUEUE_NAME = os.getenv(
 # 多个 worker 中只有一个会消费到消息，适合任务队列
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 list_broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
@@ -109,7 +114,7 @@ async def broadcast_cache_invalidation(cache_key: str) -> None:
 
 async def main() -> None:
     """演示：PubSubBroker 广播 vs ListQueueBroker 竞争消费。"""
-    async with broker_session(list_broker):
+    async with broker_session(list_broker, pubsub_broker):
         # ── 4a. ListQueueBroker — 竞争消费 ──
         print("=" * 60)
         print("📋 [ListQueueBroker] 竞争消费模式")
@@ -137,6 +142,8 @@ async def main() -> None:
         print()
         print("💡 PubSubBroker 广播示例（需要先启动 pubsub worker）:")
         print("   taskiq worker examples.09_broker_patterns.01_pubsub_broker:pubsub_broker")
+        handle = await broadcast_cache_invalidation.kiq(cache_key="user:123")
+        print(f"🚀 已发送任务到 PubSubBroker: task_id={handle.task_id}")
         print()
 
         # ── 4c. 对比总结 ──

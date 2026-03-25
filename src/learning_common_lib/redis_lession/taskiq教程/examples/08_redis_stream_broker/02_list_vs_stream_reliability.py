@@ -36,8 +36,8 @@ async def compare_list(redis_conn: Redis) -> None:
     print("=" * 72)
     print("Part A: ListQueueBroker 背后的 List 行为")
     print("=" * 72)
-    await redis_conn.delete(LIST_KEY)
-    await redis_conn.lpush(LIST_KEY, b"job:list:1001")
+    await redis_conn.delete(LIST_KEY)  # 清理 list 中的消息
+    await redis_conn.lpush(LIST_KEY, b"job:list:1001")  # 写入消息
     print(f"步骤 1: LPUSH 后 LLEN = {await redis_conn.llen(LIST_KEY)}")
 
     popped = await redis_conn.brpop([LIST_KEY], timeout=1)
@@ -51,18 +51,18 @@ async def compare_stream(redis_conn: Redis) -> None:
     print("=" * 72)
     print("Part B: RedisStreamBroker 背后的 Stream 行为")
     print("=" * 72)
-    await redis_conn.delete(STREAM_KEY)
-    await redis_conn.xgroup_create(STREAM_KEY, GROUP_NAME, id="0-0", mkstream=True)
+    await redis_conn.delete(STREAM_KEY)   # 清理 stream 中的消息
+    await redis_conn.xgroup_create(STREAM_KEY, GROUP_NAME, id="0-0", mkstream=True)  # 创建消费组
 
-    msg_id = await redis_conn.xadd(STREAM_KEY, {"data": b"job:stream:2001"})
+    msg_id = await redis_conn.xadd(STREAM_KEY, {"data": b"job:stream:2001"})  # 写入消息
     print(f"步骤 1: XADD 写入消息 id = {msg_id}")
     print(f"        XLEN = {await redis_conn.xlen(STREAM_KEY)}")
 
     fetched = await redis_conn.xreadgroup(
         GROUP_NAME,
-        "consumer-a",
-        {STREAM_KEY: ">"},
-        count=1,
+        "consumer-a",       # 表示 consumer-a 读取消息的消费者组名称
+        {STREAM_KEY: ">"},  # ">" 表示读取 stream 中尚未被消费的消息
+        count=1,  # 读取消息的数量
         block=100,
     )
     print(f"步骤 2: consumer-a XREADGROUP 读取 = {fetched}")
@@ -74,25 +74,25 @@ async def compare_stream(redis_conn: Redis) -> None:
     claimed = await redis_conn.xautoclaim(
         STREAM_KEY,
         GROUP_NAME,
-        "consumer-b",
-        min_idle_time=1000,
-        start_id="0-0",
-        count=10,
+        "consumer-b",         # 表示 consumer-b 读取消息的消费者组名称
+        min_idle_time=1000,   # 表示消息在 stream 中闲置的最小时间
+        start_id="0-0",   # 表示从最早的消息开始
+        count=10, 
     )
     print(f"步骤 4: consumer-b XAUTOCLAIM 结果 = {claimed}")
 
     pending_after_claim = await redis_conn.xpending_range(
         STREAM_KEY,
         GROUP_NAME,
-        "-",
-        "+",
-        10,
+        "-",  # 表示从最早的消息开始
+        "+",  # 表示到最新的消息结束
+        10,   # 表示读取 10 条消息
     )
     print(f"        pending detail after claim = {pending_after_claim}")
 
     if claimed[1]:
-        claimed_id = claimed[1][0][0]
-        acked = await redis_conn.xack(STREAM_KEY, GROUP_NAME, claimed_id)
+        claimed_id = claimed[1][0][0]   # 表示第一条消息的 ID，claimed 是一个列表，列表中包含一个元组，元组中包含一个列表，列表中包含一个元组，元组中包含一个消息 ID
+        acked = await redis_conn.xack(STREAM_KEY, GROUP_NAME, claimed_id)     # 确认消息
         print(f"步骤 5: consumer-b ACK reclaimed 消息，xack count = {acked}")
     print(f"        XPENDING summary after ack = {await redis_conn.xpending(STREAM_KEY, GROUP_NAME)}")
     print()

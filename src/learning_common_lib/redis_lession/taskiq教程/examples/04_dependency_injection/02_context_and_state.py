@@ -24,7 +24,7 @@ TaskIQ Context 对象和 TaskiqState — 访问消息元数据和 worker 级共�
 
 运行方式:
     Worker:
-        taskiq worker examples.04_dependency_injection.02_context_and_state:broker
+        taskiq worker examples.04_dependency_injection.02_context_and_state:broker --workers 1
     Client:
         python examples/04_dependency_injection/02_context_and_state.py
 

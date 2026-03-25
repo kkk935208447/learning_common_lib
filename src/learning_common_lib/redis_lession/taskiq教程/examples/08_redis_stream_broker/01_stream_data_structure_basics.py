@@ -47,6 +47,7 @@ async def print_pending(redis_conn: Redis, title: str) -> None:
 async def main() -> None:
     redis_conn = Redis.from_url(REDIS_URL, decode_responses=False)
     try:
+        # 清理 stream 中的消息
         await reset_stream(redis_conn)
 
         print("=" * 72)
@@ -70,7 +71,7 @@ async def main() -> None:
             STREAM_NAME,
             GROUP_NAME,
             id="0-0",
-            mkstream=True,
+            mkstream=True,  # 创建 stream 时，如果 stream 不存在，则创建 stream
         )
         print(f"  groups = {await redis_conn.xinfo_groups(STREAM_NAME)}")
         print()
@@ -78,10 +79,10 @@ async def main() -> None:
         print("步骤 3: consumer-a 读取一条消息（XREADGROUP）")
         fetched = await redis_conn.xreadgroup(
             GROUP_NAME,
-            CONSUMER_NAME,
-            {STREAM_NAME: ">"},
-            count=1,
-            block=100,
+            CONSUMER_NAME,  # 表示 consumer-a 读取消息
+            {STREAM_NAME: ">"},  # ">" 表示读取 stream 中尚未被消费的消息
+            count=1,    # 读取消息的数量
+            block=100,  # 阻塞时间，如果 stream 中没有消息，则阻塞 100 毫秒
         )
         print(f"  fetched = {fetched}")
         await print_pending(redis_conn, "  pending summary")
@@ -91,16 +92,16 @@ async def main() -> None:
         pending_detail = await redis_conn.xpending_range(
             STREAM_NAME,
             GROUP_NAME,
-            "-",
-            "+",
-            10,
+            "-",  # 表示从最早的消息开始
+            "+",  # 表示到最新的消息结束
+            10,   # 表示读取 10 条消息
         )
         print(f"  pending detail = {pending_detail}")
         print()
 
         print("步骤 5: ACK 刚才那条消息")
-        first_id = fetched[0][1][0][0]
-        acked = await redis_conn.xack(STREAM_NAME, GROUP_NAME, first_id)
+        first_id = fetched[0][1][0][0]   # 表示第一条消息的 ID，fetched 是一个列表，列表中包含一个元组，元组中包含一个列表，列表中包含一个元组，元组中包含一个消息 ID
+        acked = await redis_conn.xack(STREAM_NAME, GROUP_NAME, first_id) # 确认消息
         print(f"  xack count = {acked}")
         await print_pending(redis_conn, "  pending summary after ack")
         print()
@@ -109,6 +110,9 @@ async def main() -> None:
         print("  1. Stream 消费后消息不会立刻消失，而是进入 pending")
         print("  2. Consumer Group 负责追踪消息是否已确认")
         print("  3. 这就是 RedisStreamBroker 能做 ACK / reclaim 的根基")
+    
+        # 清理 stream 中的消息
+        await reset_stream(redis_conn)
     finally:
         await redis_conn.aclose()
 

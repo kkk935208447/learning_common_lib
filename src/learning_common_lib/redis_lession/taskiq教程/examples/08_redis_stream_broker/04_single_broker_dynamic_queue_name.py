@@ -7,6 +7,12 @@ TaskIQ 单 broker + 动态 queue_name 路由（RedisStreamBroker）细化版。
       2. producer 通过 `queue_name` label 可以把任务动态路由到不同 stream
       3. 我们可以直接读取 Redis 的 XLEN 增量，证明消息确实写进了目标 stream
 
+运行方式:
+    Worker:
+        taskiq worker examples.08_redis_stream_broker.04_single_broker_dynamic_queue_name:broker --workers 1
+    Client:
+        python examples/08_redis_stream_broker/04_single_broker_dynamic_queue_name.py
+
 关键概念:
     - 默认 stream 由 broker.queue_name 决定
     - 动态路由依赖 task labels 里的 `queue_name`
@@ -21,6 +27,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 from taskiq_redis import RedisAsyncResultBackend, RedisStreamBroker
+from taskiq.serializers import JSONSerializer
 
 try:
     from ...templates.taskiq_app import broker_session
@@ -56,11 +63,12 @@ def build_stream_broker() -> RedisStreamBroker:
     result_backend = RedisAsyncResultBackend(
         redis_url=RESULT_BACKEND_URL,
         result_ex_time=3600,
+        serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
     )
     return RedisStreamBroker(
         url=BROKER_URL,
-        queue_name=DEFAULT_STREAM,
-        consumer_group_name=CONSUMER_GROUP_NAME,
+        queue_name=DEFAULT_STREAM,   # 默认的 stream 队列名称
+        consumer_group_name=CONSUMER_GROUP_NAME,   # 消费者组名称
         additional_streams={
             # 这里的 ">" 不是占位符，而是 Redis XREADGROUP 的特殊游标：
             # 表示“读取这个 consumer group 里尚未投递给任何 consumer 的新消息”。
@@ -72,9 +80,9 @@ def build_stream_broker() -> RedisStreamBroker:
         xread_block=1000,
         xread_count=50,
         idle_timeout=30_000,
-        unacknowledged_batch_size=100,
-        maxlen=1000,
-        approximate=True,
+        unacknowledged_batch_size=100,  # 表示未确认的消息批次大小
+        maxlen=1000,                   # 表示 stream 的最大长度
+        approximate=True,              # 表示使用近似算法
     ).with_result_backend(result_backend)
 
 
@@ -91,7 +99,7 @@ async def default_task(message: str) -> dict[str, Any]:
 
 @broker.task(
     task_name="examples.08_redis_stream_broker.04_single_broker_dynamic_queue_name.high_priority_task",
-    queue_name=HIGH_PRIORITY_STREAM,
+    queue_name=HIGH_PRIORITY_STREAM,   # 高优先级的队列名称
 )
 async def high_priority_task(order_id: int) -> dict[str, Any]:
     print(f"🔥 [high_priority stream] 紧急处理订单: order_id={order_id}")
@@ -100,7 +108,7 @@ async def high_priority_task(order_id: int) -> dict[str, Any]:
 
 @broker.task(
     task_name="examples.08_redis_stream_broker.04_single_broker_dynamic_queue_name.batch_task",
-    queue_name=BATCH_STREAM,
+    queue_name=BATCH_STREAM,   # 批处理的队列名称
 )
 async def batch_task(batch_id: str, count: int) -> dict[str, Any]:
     print(f"📊 [batch stream] 批量处理: batch_id={batch_id}, count={count}")
@@ -108,6 +116,7 @@ async def batch_task(batch_id: str, count: int) -> dict[str, Any]:
 
 
 async def get_stream_lengths(redis_conn: Redis) -> dict[str, int]:
+    """获取默认、高优先级和批处理的 stream 当前长度"""
     lengths: dict[str, int] = {}
     for stream_name in (DEFAULT_STREAM, HIGH_PRIORITY_STREAM, BATCH_STREAM):
         lengths[stream_name] = await redis_conn.xlen(stream_name) if await redis_conn.exists(stream_name) else 0
@@ -115,6 +124,7 @@ async def get_stream_lengths(redis_conn: Redis) -> dict[str, int]:
 
 
 def print_delta(title: str, before: dict[str, int], after: dict[str, int]) -> None:
+    """打印三个 stream 的长度变化"""
     print(title)
     for stream_name in (DEFAULT_STREAM, HIGH_PRIORITY_STREAM, BATCH_STREAM):
         delta = after[stream_name] - before[stream_name]
@@ -124,16 +134,17 @@ def print_delta(title: str, before: dict[str, int], after: dict[str, int]) -> No
 async def assert_routed_to_stream(
     *,
     redis_conn: Redis,
-    expected_stream: str,
-    sender: Any,
-    sender_kwargs: dict[str, Any],
+    expected_stream: str,   # 预期 stream
+    sender: Any,        # 发送者
+    sender_kwargs: dict[str, Any],   # 发送者参数
 ) -> None:
-    before = await get_stream_lengths(redis_conn)
-    handle = await sender.kiq(**sender_kwargs)
-    after_send = await get_stream_lengths(redis_conn)
+    """证明一条任务被写进了预期 stream"""
+    before = await get_stream_lengths(redis_conn)   # 获取发送前的 stream 长度
+    handle = await sender.kiq(**sender_kwargs)   # 发送任务
+    after_send = await get_stream_lengths(redis_conn)   # 获取发送后的 stream 长度
 
     print_delta("  发送后 stream 长度增量:", before, after_send)
-
+    # 证明逻辑: 遍历发送后的 stream 长度，如果 stream 名称与预期 stream 名称相同，则断言增长 1，否则断言增长 0，并打印任务 ID 和结果
     for stream_name, length in after_send.items():
         delta = length - before[stream_name]
         if stream_name == expected_stream:

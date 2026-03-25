@@ -25,6 +25,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 from taskiq_redis import RedisAsyncResultBackend, RedisStreamBroker
+from taskiq.serializers import JSONSerializer
 
 try:
     from ...templates.taskiq_app import broker_session
@@ -57,17 +58,14 @@ CONSUMER_GROUP_NAME = os.getenv(
 
 
 def build_stream_broker() -> RedisStreamBroker:
-    # 原理说明:
-    # 1. broker.queue_name 决定“默认 stream”。
-    # 2. additional_streams 决定 worker 侧还会额外监听哪些 stream。
-    # 3. task 发布时如果 message.labels["queue_name"] 有值，
-    #    taskiq-redis 会优先把消息写到那个目标 stream，而不是默认 stream。
-    # 4. 这正是它和 ListQueueBroker 的关键区别之一：
-    #    ListQueueBroker 也支持 producer 侧 queue_name 动态路由，
-    #    但没有 additional_streams，所以 worker 侧不能像这里一样一次监听多个目标队列。
+    # 自动动态路由原理说明:
+    # 1. queue_name 为默认 stream。 additional_streams 决定 worker 侧还会额外监听哪些 stream。
+    # 2. task 发布时如果 message.labels["queue_name"] 有值，taskiq-redis 会优先把消息写到那个目标 stream，而不是默认 stream。
+    # 3. 这正是它和 ListQueueBroker 的关键区别之一：
+    #    ListQueueBroker 也支持 producer 侧 queue_name 动态路由，但没有 additional_streams，所以 worker 侧不能像这里一样一次监听多个目标队列。
     return RedisStreamBroker(
         url=BROKER_URL,
-        queue_name=DEFAULT_STREAM,
+        queue_name=DEFAULT_STREAM,   # 默认的 stream 队列名称
         consumer_group_name=CONSUMER_GROUP_NAME,
         additional_streams={
             # 这里的 ">" 直接传给 Redis XREADGROUP：
@@ -87,6 +85,7 @@ def build_stream_broker() -> RedisStreamBroker:
         RedisAsyncResultBackend(
             redis_url=RESULT_BACKEND_URL,
             result_ex_time=3600,
+            serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
         )
     )
 
@@ -107,14 +106,10 @@ async def default_task(message: str) -> dict[str, Any]:
     queue_name=HIGH_PRIORITY_STREAM,
 )
 async def high_priority_task(order_id: int) -> dict[str, Any]:
-    # 动态路由原理:
-    # @broker.task(queue_name=...) 并不是让 worker CLI 切队列，
-    # 而是给这条消息附加 labels["queue_name"]。
-    # 这里不需要中间件，因为 queue_name 是 broker 实现自己认识的“内建 label”：
-    # Taskiq 在发消息时会把 labels 放进 TaskiqMessage / BrokerMessage，
-    # 然后 RedisStreamBroker.kick() 直接读取 message.labels["queue_name"]。
-    # producer 发送时，RedisStreamBroker.kick() 会读取这个 label，
-    # 然后把消息 XADD 到对应 stream。
+    # 自动动态路由原理:
+    # @broker.task(queue_name=...) 并不是让 worker CLI 切队列，而是给这条消息附加 labels["queue_name"]。这里不需要中间件，因为 queue_name 是 broker 实现自己认识的“内建 label”：
+    # Taskiq 在发消息时会把 labels 放进 TaskiqMessage / BrokerMessage，然后 RedisStreamBroker.kick() 直接读取 message.labels["queue_name"]。
+    # producer 发送时，RedisStreamBroker.kick() 会读取这个 label，然后把消息 XADD 到对应 stream。
     print(f"🔥 [high_priority stream] 紧急处理订单: order_id={order_id}")
     return {"route": "high_priority", "order_id": order_id}
 
@@ -129,15 +124,16 @@ async def batch_task(batch_id: str, count: int) -> dict[str, Any]:
 
 
 async def get_stream_lengths(redis_conn: Redis) -> dict[str, int]:
+    """ 获取三个 stream 当前长度"""
     lengths: dict[str, int] = {}
     for stream_name in (DEFAULT_STREAM, HIGH_PRIORITY_STREAM, BATCH_STREAM):
-        # Stream 会保留历史消息直到被 trim，所以 XLEN 的“发送前后增量”
-        # 可以直接作为“消息写进了哪个 stream”的证据。
+        # Stream 会保留历史消息直到被 trim，所以 XLEN 的“发送前后增量”，可以直接作为“消息写进了哪个 stream”的证据。
         lengths[stream_name] = await redis_conn.xlen(stream_name) if await redis_conn.exists(stream_name) else 0
     return lengths
 
 
 def print_delta(before: dict[str, int], after: dict[str, int]) -> None:
+    """ 打印三个 stream 的长度变化"""
     for stream_name in (DEFAULT_STREAM, HIGH_PRIORITY_STREAM, BATCH_STREAM):
         delta = after[stream_name] - before[stream_name]
         print(f"  {stream_name:<76} delta={delta:+d}")
@@ -146,10 +142,13 @@ def print_delta(before: dict[str, int], after: dict[str, int]) -> None:
 async def prove_task_routed_to_stream(
     *,
     redis_conn: Redis,
-    expected_stream: str,
-    sender: Any,
-    sender_kwargs: dict[str, Any],
+    expected_stream: str,    # 期望消息进入的 stream 名称
+    sender: Any,             #  taskiq 任务发送器
+    sender_kwargs: dict[str, Any],   # 任务发送器参数
 ) -> None:
+    """ 
+    证明某个 sender 发出的消息确实进入了 expected_stream。
+    """
     before = await get_stream_lengths(redis_conn)
     handle = await sender.kiq(**sender_kwargs)
     after_send = await get_stream_lengths(redis_conn)
@@ -158,8 +157,7 @@ async def prove_task_routed_to_stream(
     print_delta(before, after_send)
 
     # 证明逻辑:
-    # 如果某次发送只让“目标 stream”增长 1，而其他 stream 都不变，
-    # 那么这条消息就确定是被写到了目标 stream。
+    # 如果某次发送只让“目标 stream”增长 1，而其他 stream 都不变，那么这条消息就确定是被写到了目标 stream。
     for stream_name in (DEFAULT_STREAM, HIGH_PRIORITY_STREAM, BATCH_STREAM):
         delta = after_send[stream_name] - before[stream_name]
         if stream_name == expected_stream:

@@ -37,6 +37,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from taskiq.serializers import JSONSerializer
 
 BROKER_URL = "redis://default:123456@localhost:6379/0"
 RESULT_BACKEND_URL = "redis://default:123456@localhost:6379/1"
@@ -65,6 +66,7 @@ def build_broker() -> ListQueueBroker:
     result_backend = RedisAsyncResultBackend(
         redis_url=RESULT_BACKEND_URL,
         result_ex_time=3600,
+        serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
     )
     return ListQueueBroker(
         url=BROKER_URL,

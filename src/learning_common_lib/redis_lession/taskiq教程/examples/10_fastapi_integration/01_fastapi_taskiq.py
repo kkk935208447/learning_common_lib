@@ -53,6 +53,7 @@ from fastapi import FastAPI
 from taskiq.exceptions import ResultBackendError
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 from taskiq_redis.exceptions import ResultIsMissingError
+from taskiq.serializers import JSONSerializer
 
 QUEUE_NAME = os.getenv(
     "TASKIQ_QUEUE_NAME",
@@ -62,6 +63,7 @@ QUEUE_NAME = os.getenv(
 # ── 1. 创建 Broker + Result Backend ──
 result_backend = RedisAsyncResultBackend(
     redis_url="redis://default:123456@localhost:6379/1",
+    serializer=JSONSerializer()   # taskiq 默认使用的 PickleSerializer序列化，这在 redis 侧是人类不可读的，所以这里使用 JSONSerializer
 )
 broker = ListQueueBroker(
     url="redis://default:123456@localhost:6379/0",
