@@ -341,3 +341,63 @@ builder.add_edge("a", END)
 - `GlobalGraph` 统一负责推进决策
 - `SubtaskGraph` 只负责局部闭环
 - worker 通过结果回写和升级协议与控制面协作
+
+## 14. 把 checkpoint 当成业务真理源
+
+```python
+# ❌ 错误：把业务状态只写到 checkpoint
+return {"status": "COMPLETED", "final_answer": "..."}
+```
+
+问题：
+
+- checkpoint 只保证“图能从这里恢复”
+- 它不提供审计事件、查询能力、跨系统一致性
+
+正确做法：
+
+- 业务真理源写 MySQL / 事件表 / 任务表
+- checkpoint 只保留最小运行态
+
+## 15. 子 agent 只是函数，不是图
+
+```python
+# ❌ 错误：worker 只是一个裸函数
+def researcher(state): ...
+```
+
+问题：
+
+- 没有局部闭环
+- 没有本地重试/校验/escalate
+- 父图看不到结构化结果契约
+
+更真实的教学路径：
+
+- worker 至少应是 `prepare -> execute -> verify -> done/escalate` 子图
+
+## 16. SSE 没有 heartbeat / Last-Event-ID
+
+如果你只会：
+
+- `yield token`
+
+但没有：
+
+- `heartbeat`
+- `Last-Event-ID`
+- replay 语义
+
+前端一断线就会失去进度上下文。
+
+## 17. resume_orchestrator 直接做调度
+
+错误心智：
+
+- worker 完成后，恢复器自己决定下一个 READY 子任务
+
+正确心智：
+
+- 恢复器只做 accepted/stale 判定
+- 然后用同一个 `thread_id` 恢复图
+- 真正的下一步仍由 `GlobalGraph` 决定

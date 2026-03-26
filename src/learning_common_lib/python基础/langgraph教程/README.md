@@ -121,25 +121,15 @@ langgraph教程/
 │   ├── 07_subgraph_composition/   ← 子图与图嵌套（含双图架构）
 │   ├── 08_human_in_the_loop/      ← 人机协作全模式（dynamic interrupt 为主）
 │   ├── 09_error_and_resilience/   ← 容错与降级（safe_node/重试/升级）
-│   ├── 10_multi_agent/            ← 多 Agent 架构全谱（5 种模式）
+│   ├── 10_multi_agent/            ← 多 Agent 架构全谱（含 toy baseline + 真实版 subgraph workers）
 │   ├── 11_dynamic_and_parallel/   ← 动态图与并行（Send/map-reduce）
-│   ├── 12_memory_and_store/       ← 短期/长期记忆（含五层记忆架构）
+│   ├── 12_memory_and_store/       ← 短期/长期记忆（含 state/store 边界与 injected store）
 │   ├── 13_functional_api/         ← @entrypoint/@task 函数式 API
 │   ├── 14_testing_and_debugging/  ← 测试与调试（单元/集成/Mock LLM）
 │   ├── 15_production_deployment/  ← 生产部署全链路（FastAPI SSE/优雅关闭）
 │   └── 16_agentic_rag_patterns/   ← AgenticRAG 实战模式（双图/Celery 桥接/DAG 调度）
 ├── templates/
-│   ├── __init__.py
-│   ├── README.md
-│   ├── state_schemas.py
-│   ├── safe_node.py
-│   ├── graph_builder.py
-│   ├── runtime_settings.py
-│   ├── checkpoint_manager.py
-│   ├── store_manager.py
-│   ├── multi_agent_orchestrator.py
-│   ├── celery_graph_bridge.py
-│   └── fastapi_graph_app.py
+│   ...
 └── smoke/
     └── run_all_examples.py        ← 一键验证所有示例
 ```
@@ -167,6 +157,8 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 
 - `core`：核心控制流示例
 - `integration`：Redis / FastAPI / Celery 集成示例
+- `realistic_multi_agent`：更接近真实项目的多 Agent / graph worker 示例
+- `resume_recovery`：等待、恢复、stale fencing、double-texting 相关示例
 - `integration` 默认采用严格模式：只要降级到内存 backend，就判定失败
 
 注意：
@@ -200,8 +192,33 @@ llm = FakeListChatModel(responses=["模拟回复"])
 注意：
 
 - `FakeListChatModel` 按顺序返回预设响应，适合教学和测试
+- `FakeMessagesListChatModel` 适合返回 `AIMessage(tool_calls=...)`，更接近真实工具调用测试
 - 涉及工具调用的示例，通常会手动构造带 `tool_calls` 的 `AIMessage`
 - 在当前版本里，`FakeListChatModel` 也能配合 `stream_mode="messages"` 产出 chunk，适合本地流式示例
+
+## 教程分层约定
+
+从这一版开始，教程明确分成三类：
+
+- `toy baseline`：最小概念例子，帮助第一次理解 API，不等于生产推荐写法
+- `realistic example`：保留离线可运行，但补上契约、等待、恢复、幂等等真实问题
+- `template skeleton`：可复用骨架，面向迁移，不是最小教学入口
+
+最容易被误读的 toy baseline：
+
+- `10_multi_agent/01_supervisor_pattern.py`
+- `10_multi_agent/04_hierarchical_agents.py`
+- `15_production_deployment/03_double_texting.py` 的旧思路已被更真实的等待/恢复版替换
+
+建议学习时先看 toy baseline，再立刻补看对应 realistic example：
+
+- `10_multi_agent/06_supervisor_with_subgraphs.py`
+- `10_multi_agent/07_replan_with_fingerprint.py`
+- `10_multi_agent/08_partial_plan_reuse.py`
+- `05_checkpointing/05_checkpoint_schema_evolution.py`
+- `06_streaming/05_sse_replay_and_heartbeat.py`
+- `08_human_in_the_loop/05_structured_approval_contract.py`
+- `16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py`
 
 ## Async-First 教程约定
 
@@ -234,21 +251,21 @@ async for chunk, metadata in app.astream(inputs, stream_mode="messages"):
 | 阶段 | 章 | 主题 | 核心知识点 | 建议时间 |
 |------|-----|------|-----------|----------|
 | 基础篇 | 01 | 图基础 | StateGraph、add_node/add_edge、compile、ainvoke、Pregel superstep | 半天 |
-| 基础篇 | 02 | 状态深入 | TypedDict、Annotated reducer、MessagesState、Pydantic、Channel | 半天 |
+| 基础篇 | 02 | 状态深入 | TypedDict、Annotated reducer、MessagesState、Pydantic、Channel、state/config/context 边界 | 半天 |
 | 基础篇 | 03 | 边与路由 | 普通边、条件边、五路路由器、循环守卫 | 半天 |
 | 基础篇 | 04 | 工具调用 | @tool、ToolNode、ReAct、工具错误处理 | 半天 |
-| 基础篇 | 05 | 检查点 | MemorySaver、thread_id、时间旅行、Redis 持久化 | 半天 |
-| 基础篇 | 06 | 流式输出 | values/updates/messages、自定义流、`astream_events()` | 半天 |
+| 基础篇 | 05 | 检查点 | MemorySaver、thread_id、时间旅行、Redis 持久化、schema 演进、幂等恢复 | 半天 |
+| 基础篇 | 06 | 流式输出 | values/updates/messages、自定义流、`astream_events()`、SSE replay/heartbeat | 半天 |
 | 进阶篇 | 07 | 子图组合 | 子图作为节点、状态映射、Command handoff、双图架构 | 半天 |
-| 进阶篇 | 08 | 人机协作 | dynamic interrupt、审批流、静态断点补充 | 半天 |
+| 进阶篇 | 08 | 人机协作 | dynamic interrupt、审批流、结构化 Clarify、超时默认项 | 半天 |
 | 进阶篇 | 09 | 错误与韧性 | safe_node、重试、降级、升级协议 | 1 天 |
-| 进阶篇 | 10 | 多 Agent | Supervisor、Swarm、Plan-Execute-Replan、层级 Agent、黑板模式 | 1 天 |
+| 进阶篇 | 10 | 多 Agent | Supervisor、Swarm、Plan-Execute-Replan、层级 Agent、graph workers、partial reuse | 1 天 |
 | 进阶篇 | 11 | 动态与并行 | Send fan-out、Send vs Command、configurable、map-reduce | 半天 |
-| 进阶篇 | 12 | 记忆与存储 | 短期记忆、长期记忆、五层记忆架构 | 半天 |
+| 进阶篇 | 12 | 记忆与存储 | 短期记忆、长期记忆、五层记忆架构、state/store/injected store 边界 | 半天 |
 | 进阶篇 | 13 | 函数式 API | @entrypoint、@task、Functional vs Graph API | 半天 |
-| 工程篇 | 14 | 测试与调试 | 节点单元测试、图集成测试、Mock LLM、Mermaid 调试 | 1 天 |
-| 工程篇 | 15 | 生产部署 | FastAPI SSE、可观测性、Double-texting、优雅关闭 | 1 天 |
-| 工程篇 | 16 | AgenticRAG | GlobalGraph/SubtaskGraph、Celery bridge、DAG dispatch | 1 天 |
+| 工程篇 | 14 | 测试与调试 | 节点单元测试、图集成测试、Fake tool call、结构化输出重试、resume 测试 | 1 天 |
+| 工程篇 | 15 | 生产部署 | FastAPI SSE、可观测性、Double-texting、Last-Event-ID、优雅关闭 | 1 天 |
+| 工程篇 | 16 | AgenticRAG | GlobalGraph/SubtaskGraph、Celery bridge、控制面/运行态分层、stale fencing | 1 天 |
 
 第 16 章直接对应：
 
@@ -304,16 +321,16 @@ thread_id 命名约定（参考 AgenticRAG）：
 
 ### 工程能力
 
-- `05_checkpointing`：thread_id、checkpoint、恢复、时间旅行
-- `06_streaming`：`astream(..., stream_mode=...)` 与 `astream_events(...)` 的边界
-- `08_human_in_the_loop`：动态 `interrupt()` 为主，静态断点为补充
+- `05_checkpointing`：thread_id、checkpoint、恢复、schema 演进、幂等副作用
+- `06_streaming`：`astream(..., stream_mode=...)` 与 `astream_events(...)` 的边界，SSE replay/heartbeat
+- `08_human_in_the_loop`：动态 `interrupt()` 为主，结构化审批与 Clarify 为主线
 - `09_error_and_resilience`：safe node、retry、fallback、escalation
 
 ### 架构能力
 
-- `10_multi_agent`：supervisor、swarm、plan-execute-replan、blackboard
+- `10_multi_agent`：supervisor、swarm、plan-execute-replan、blackboard、graph worker
 - `11_dynamic_and_parallel`：`Send`、`Command`、map-reduce
-- `12_memory_and_store`：checkpoint 与 store 的职责边界
+- `12_memory_and_store`：checkpoint 与 store 的职责边界、InjectedStore / InjectedState
 
 ### AgenticRAG 映射
 
@@ -322,9 +339,15 @@ thread_id 命名约定（参考 AgenticRAG）：
 - `16_agentic_rag_patterns/02_subtask_graph_skeleton.py`
   - 子任务局部执行闭环
 - `16_agentic_rag_patterns/03_celery_bridge.py`
-  - dispatch -> waiting -> resume
+  - dispatch -> waiting -> accepted/stale -> resume
 - `16_agentic_rag_patterns/04_dag_dispatch_pattern.py`
   - READY batch dispatch + fan-out
+- `16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py`
+  - 控制面真理源 vs runtime state
+- `16_agentic_rag_patterns/06_resume_orchestrator_contract.py`
+  - result accepted -> resume graph
+- `16_agentic_rag_patterns/07_stale_result_fencing.py`
+  - current_execution_id 防旧结果污染
 
 ## 阅读建议
 
@@ -340,3 +363,4 @@ thread_id 命名约定（参考 AgenticRAG）：
 - 模板代码放在 `templates/`，面向复用，不面向最小教学路径
 - Redis / Celery / FastAPI 章节是工程样板，不是所有项目都必须引入
 - 如果你只想学 LangGraph 控制流，至少先完成 `01`、`02`、`03`、`05`、`06`
+- 如果你准备迁移到真实项目，请不要只停留在 `toy baseline`，至少补跑每章的 `realistic example`

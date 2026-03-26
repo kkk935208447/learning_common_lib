@@ -7,13 +7,14 @@
 | 模块 | 用途 | 关键导出 |
 |------|------|----------|
 | `state_schemas.py` | 状态 schema 基类 | `BaseState`, `AgentState`, `MessageAgentState` |
+| `teaching_contracts.py` | 教程共享契约 | `PlanNodeSpec`, `WorkerTask`, `WorkerResultEnvelope`, `EscalationReport` |
 | `safe_node.py` | 节点错误处理中间件 | `@safe_node`, `NodeError`, `ErrorSeverity` |
 | `graph_builder.py` | 图构建工厂 | `GraphBuilder`, `build_graph()` |
 | `runtime_settings.py` | Redis-first 运行时配置 | `RedisRuntimeSettings`, `DEFAULT_RUNTIME_SETTINGS` |
 | `checkpoint_manager.py` | Checkpoint 管理 | `CheckpointManager`, `get_checkpointer()` |
 | `store_manager.py` | Store 管理 | `StoreManager`, `ResilientStore`, `get_store()` |
 | `multi_agent_orchestrator.py` | 多 Agent 编排 | `Orchestrator`, `SupervisorAgent`, `WorkerAgent` |
-| `celery_graph_bridge.py` | Celery 桥接 | `dispatch_to_celery()`, `resume_orchestrator()` |
+| `celery_graph_bridge.py` | Celery 桥接 | `dispatch_to_celery()`, `accept_or_mark_stale()`, `resume_orchestrator()` |
 | `fastapi_graph_app.py` | FastAPI 集成 | `create_graph_app()`, `graph_lifespan` |
 
 ## 快速使用
@@ -96,7 +97,7 @@ await store.aclose()
 from templates import SupervisorAgent, WorkerAgent
 
 workers = [
-    WorkerAgent(name="researcher", description="搜索信息", func=research_fn),
+    WorkerAgent(name="researcher", description="搜索信息", graph=research_graph),
     WorkerAgent(name="writer", description="撰写内容", func=write_fn),
 ]
 supervisor = SupervisorAgent(workers, llm=my_llm)
@@ -106,7 +107,7 @@ graph = supervisor.build_graph()
 ## Celery 桥接
 
 ```python
-from templates import dispatch_to_celery
+from templates import accept_or_mark_stale, dispatch_to_celery
 
 # 在图节点内分发 Celery 任务（不阻塞事件循环）
 envelope = await dispatch_to_celery(
@@ -117,6 +118,12 @@ envelope = await dispatch_to_celery(
     execution_id="exec-001",
 )
 print(envelope["task_id"])
+
+decision = accept_or_mark_stale(
+    {"execution_id": "exec-001", "status": "COMPLETED"},
+    current_execution_id="exec-001",
+)
+print(decision)
 ```
 
 ## FastAPI 集成
@@ -135,3 +142,18 @@ app = create_graph_app(title="My LangGraph API")
 - checkpoint / store 默认共享 db=0，通过不同 prefix 隔离
 - FastAPI SSE：`stream_mode="messages"`
 - Celery：统一使用 runtime settings 中的 Redis URL
+
+## 教程映射
+
+如果你是从 `examples/` 迁移到模板层，建议按下面的映射阅读：
+
+- `09_error_and_resilience/*` → `safe_node.py`
+- `05_checkpointing/*` → `checkpoint_manager.py`
+- `12_memory_and_store/*` → `store_manager.py`
+- `10_multi_agent/06_supervisor_with_subgraphs.py` → `multi_agent_orchestrator.py`
+- `16_agentic_rag_patterns/03_celery_bridge.py` / `06_resume_orchestrator_contract.py` → `celery_graph_bridge.py`
+
+注意：
+
+- 模板是“可复用骨架”，不是“最小教学例子”
+- 如果你还停留在 toy 示例阶段，先读 `examples/` 里的真实版，再看模板层

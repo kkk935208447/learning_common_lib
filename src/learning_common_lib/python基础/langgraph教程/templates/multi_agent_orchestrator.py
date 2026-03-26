@@ -1,9 +1,15 @@
-"""多 Agent 编排骨架：Supervisor + Worker 和 Plan-Execute-Replan 两种模式。"""
+"""多 Agent 编排骨架：Supervisor + Graph Worker 和 Plan-Execute-Replan。
+
+这个模板刻意保持轻量，但不再把 worker 限制成“普通函数”。
+教程里的真实版示例会复用这里的契约：worker 可以是函数，也可以是已编译子图。
+"""
 from __future__ import annotations
 
+import json
+import inspect
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from dataclasses import dataclass
+from typing import Any, Callable, Literal, TypedDict
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.graph import END, StateGraph
@@ -11,9 +17,11 @@ from langgraph.graph import END, StateGraph
 try:
     from .safe_node import safe_node
     from .state_schemas import AgentState
+    from .teaching_contracts import EscalationReport, WorkerResultEnvelope, WorkerTask
 except ImportError:  # pragma: no cover - 允许直接运行模板文件
     from safe_node import safe_node
     from state_schemas import AgentState
+    from teaching_contracts import EscalationReport, WorkerResultEnvelope, WorkerTask
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +32,50 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WorkerAgent:
-    """工作 Agent 定义。"""
+    """工作 Agent 定义。
+
+    `func` 适合 toy baseline，`graph` 适合真实版 graph-as-agent 教学。
+    """
 
     name: str
     description: str
-    func: Callable
+    func: Callable | None = None
+    graph: Any | None = None
+    input_builder: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     timeout_s: float = 30.0
+
+
+class SupervisorState(AgentState, total=False):
+    query: str
+    planned_tasks: list[WorkerTask]
+    current_task: WorkerTask | None
+    worker_results: list[WorkerResultEnvelope]
+
+
+def _coerce_worker_result(
+    worker: WorkerAgent,
+    task: WorkerTask,
+    result: dict[str, Any],
+) -> WorkerResultEnvelope:
+    """把子图/函数结果归一成统一 envelope。"""
+    if {"task_id", "execution_id", "worker_name", "status"} <= result.keys():
+        return result  # 已经是 envelope 形状
+
+    escalation: EscalationReport | None = result.get("escalation")
+    status: Literal["COMPLETED", "ESCALATED", "STALE_IGNORED"] = (
+        "ESCALATED" if escalation else "COMPLETED"
+    )
+    summary = result.get("summary") or result.get("result") or f"{worker.name} 完成任务"
+    return {
+        "task_id": task.get("task_id", ""),
+        "execution_id": task.get("execution_id", ""),
+        "worker_name": worker.name,
+        "status": status,
+        "summary": str(summary),
+        "evidence_refs": list(result.get("evidence_refs", [])),
+        "output_ref": result.get("output_ref"),
+        "escalation": escalation,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -41,33 +87,113 @@ class SupervisorAgent:
 
     def __init__(self, workers: list[WorkerAgent], llm: Any | None = None) -> None:
         self._workers = {w.name: w for w in workers}
-        self._llm = llm or FakeListChatModel(responses=["worker_a"])
+        self._llm = llm or FakeListChatModel(responses=['{"next_worker":"worker_a"}'])
+
+    def _choose_worker(self, state: SupervisorState) -> str:
+        planned_tasks = state.get("planned_tasks", [])
+        completed = {item["task_id"] for item in state.get("worker_results", [])}
+        current_task = next(
+            (task for task in planned_tasks if task.get("task_id") not in completed),
+            None,
+        )
+        if current_task is not None:
+            return current_task["worker_name"]
+
+        worker_names = sorted(self._workers.keys())
+        response = self._llm.invoke(
+            json.dumps(
+                {
+                    "query": state.get("query", ""),
+                    "workers": worker_names,
+                    "instruction": "返回 JSON: {\"next_worker\": \"...\"} 或 {\"next_worker\": \"FINISH\"}",
+                },
+                ensure_ascii=False,
+            )
+        ).content.strip()
+        try:
+            payload = json.loads(response)
+            chosen = payload.get("next_worker", "FINISH")
+        except json.JSONDecodeError:
+            chosen = response
+        return chosen if chosen in self._workers else "__end__"
 
     def build_graph(self) -> Any:
         """构建 Supervisor 模式的图。"""
-        builder = StateGraph(AgentState)
+        builder = StateGraph(SupervisorState)
 
         # 注册 supervisor 节点
         @safe_node(node_name="supervisor", timeout_s=30)
-        async def supervisor_node(state: dict) -> dict:
+        async def supervisor_node(state: SupervisorState) -> dict:
             """Supervisor 决策：选择下一个 Worker 或结束。"""
             iteration = state.get("iteration", 0)
             max_iter = state.get("max_iterations", 5)
             if iteration >= max_iter:
                 return {"next_action": "__end__"}
-            # 简化：用 LLM 决定下一个 worker
-            worker_names = list(self._workers.keys())
-            response = self._llm.invoke(f"选择 worker: {worker_names}")
-            chosen = response.content.strip()
-            if chosen not in self._workers:
-                chosen = worker_names[0]
-            return {"next_action": chosen, "iteration": iteration + 1}
+            planned_tasks = list(state.get("planned_tasks", []))
+            if not planned_tasks and state.get("query"):
+                planned_tasks = [
+                    {
+                        "task_id": f"task-{iteration + 1}",
+                        "plan_node_code": f"NODE-{iteration + 1:03d}",
+                        "worker_name": self._choose_worker(state),
+                        "objective": state.get("query", ""),
+                        "context_ref": None,
+                        "execution_id": f"exec-{iteration + 1:03d}",
+                    }
+                ]
+
+            chosen = self._choose_worker({**state, "planned_tasks": planned_tasks})
+            if chosen == "__end__":
+                return {"next_action": "__end__", "planned_tasks": planned_tasks}
+
+            current_task = next(
+                (
+                    task for task in planned_tasks
+                    if task.get("worker_name") == chosen
+                    and task.get("task_id")
+                    not in {item["task_id"] for item in state.get("worker_results", [])}
+                ),
+                None,
+            )
+            return {
+                "next_action": chosen,
+                "planned_tasks": planned_tasks,
+                "current_task": current_task,
+                "iteration": iteration + 1,
+            }
 
         builder.add_node("supervisor", supervisor_node)
 
         # 注册 worker 节点
         for name, worker in self._workers.items():
-            wrapped = safe_node(node_name=name, timeout_s=worker.timeout_s)(worker.func)
+            if worker.func is None and worker.graph is None:
+                raise ValueError(f"worker={name} 既没有 func 也没有 graph")
+
+            async def run_worker(
+                state: SupervisorState,
+                *,
+                _worker: WorkerAgent = worker,
+            ) -> dict[str, Any]:
+                task = state.get("current_task")
+                if task is None:
+                    return {"next_action": "__end__"}
+                worker_input = _worker.input_builder(state) if _worker.input_builder else dict(state)
+                if _worker.graph is not None:
+                    result = await _worker.graph.ainvoke(worker_input)
+                else:
+                    maybe_result = _worker.func(worker_input)
+                    if inspect.isawaitable(maybe_result):
+                        result = await maybe_result
+                    else:
+                        result = maybe_result
+                envelope = _coerce_worker_result(_worker, task, result)
+                return {
+                    "worker_results": [*state.get("worker_results", []), envelope],
+                    "next_action": "supervisor",
+                    "current_task": None,
+                }
+
+            wrapped = safe_node(node_name=name, timeout_s=worker.timeout_s)(run_worker)
             builder.add_node(name, wrapped)
             builder.add_edge(name, "supervisor")
 
@@ -141,27 +267,97 @@ class Orchestrator:
 # ---------------------------------------------------------------------------
 
 async def _demo() -> None:
-    """演示 Supervisor 模式。"""
+    """演示 Supervisor + graph worker 模式。"""
+
+    class GraphWorkerState(TypedDict, total=False):
+        objective: str
+        notes: list[str]
+        summary: str
+
+    async def researcher_prepare(state: GraphWorkerState) -> dict:
+        objective = state.get("objective", "")
+        return {"notes": [f"检索资料: {objective}"]}
+
+    async def researcher_verify(state: GraphWorkerState) -> dict:
+        note_count = len(state.get("notes", []))
+        return {"summary": f"researcher 完成，产出 {note_count} 条笔记"}
+
+    researcher_graph = StateGraph(GraphWorkerState)
+    researcher_graph.add_node("prepare", researcher_prepare)
+    researcher_graph.add_node("verify", researcher_verify)
+    researcher_graph.set_entry_point("prepare")
+    researcher_graph.add_edge("prepare", "verify")
+    researcher_graph.add_edge("verify", END)
+    compiled_researcher = researcher_graph.compile()
 
     async def worker_a_fn(state: dict) -> dict:
-        print(f"  Worker A 执行, iteration={state.get('iteration', 0)}")
-        return {"next_action": "supervisor"}
+        task = state.get("current_task", {})
+        return {"summary": f"worker_a 执行: {task.get('objective', '')}"}
 
     async def worker_b_fn(state: dict) -> dict:
-        print(f"  Worker B 执行, iteration={state.get('iteration', 0)}")
-        return {"next_action": "supervisor"}
+        task = state.get("current_task", {})
+        return {
+            "summary": f"worker_b 发现缺口: {task.get('objective', '')}",
+            "escalation": {
+                "worker_name": "worker_b",
+                "reason": "needs_user_input",
+                "gap_type": "clarification_gap",
+                "message": "需要更精确的时间范围",
+                "suggested_global_action": "clarify",
+                "best_score": 0.58,
+                "missing_slots": ["time_range"],
+            },
+        }
 
     workers = [
-        WorkerAgent(name="worker_a", description="工作者A", func=worker_a_fn),
+        WorkerAgent(
+            name="worker_a",
+            description="research graph worker",
+            graph=compiled_researcher,
+            input_builder=lambda state: {"objective": state["current_task"]["objective"], "notes": [], "summary": ""},
+        ),
         WorkerAgent(name="worker_b", description="工作者B", func=worker_b_fn),
     ]
 
-    llm = FakeListChatModel(responses=["worker_a", "worker_b", "worker_a"])
+    llm = FakeListChatModel(
+        responses=[
+            '{"next_worker":"worker_a"}',
+            '{"next_worker":"worker_b"}',
+            '{"next_worker":"FINISH"}',
+        ]
+    )
     supervisor = SupervisorAgent(workers, llm=llm)
     graph = supervisor.build_graph()
 
-    result = await graph.ainvoke({"iteration": 0, "max_iterations": 3})
-    print(f"  最终结果: {result}")
+    result = await graph.ainvoke(
+        {
+            "query": "整理最近一周的差旅规则变更",
+            "planned_tasks": [
+                {
+                    "task_id": "task-1",
+                    "plan_node_code": "NODE-001",
+                    "worker_name": "worker_a",
+                    "objective": "先搜集制度变更信息",
+                    "context_ref": "ctx://task-1",
+                    "execution_id": "exec-001",
+                },
+                {
+                    "task_id": "task-2",
+                    "plan_node_code": "NODE-002",
+                    "worker_name": "worker_b",
+                    "objective": "检查是否还需要用户补充时间范围",
+                    "context_ref": "ctx://task-2",
+                    "execution_id": "exec-002",
+                },
+            ],
+            "worker_results": [],
+            "iteration": 0,
+            "max_iterations": 4,
+        }
+    )
+    print("  worker_results:")
+    for item in result.get("worker_results", []):
+        print(f"    - {item['worker_name']} [{item['status']}] {item['summary']}")
 
 
 if __name__ == "__main__":

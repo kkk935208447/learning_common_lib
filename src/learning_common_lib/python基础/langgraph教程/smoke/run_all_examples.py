@@ -13,10 +13,35 @@ INTEGRATION_EXAMPLES = {
     "16_agentic_rag_patterns/03_celery_bridge.py",
 }
 
+REALISTIC_MULTI_AGENT_EXAMPLES = {
+    "10_multi_agent/06_supervisor_with_subgraphs.py",
+    "10_multi_agent/07_replan_with_fingerprint.py",
+    "10_multi_agent/08_partial_plan_reuse.py",
+}
+
+RESUME_RECOVERY_EXAMPLES = {
+    "05_checkpointing/05_checkpoint_schema_evolution.py",
+    "05_checkpointing/06_subgraph_thread_strategy.py",
+    "05_checkpointing/07_idempotent_resume_side_effects.py",
+    "08_human_in_the_loop/05_structured_approval_contract.py",
+    "08_human_in_the_loop/06_clarify_with_timeout_default.py",
+    "14_testing_and_debugging/05_resume_and_replay_tests.py",
+    "15_production_deployment/03_double_texting.py",
+    "16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py",
+    "16_agentic_rag_patterns/06_resume_orchestrator_contract.py",
+    "16_agentic_rag_patterns/07_stale_result_fencing.py",
+}
+
 
 def classify_example(rel_path: str) -> str:
     """按教程维度给示例分类。"""
-    return "integration" if rel_path in INTEGRATION_EXAMPLES else "core"
+    if rel_path in INTEGRATION_EXAMPLES:
+        return "integration"
+    if rel_path in REALISTIC_MULTI_AGENT_EXAMPLES:
+        return "realistic_multi_agent"
+    if rel_path in RESUME_RECOVERY_EXAMPLES:
+        return "resume_recovery"
+    return "core"
 
 
 def validate_integration_output(rel_path: str, stdout: str) -> str | None:
@@ -46,6 +71,8 @@ def run_all() -> dict[str, list]:
     kind_summary = {
         "core": {"passed": 0, "failed": 0, "skipped": 0},
         "integration": {"passed": 0, "failed": 0, "skipped": 0},
+        "realistic_multi_agent": {"passed": 0, "failed": 0, "skipped": 0},
+        "resume_recovery": {"passed": 0, "failed": 0, "skipped": 0},
     }
 
     if not examples_dir.exists():

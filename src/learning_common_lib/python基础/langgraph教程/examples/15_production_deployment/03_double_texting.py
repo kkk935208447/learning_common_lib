@@ -1,164 +1,249 @@
-"""Double-texting 处理策略
+"""Double-texting 处理策略（更真实的等待/恢复版）。
 
 目标：
-    演示用户在 AI 处理过程中发送新消息（double-texting）的 4 种处理策略：
-    enqueue / reject / interrupt / rollback。
-
-关键 API：
-    - interrupt 机制 —— 中断当前执行
-    - checkpoint —— 状态回滚
+    演示同一 thread_id 上，用户在任务等待阶段再次发送消息时的处理策略：
+    enqueue / reject / interrupt / rollback / idempotency。
 
 运行命令：
     python 03_double_texting.py
-
-预期现象：
-    分别演示 4 种 double-texting 处理策略的行为差异。
-
-生产提醒：
-    - 选择策略取决于业务场景：聊天用 interrupt，表单用 reject
-    - interrupt 需要 checkpointer 支持状态恢复
-    - 生产环境建议在网关层实现，而非图内部
 """
 from __future__ import annotations
 
 import asyncio
-import time
+from collections import deque
 from enum import Enum
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
-
-# ══════════════════════════════════════════════════════════
-# Double-texting 策略定义
-# ══════════════════════════════════════════════════════════
 
 class Strategy(str, Enum):
-    ENQUEUE = "enqueue"      # 排队：等当前完成后处理新消息
-    REJECT = "reject"        # 拒绝：丢弃新消息，返回"请等待"
-    INTERRUPT = "interrupt"  # 中断：停止当前任务，处理新消息
-    ROLLBACK = "rollback"    # 回滚：撤销当前进度，从头处理新消息
+    ENQUEUE = "enqueue"
+    REJECT = "reject"
+    INTERRUPT = "interrupt"
+    ROLLBACK = "rollback"
 
 
-STRATEGY_DESC = {
-    Strategy.ENQUEUE: "排队等待 —— 当前任务完成后再处理新消息",
-    Strategy.REJECT: "直接拒绝 —— 告知用户请等待当前任务完成",
-    Strategy.INTERRUPT: "中断当前 —— 停止进行中的任务，转向新消息",
-    Strategy.ROLLBACK: "回滚重来 —— 撤销当前进度，用新消息重新开始",
-}
+class ChatState(TypedDict, total=False):
+    request_id: str
+    incoming_message: str
+    waiting_reason: str
+    worker_summary: str
+    final_answer: str
 
 
-# ── 状态定义 ──────────────────────────────────────────────
-class ChatState(TypedDict):
-    query: str
-    response: str
-    processing: bool
+REQUEST_COUNTER = 0
 
 
-# ── 模拟处理器 ──────────────────────────────────────────
-class DoubleTextHandler:
-    """Double-texting 处理器"""
-
-    def __init__(self, strategy: Strategy):
-        self.strategy = strategy
-        self.is_processing = False
-        self.queue: list[str] = []
-
-    def handle_new_message(self, message: str) -> str:
-        """处理新消息"""
-        if not self.is_processing:
-            return self._process(message)
-
-        # 正在处理中，根据策略决定行为
-        if self.strategy == Strategy.ENQUEUE:
-            self.queue.append(message)
-            return f"[enqueue] 消息已排队（队列长度: {len(self.queue)}）"
-
-        elif self.strategy == Strategy.REJECT:
-            return "[reject] 请等待当前任务完成后再发送"
-
-        elif self.strategy == Strategy.INTERRUPT:
-            print(f"  [interrupt] 中断当前任务，转向处理: {message}")
-            self.is_processing = False
-            return self._process(message)
-
-        elif self.strategy == Strategy.ROLLBACK:
-            print(f"  [rollback] 回滚当前进度，重新处理: {message}")
-            self.is_processing = False
-            return self._process(message)
-
-        return "未知策略"
-
-    def _process(self, message: str) -> str:
-        """模拟处理消息"""
-        self.is_processing = True
-        time.sleep(0.1)  # 模拟处理延迟
-        self.is_processing = False
-
-        # 处理排队消息
-        result = f"已处理: {message}"
-        if self.queue:
-            queued = self.queue.pop(0)
-            result += f"\n  [enqueue] 继续处理排队消息: {queued}"
-
-        return result
+def next_request_id() -> str:
+    global REQUEST_COUNTER
+    REQUEST_COUNTER += 1
+    return f"req-{REQUEST_COUNTER:03d}"
 
 
-# ── 在 LangGraph 中实现 interrupt 策略 ──────────────────
-def slow_node(state: ChatState) -> dict:
-    """模拟耗时节点"""
-    time.sleep(0.2)
-    return {"response": f"处理完成: {state['query']}", "processing": False}
+def start_request(state: ChatState) -> dict:
+    request_id = next_request_id()
+    print(f"[graph] 开始处理 {request_id}: {state['incoming_message']}")
+    return {"request_id": request_id, "waiting_reason": "WORKER", "final_answer": ""}
 
 
-def build_interruptible_graph():
-    """构建可中断的图"""
+def wait_for_worker(state: ChatState) -> dict:
+    payload = interrupt(
+        {
+            "request_id": state["request_id"],
+            "waiting_reason": state["waiting_reason"],
+            "message": state["incoming_message"],
+        }
+    )
+    return {"worker_summary": payload["worker_summary"], "waiting_reason": "NONE"}
+
+
+def finalize(state: ChatState) -> dict:
+    return {
+        "final_answer": (
+            f"{state['request_id']} 完成："
+            f"{state['incoming_message']} -> {state['worker_summary']}"
+        )
+    }
+
+
+class DoubleTextGateway:
+    """网关层策略：检查同一 thread_id 是否已有等待中的任务。"""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.queues: dict[str, deque[tuple[str, str]]] = {}
+        self.idempotency_cache: dict[str, dict] = {}
+        self.cancelled_requests: dict[str, list[str]] = {}
+
+    async def _is_waiting(self, thread_id: str) -> bool:
+        state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
+        return bool(state.values) and state.values.get("waiting_reason") == "WORKER"
+
+    async def _current_request_id(self, thread_id: str) -> str | None:
+        state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
+        return state.values.get("request_id") if state.values else None
+
+    async def _start_new(self, thread_id: str, message: str, idempotency_key: str) -> dict:
+        result = await self.app.ainvoke(
+            {"incoming_message": message},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+        response = {
+            "status": "waiting",
+            "thread_id": thread_id,
+            "request_id": result["request_id"],
+            "waiting_reason": result["waiting_reason"],
+        }
+        self.idempotency_cache[idempotency_key] = response
+        return response
+
+    async def submit(
+        self,
+        *,
+        thread_id: str,
+        message: str,
+        strategy: Strategy,
+        idempotency_key: str,
+    ) -> dict:
+        if idempotency_key in self.idempotency_cache:
+            cached = self.idempotency_cache[idempotency_key]
+            return {**cached, "status": "idempotent_replay"}
+
+        if not await self._is_waiting(thread_id):
+            return await self._start_new(thread_id, message, idempotency_key)
+
+        current_request_id = await self._current_request_id(thread_id)
+        if strategy == Strategy.REJECT:
+            response = {
+                "status": "rejected_busy",
+                "thread_id": thread_id,
+                "active_request_id": current_request_id,
+            }
+            self.idempotency_cache[idempotency_key] = response
+            return response
+
+        if strategy == Strategy.ENQUEUE:
+            self.queues.setdefault(thread_id, deque()).append((message, idempotency_key))
+            response = {
+                "status": "enqueued",
+                "thread_id": thread_id,
+                "active_request_id": current_request_id,
+                "queue_size": len(self.queues[thread_id]),
+            }
+            self.idempotency_cache[idempotency_key] = response
+            return response
+
+        if strategy == Strategy.INTERRUPT:
+            self.cancelled_requests.setdefault(thread_id, []).append(current_request_id or "unknown")
+            return await self._start_new(thread_id, message, idempotency_key)
+
+        if strategy == Strategy.ROLLBACK:
+            self.cancelled_requests.setdefault(thread_id, []).append(f"rollback:{current_request_id or 'unknown'}")
+            self.queues[thread_id] = deque()
+            return await self._start_new(thread_id, message, idempotency_key)
+
+        raise ValueError(f"未知策略: {strategy}")
+
+    async def resume_worker(self, *, thread_id: str, worker_summary: str) -> dict:
+        result = await self.app.ainvoke(
+            Command(resume={"worker_summary": worker_summary}),
+            config={"configurable": {"thread_id": thread_id}},
+        )
+        if self.queues.get(thread_id):
+            message, idem_key = self.queues[thread_id].popleft()
+            queued = await self._start_new(thread_id, message, idem_key)
+            return {
+                "completed": result["final_answer"],
+                "next_queued": queued,
+            }
+        return {"completed": result["final_answer"], "next_queued": None}
+
+
+async def main() -> None:
+    saver = MemorySaver()
     graph = StateGraph(ChatState)
-    graph.add_node("process", slow_node)
-    graph.set_entry_point("process")
-    graph.add_edge("process", END)
-    checkpointer = MemorySaver()
-    return graph.compile(checkpointer=checkpointer)
+    graph.add_node("start", start_request)
+    graph.add_node("wait", wait_for_worker)
+    graph.add_node("finalize", finalize)
+    graph.add_edge(START, "start")
+    graph.add_edge("start", "wait")
+    graph.add_edge("wait", "finalize")
+    graph.add_edge("finalize", END)
+    app = graph.compile(checkpointer=saver)
+    gateway = DoubleTextGateway(app)
 
+    thread_id = "chat-thread-001"
+    print("=== 第一次消息：进入等待态 ===")
+    print(
+        await gateway.submit(
+            thread_id=thread_id,
+            message="整理公司的差旅规则变化",
+            strategy=Strategy.ENQUEUE,
+            idempotency_key="idem-001",
+        )
+    )
 
-# ══════════════════════════════════════════════════════════
-# 演示
-# ══════════════════════════════════════════════════════════
+    print("\n=== 同线程再次发送：reject ===")
+    print(
+        await gateway.submit(
+            thread_id=thread_id,
+            message="顺便整理报销规则",
+            strategy=Strategy.REJECT,
+            idempotency_key="idem-002",
+        )
+    )
 
-def demo_strategy(strategy: Strategy) -> None:
-    """演示单个策略"""
-    print(f"\n策略: {strategy.value} —— {STRATEGY_DESC[strategy]}")
-    handler = DoubleTextHandler(strategy)
+    print("\n=== 同线程再次发送：enqueue ===")
+    print(
+        await gateway.submit(
+            thread_id=thread_id,
+            message="再补一份近 30 天版本",
+            strategy=Strategy.ENQUEUE,
+            idempotency_key="idem-003",
+        )
+    )
 
-    # 模拟：第一条消息正在处理时，第二条消息到达
-    handler.is_processing = True  # 模拟正在处理
-    result = handler.handle_new_message("第二条消息（double-text）")
-    print(f"  结果: {result}")
+    print("\n=== worker 完成当前请求 ===")
+    print(
+        await gateway.resume_worker(
+            thread_id=thread_id,
+            worker_summary="已收集 2 条制度变化",
+        )
+    )
+
+    print("\n=== 新线程演示 interrupt ===")
+    interrupt_thread = "chat-thread-002"
+    await gateway.submit(
+        thread_id=interrupt_thread,
+        message="先整理全部差旅制度",
+        strategy=Strategy.ENQUEUE,
+        idempotency_key="idem-010",
+    )
+    print(
+        await gateway.submit(
+            thread_id=interrupt_thread,
+            message="不用全部了，只看近 30 天",
+            strategy=Strategy.INTERRUPT,
+            idempotency_key="idem-011",
+        )
+    )
+
+    print("\n=== 重复提交同一个 idempotency key ===")
+    print(
+        await gateway.submit(
+            thread_id=interrupt_thread,
+            message="不用全部了，只看近 30 天",
+            strategy=Strategy.INTERRUPT,
+            idempotency_key="idem-011",
+        )
+    )
+
+    print("\n取消记录:")
+    print(gateway.cancelled_requests)
 
 
 if __name__ == "__main__":
-    print("=== Double-Texting 处理策略 ===")
-
-    for strategy in Strategy:
-        demo_strategy(strategy)
-
-    print("\n" + "=" * 50)
-    print("\n=== LangGraph 可中断图演示 ===\n")
-
-    app = build_interruptible_graph()
-    config = {"configurable": {"thread_id": "dt-demo"}}
-
-    result = app.invoke(
-        {"query": "第一条消息", "response": "", "processing": True},
-        config=config,
-    )
-    print(f"结果: {result['response']}")
-
-    print("""
-策略选择指南:
-  - 聊天场景 → interrupt（用户改变意图，旧任务无意义）
-  - 表单提交 → reject（防止重复提交）
-  - 批处理   → enqueue（所有请求都需要处理）
-  - 搜索场景 → rollback（用新关键词重新搜索）
-""")
+    asyncio.run(main())
