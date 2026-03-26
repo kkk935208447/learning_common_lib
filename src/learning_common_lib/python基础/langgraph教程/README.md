@@ -12,7 +12,7 @@ import redis as redis_lib
 
 def reset_tutorial_redis() -> None:
     """清空教程专用 Redis DB，避免示例之间互相污染。"""
-    for db in (0, 2):
+    for db in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15):
         client = redis_lib.Redis(
             host="localhost",
             port=6379,
@@ -149,7 +149,7 @@ langgraph教程/
 ```bash
 cd src/learning_common_lib/python基础/langgraph教程
 
-# 如果之前运行过其他示例，建议先清理 Redis：
+# 如果之前运行过其他示例，建议先清理 Redis (如果没有 redis-cli 工具，也可以使用 Python 代码 `examples/清理redis的代码.py` 清理 Redis 内容)：
 redis-cli -a 123456 -n 0 FLUSHDB
 redis-cli -a 123456 -n 2 FLUSHDB
 
