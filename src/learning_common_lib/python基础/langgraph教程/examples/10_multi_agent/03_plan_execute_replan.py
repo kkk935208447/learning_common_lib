@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+10_multi_agent / 03_plan_execute_replan
 
+目标:
+    Plan-Execute-Replan 循环（toy baseline）
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    planner→executor→evaluator→replan 四节点循环
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/03_plan_execute_replan.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/03_plan_execute_replan.py
+
+预期现象:
+    规划器生成计划 → 执行器逐步执行 → 评估器检查质量 → 不满意则重规划
+
+生产提醒:
+    控制最大迭代次数防止无限循环，每轮评估应有明确的通过/失败标准
 """
-目标: Plan-Execute-Replan 循环，直接模拟 AgenticRAG 全局循环
-关键 API: planner→executor→evaluator→replan 四节点循环
-运行命令: python 03_plan_execute_replan.py
-预期现象: 规划器生成计划 → 执行器逐步执行 → 评估器检查质量 → 不满意则重规划
-生产提醒: 控制最大迭代次数防止无限循环，每轮评估应有明确的通过/失败标准
-"""
+from __future__ import annotations
 
 import asyncio
 import operator

@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+07_subgraph_composition / 02_state_mapping
 
+目标:
+    演示父子图状态 schema 不同时的映射机制
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    重叠 key 自动共享、非重叠 key 为子图私有状态
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/07_subgraph_composition/02_state_mapping.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/07_subgraph_composition/02_state_mapping.py
+
+预期现象:
+    子图通过重叠 key 'query' 接收父图数据，子图私有 key 'internal_score' 不会泄漏到父图
+
+生产提醒:
+    设计子图时明确哪些 key 需要与父图共享，哪些应保持私有
 """
-目标: 演示父子图状态 schema 不同时的映射机制
-关键 API: 重叠 key 自动共享、非重叠 key 为子图私有状态
-运行命令: python 02_state_mapping.py
-预期现象: 子图通过重叠 key 'query' 接收父图数据，子图私有 key 'internal_score' 不会泄漏到父图
-生产提醒: 设计子图时明确哪些 key 需要与父图共享，哪些应保持私有
-"""
+from __future__ import annotations
 
 import operator
 from typing import Annotated, TypedDict

@@ -1,10 +1,29 @@
-"""MessagesState 预置 schema 与 add_messages reducer。
+"""
+MessagesState 预置 schema 与 add_messages reducer。
 
-目标：掌握 LangGraph 内置的 MessagesState 及 add_messages 的去重/更新逻辑
-关键 API：MessagesState, add_messages, HumanMessage, AIMessage, SystemMessage
-运行命令：python 03_message_state.py
-预期现象：使用 FakeListChatModel 模拟对话，展示消息按 ID 去重/更新
-生产提醒：生产环境替换 FakeListChatModel 为真实 LLM（如 ChatOpenAI）
+目标:
+    掌握 LangGraph 内置的 MessagesState 及 add_messages 的去重/更新逻辑
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    MessagesState, add_messages, HumanMessage, AIMessage, SystemMessage
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/02_state_deep_dive/03_message_state.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/02_state_deep_dive/03_message_state.py
+
+预期现象:
+    使用 FakeListChatModel 模拟对话，展示消息按 ID 去重/更新
+
+生产提醒:
+    生产环境替换 FakeListChatModel 为真实 LLM（如 ChatOpenAI）
 """
 from __future__ import annotations
 

@@ -1,20 +1,37 @@
-from __future__ import annotations
+"""
+04_tool_calling / 04_react_agent_pattern
 
+目标:
+    实现完整的 ReAct Agent 模式——思考→工具→观察循环
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    条件边 + ToolNode + LLM 节点, should_continue 路由函数
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/04_tool_calling/04_react_agent_pattern.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/04_tool_calling/04_react_agent_pattern.py
+
+预期现象:
+    1. Agent 接收用户问题
+    2. LLM 决定调用工具（思考→行动）
+    3. 工具返回结果（观察）
+    4. LLM 根据观察决定是否继续调用工具或给出最终回答
+    5. 循环直到 LLM 不再请求工具调用
+
+生产提醒:
+    - 真实场景替换 FakeListChatModel 为 ChatOpenAI / ChatAnthropic
+    - 务必设置最大迭代次数防止无限循环（recursion_limit）
+    - should_continue 是 ReAct 模式的核心路由逻辑
 """
-目标：实现完整的 ReAct Agent 模式——思考→工具→观察循环
-关键 API：条件边 + ToolNode + LLM 节点, should_continue 路由函数
-运行命令：python 04_react_agent_pattern.py
-预期现象：
-  1. Agent 接收用户问题
-  2. LLM 决定调用工具（思考→行动）
-  3. 工具返回结果（观察）
-  4. LLM 根据观察决定是否继续调用工具或给出最终回答
-  5. 循环直到 LLM 不再请求工具调用
-生产提醒：
-  - 真实场景替换 FakeListChatModel 为 ChatOpenAI / ChatAnthropic
-  - 务必设置最大迭代次数防止无限循环（recursion_limit）
-  - should_continue 是 ReAct 模式的核心路由逻辑
-"""
+from __future__ import annotations
 
 from typing import Literal
 

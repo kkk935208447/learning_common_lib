@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+05_checkpointing / 02_conversation_threads
 
+目标:
+    演示多线程对话——不同 thread_id 维护独立的对话状态
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    MessagesState + MemorySaver, thread_id 命名约定
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/02_conversation_threads.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/02_conversation_threads.py
+
+预期现象:
+    1. 模拟两个用户各自的对话线程
+    2. 每个线程独立维护消息历史
+    3. 展示 thread_id 命名约定（参考 AgenticRAG: tenant:{id}:task:{id}）
+
+生产提醒:
+    - thread_id 命名建议：tenant:{tenant_id}:user:{user_id}:session:{session_id}
+    - 长对话需要考虑消息裁剪策略，避免 context window 溢出
+    - 可通过 get_state 检查任意线程的当前状态
 """
-目标：演示多线程对话——不同 thread_id 维护独立的对话状态
-关键 API：MessagesState + MemorySaver, thread_id 命名约定
-运行命令：python 02_conversation_threads.py
-预期现象：
-  1. 模拟两个用户各自的对话线程
-  2. 每个线程独立维护消息历史
-  3. 展示 thread_id 命名约定（参考 AgenticRAG: tenant:{id}:task:{id}）
-生产提醒：
-  - thread_id 命名建议：tenant:{tenant_id}:user:{user_id}:session:{session_id}
-  - 长对话需要考虑消息裁剪策略，避免 context window 溢出
-  - 可通过 get_state 检查任意线程的当前状态
-"""
+from __future__ import annotations
 
 import asyncio
 

@@ -1,10 +1,29 @@
-"""Pregel 执行模型：superstep 概念与节点激活机制。
+"""
+Pregel 执行模型：superstep 概念与节点激活机制。
 
-目标：理解 LangGraph 底层的 Pregel 执行模型
-关键 API：StateGraph, stream（用于观察 superstep）
-运行命令：python 03_execution_model.py
-预期现象：打印每个 superstep 的执行过程，展示节点激活/休眠切换
-生产提醒：同一 superstep 内的并行节点共享同一快照，互相看不到对方的写入
+目标:
+    理解 LangGraph 底层的 Pregel 执行模型
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph, stream（用于观察 superstep）
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/01_graph_fundamentals/03_execution_model.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/01_graph_fundamentals/03_execution_model.py
+
+预期现象:
+    打印每个 superstep 的执行过程，展示节点激活/休眠切换
+
+生产提醒:
+    同一 superstep 内的并行节点共享同一快照，互相看不到对方的写入
 """
 from __future__ import annotations
 

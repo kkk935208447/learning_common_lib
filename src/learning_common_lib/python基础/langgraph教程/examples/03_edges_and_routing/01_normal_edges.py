@@ -1,10 +1,29 @@
-"""普通边、入口点边、END 边。
+"""
+普通边、入口点边、END 边。
 
-目标：掌握 LangGraph 中三种基本边类型及新旧 API 对比
-关键 API：add_edge, set_entry_point（旧）, set_finish_point（旧）, START/END（新）
-运行命令：python 01_normal_edges.py
-预期现象：新旧两种 API 构建相同拓扑，输出一致
-生产提醒：set_entry_point/set_finish_point 是旧 API，推荐使用 START/END 常量
+目标:
+    掌握 LangGraph 中三种基本边类型及新旧 API 对比
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    add_edge, set_entry_point（旧）, set_finish_point（旧）, START/END（新）
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/03_edges_and_routing/01_normal_edges.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/03_edges_and_routing/01_normal_edges.py
+
+预期现象:
+    新旧两种 API 构建相同拓扑，输出一致
+
+生产提醒:
+    set_entry_point/set_finish_point 是旧 API，推荐使用 START/END 常量
 """
 from __future__ import annotations
 

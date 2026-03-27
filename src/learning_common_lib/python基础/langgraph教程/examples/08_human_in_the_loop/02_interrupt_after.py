@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 02_interrupt_after
 
+目标:
+    使用 interrupt_after 在节点执行后暂停，审核结果后再继续
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt_after
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/02_interrupt_after.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/02_interrupt_after.py
+
+预期现象:
+    analysis 节点执行后暂停，人工审核结果，可修改状态后继续
+
+生产提醒:
+    interrupt_after 适合需要审核中间结果的场景，如 AI 生成内容的人工审核
 """
-目标: 使用 interrupt_after 在节点执行后暂停，审核结果后再继续
-关键 API: interrupt_after
-运行命令: python 02_interrupt_after.py
-预期现象: analysis 节点执行后暂停，人工审核结果，可修改状态后继续
-生产提醒: interrupt_after 适合需要审核中间结果的场景，如 AI 生成内容的人工审核
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

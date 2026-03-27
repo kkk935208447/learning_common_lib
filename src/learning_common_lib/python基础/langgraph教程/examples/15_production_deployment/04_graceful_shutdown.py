@@ -1,22 +1,32 @@
-"""优雅关闭：checkpoint 保存 + 进行中任务处理
+"""
+优雅关闭：checkpoint 保存 + 进行中任务处理
 
-目标：
+目标:
     演示生产环境中的优雅关闭机制：
     收到终止信号后保存 checkpoint、等待进行中任务完成、清理资源。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - signal.signal(SIGTERM/SIGINT) —— 信号处理
     - checkpointer —— 状态持久化
     - asyncio.Event —— 关闭协调
 
-运行命令：
-    python 04_graceful_shutdown.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/15_production_deployment/04_graceful_shutdown.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/15_production_deployment/04_graceful_shutdown.py
+
+预期现象:
     模拟收到 SIGTERM 信号后，系统优雅关闭：
     等待当前任务完成 → 保存 checkpoint → 清理资源 → 退出。
 
-生产提醒：
+生产提醒:
     - K8s 默认 SIGTERM 后 30 秒强制 SIGKILL，确保关闭逻辑在此之内完成
     - checkpoint 保存是关键：确保中断的任务可以从断点恢复
     - 使用 health check 端点配合 readiness probe

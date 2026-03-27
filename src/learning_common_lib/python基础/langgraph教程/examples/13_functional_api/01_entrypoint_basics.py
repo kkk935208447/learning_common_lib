@@ -1,21 +1,31 @@
-"""@entrypoint 定义工作流入口
+"""
+@entrypoint 定义工作流入口
 
-目标：
+目标:
     演示 LangGraph Functional API 的 @entrypoint 装饰器，
     用原生 Python if/for 控制流定义工作流，无需显式构建图。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - @entrypoint(checkpointer) —— 定义工作流入口函数
     - 原生 Python 控制流（if/for/while）
 
-运行命令：
-    python 01_entrypoint_basics.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/13_functional_api/01_entrypoint_basics.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/13_functional_api/01_entrypoint_basics.py
+
+预期现象:
     使用 @entrypoint 定义的工作流像普通函数一样执行，
     但自动获得 checkpoint 持久化能力。
 
-生产提醒：
+生产提醒:
     - @entrypoint 适合简单线性流程，复杂拓扑仍建议用 Graph API
     - entrypoint 函数的参数和返回值必须可序列化
     - checkpointer 可选，不传则无持久化

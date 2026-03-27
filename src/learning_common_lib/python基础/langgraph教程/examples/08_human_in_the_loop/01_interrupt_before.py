@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 01_interrupt_before
 
+目标:
+    使用 interrupt_before 在节点执行前暂停，等待人工确认后继续
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt_before, Command(resume=...)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/01_interrupt_before.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/01_interrupt_before.py
+
+预期现象:
+    图执行到 sensitive_node 前暂停，模拟人工确认后恢复执行
+
+生产提醒:
+    需要 checkpointer（如 MemorySaver）保存中断点状态，生产环境建议用持久化存储
 """
-目标: 使用 interrupt_before 在节点执行前暂停，等待人工确认后继续
-关键 API: interrupt_before, Command(resume=...)
-运行命令: python 01_interrupt_before.py
-预期现象: 图执行到 sensitive_node 前暂停，模拟人工确认后恢复执行
-生产提醒: 需要 checkpointer（如 MemorySaver）保存中断点状态，生产环境建议用持久化存储
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

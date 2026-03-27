@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+07_subgraph_composition / 04_nested_dual_graph
 
+目标:
+    双图架构 — GlobalGraph + SubtaskGraph，直接模拟 AgenticRAG 的双图设计
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph 嵌套、Command 跨图通信
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/07_subgraph_composition/04_nested_dual_graph.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/07_subgraph_composition/04_nested_dual_graph.py
+
+预期现象:
+    全局图分解任务 → 子任务图逐个执行 → 全局图汇总结果，支持迭代重规划
+
+生产提醒:
+    双图架构是复杂 Agent 系统的核心模式，注意控制全局迭代次数防止无限循环
 """
-目标: 双图架构 — GlobalGraph + SubtaskGraph，直接模拟 AgenticRAG 的双图设计
-关键 API: StateGraph 嵌套、Command 跨图通信
-运行命令: python 04_nested_dual_graph.py
-预期现象: 全局图分解任务 → 子任务图逐个执行 → 全局图汇总结果，支持迭代重规划
-生产提醒: 双图架构是复杂 Agent 系统的核心模式，注意控制全局迭代次数防止无限循环
-"""
+from __future__ import annotations
 
 import asyncio
 import operator

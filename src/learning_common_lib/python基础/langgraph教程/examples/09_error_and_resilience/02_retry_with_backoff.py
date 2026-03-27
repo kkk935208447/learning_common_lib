@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+09_error_and_resilience / 02_retry_with_backoff
 
+目标:
+    条件边重试 + 指数退避 + 最大重试次数，区分错误类型
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    条件边路由 + 状态中的重试计数器
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/09_error_and_resilience/02_retry_with_backoff.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/09_error_and_resilience/02_retry_with_backoff.py
+
+预期现象:
+    TRANSIENT 错误自动重试（指数退避），PERMANENT 错误直接失败，DEGRADABLE 降级处理
+
+生产提醒:
+    区分错误类型是健壮系统的关键，避免对不可恢复错误做无意义重试
 """
-目标: 条件边重试 + 指数退避 + 最大重试次数，区分错误类型
-关键 API: 条件边路由 + 状态中的重试计数器
-运行命令: python 02_retry_with_backoff.py
-预期现象: TRANSIENT 错误自动重试（指数退避），PERMANENT 错误直接失败，DEGRADABLE 降级处理
-生产提醒: 区分错误类型是健壮系统的关键，避免对不可恢复错误做无意义重试
-"""
+from __future__ import annotations
 
 import asyncio
 import random

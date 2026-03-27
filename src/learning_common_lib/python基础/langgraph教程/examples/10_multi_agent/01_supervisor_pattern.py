@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+10_multi_agent / 01_supervisor_pattern
 
+目标:
+    Supervisor 模式 — 中心化调度器分配任务给 Worker（toy baseline）
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    条件边路由 + FakeListChatModel 模拟 LLM 决策
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/01_supervisor_pattern.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/01_supervisor_pattern.py
+
+预期现象:
+    Supervisor 根据查询类型将任务分配给不同 Worker，Worker 执行后返回结果
+
+生产提醒:
+    Supervisor 是单控制平面原则的体现，所有决策由一个节点统一管理
 """
-目标: Supervisor 模式 — 中心化调度器分配任务给 Worker
-关键 API: 条件边路由 + FakeListChatModel 模拟 LLM 决策
-运行命令: python 01_supervisor_pattern.py
-预期现象: Supervisor 根据查询类型将任务分配给不同 Worker，Worker 执行后返回结果
-生产提醒: Supervisor 是单控制平面原则的体现，所有决策由一个节点统一管理
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict

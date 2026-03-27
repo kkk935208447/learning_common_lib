@@ -1,10 +1,29 @@
-"""Pydantic BaseModel 作为状态：运行时验证与嵌套模型。
+"""
+Pydantic BaseModel 作为状态：运行时验证与嵌套模型。
 
-目标：理解 Pydantic 状态相比 TypedDict 的优势与取舍
-关键 API：StateGraph + Pydantic BaseModel
-运行命令：python 04_pydantic_state.py
-预期现象：演示运行时类型验证、默认值、嵌套模型，以及验证失败的错误提示
-生产提醒：Pydantic 验证有性能开销，高吞吐场景可考虑 TypedDict + 手动校验
+目标:
+    理解 Pydantic 状态相比 TypedDict 的优势与取舍
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph + Pydantic BaseModel
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/02_state_deep_dive/04_pydantic_state.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/02_state_deep_dive/04_pydantic_state.py
+
+预期现象:
+    演示运行时类型验证、默认值、嵌套模型，以及验证失败的错误提示
+
+生产提醒:
+    Pydantic 验证有性能开销，高吞吐场景可考虑 TypedDict + 手动校验
 """
 from __future__ import annotations
 

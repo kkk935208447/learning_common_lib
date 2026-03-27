@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+10_multi_agent / 02_swarm_pattern
 
+目标:
+    Swarm 模式 — Agent 间点对点协作，通过 handoff 机制传递控制权
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Command + active_agent 状态
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/02_swarm_pattern.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/02_swarm_pattern.py
+
+预期现象:
+    多个 Agent 通过 Command 互相移交控制权，无中心调度器
+
+生产提醒:
+    Swarm 适合 Agent 能力互补且交互模式明确的场景，注意防止循环移交
 """
-目标: Swarm 模式 — Agent 间点对点协作，通过 handoff 机制传递控制权
-关键 API: Command + active_agent 状态
-运行命令: python 02_swarm_pattern.py
-预期现象: 多个 Agent 通过 Command 互相移交控制权，无中心调度器
-生产提醒: Swarm 适合 Agent 能力互补且交互模式明确的场景，注意防止循环移交
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict

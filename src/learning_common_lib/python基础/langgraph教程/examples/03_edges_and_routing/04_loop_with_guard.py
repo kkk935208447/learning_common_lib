@@ -1,10 +1,29 @@
-"""循环边 + 迭代守卫 + 收敛检测。
+"""
+循环边 + 迭代守卫 + 收敛检测。
 
-目标：实现带安全守卫的循环图，防止无限循环
-关键 API：add_conditional_edges, 循环边
-运行命令：python 04_loop_with_guard.py
-预期现象：循环迭代直到达到最大次数或检测到状态收敛（fingerprint 重复）
-生产提醒：生产环境务必设置 max_iterations 和收敛检测，避免 LLM 陷入死循环
+目标:
+    实现带安全守卫的循环图，防止无限循环
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    add_conditional_edges, 循环边
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/03_edges_and_routing/04_loop_with_guard.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/03_edges_and_routing/04_loop_with_guard.py
+
+预期现象:
+    循环迭代直到达到最大次数或检测到状态收敛（fingerprint 重复）
+
+生产提醒:
+    生产环境务必设置 max_iterations 和收敛检测，避免 LLM 陷入死循环
 """
 from __future__ import annotations
 

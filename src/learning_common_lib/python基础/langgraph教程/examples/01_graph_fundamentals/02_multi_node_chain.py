@@ -1,10 +1,29 @@
-"""三节点链式图：状态在节点间自动传递。
+"""
+三节点链式图：状态在节点间自动传递。
 
-目标：理解多节点链式执行与 partial state 返回机制
-关键 API：StateGraph, add_node, add_edge, compile, invoke
-运行命令：python 02_multi_node_chain.py
-预期现象：消息依次经过三个节点，每个节点追加文本；step 计数递增
-生产提醒：无 reducer 时字段采用 last-write-wins 策略，多节点并行写同一字段会丢失数据
+目标:
+    理解多节点链式执行与 partial state 返回机制
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph, add_node, add_edge, compile, invoke
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/01_graph_fundamentals/02_multi_node_chain.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/01_graph_fundamentals/02_multi_node_chain.py
+
+预期现象:
+    消息依次经过三个节点，每个节点追加文本；step 计数递增
+
+生产提醒:
+    无 reducer 时字段采用 last-write-wins 策略，多节点并行写同一字段会丢失数据
 """
 from __future__ import annotations
 

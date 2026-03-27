@@ -1,21 +1,38 @@
-from __future__ import annotations
+"""
+05_checkpointing / 04_redis_checkpointer
 
+目标:
+    使用 Redis 持久化 checkpoint，支持跨进程恢复和 TTL 管理
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    AsyncRedisSaver (from langgraph.checkpoint.redis.aio import AsyncRedisSaver)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/04_redis_checkpointer.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        env LANGGRAPH_STRICT_REDIS=1 uv run python examples/05_checkpointing/04_redis_checkpointer.py
+
+预期现象:
+    1. 连接 Redis 并创建 AsyncRedisSaver
+    2. 多轮对话后 checkpoint 持久化到 Redis
+    3. 模拟"跨进程恢复"：重新编译图并从 Redis 恢复状态
+    4. 输出明确的运行时状态，便于 smoke / 排障判断是否真的用了 Redis
+
+生产提醒:
+    - 需要安装: pip install langgraph-checkpoint-redis
+    - 需要带 RediSearch/Redis Stack 能力的 Redis 实例，普通 Redis 可能报 `FT._LIST` 不存在
+    - Redis 连接需要配置密码和合适的 DB 编号
+    - 教程默认让 checkpoint / store 共用 db=0，通过不同 prefix 隔离
+    - TTL 策略：通过 Redis 的 EXPIRE 或定期清理过期 checkpoint
 """
-目标：使用 Redis 持久化 checkpoint，支持跨进程恢复和 TTL 管理
-关键 API：AsyncRedisSaver (from langgraph.checkpoint.redis.aio import AsyncRedisSaver)
-运行命令：python 04_redis_checkpointer.py
-预期现象：
-  1. 连接 Redis 并创建 AsyncRedisSaver
-  2. 多轮对话后 checkpoint 持久化到 Redis
-  3. 模拟"跨进程恢复"：重新编译图并从 Redis 恢复状态
-  4. 输出明确的运行时状态，便于 smoke / 排障判断是否真的用了 Redis
-生产提醒：
-  - 需要安装: pip install langgraph-checkpoint-redis
-  - 需要带 RediSearch/Redis Stack 能力的 Redis 实例，普通 Redis 可能报 `FT._LIST` 不存在
-  - Redis 连接需要配置密码和合适的 DB 编号
-  - 教程默认让 checkpoint / store 共用 db=0，通过不同 prefix 隔离
-  - TTL 策略：通过 Redis 的 EXPIRE 或定期清理过期 checkpoint
-"""
+from __future__ import annotations
 
 import asyncio
 import sys

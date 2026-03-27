@@ -41,10 +41,11 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 | 7 | `examples/02_state_deep_dive/03_message_state.py` | MessagesState 预置 schema | 对话场景标准状态 |
 | 8 | `examples/02_state_deep_dive/04_pydantic_state.py` | Pydantic 运行时校验 | 复杂状态建模 |
 | 9 | `examples/02_state_deep_dive/05_state_channels.py` | Channel 类型深入 | 理解底层状态机制 |
-| 10 | `examples/03_edges_and_routing/01_normal_edges.py` | 普通边、入口边、END 边 | 边的三种基本类型 |
-| 11 | `examples/03_edges_and_routing/02_conditional_edges.py` | 条件边、路由映射 dict | 动态路由是核心能力 |
-| 12 | `examples/03_edges_and_routing/03_multi_way_router.py` | 五路路由器 | 模拟 AgenticRAG 分流 |
-| 13 | `examples/03_edges_and_routing/04_loop_with_guard.py` | 循环边 + 迭代守卫 + fingerprint 检测 | 防止无限循环 |
+| 10 | `examples/02_state_deep_dive/06_state_vs_config_vs_context.py` | state / config / runtime context 边界 | 避免把 thread_id/trace_id 塞进业务 state |
+| 11 | `examples/03_edges_and_routing/01_normal_edges.py` | 普通边、入口边、END 边 | 边的三种基本类型 |
+| 12 | `examples/03_edges_and_routing/02_conditional_edges.py` | 条件边、路由映射 dict | 动态路由是核心能力 |
+| 13 | `examples/03_edges_and_routing/03_multi_way_router.py` | 五路路由器 | 模拟 AgenticRAG 分流 |
+| 14 | `examples/03_edges_and_routing/04_loop_with_guard.py` | 循环边 + 迭代守卫 + fingerprint 检测 | 防止无限循环 |
 
 建议：
 
@@ -65,10 +66,16 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 | 19 | `examples/05_checkpointing/02_conversation_threads.py` | 多线程对话、独立状态 | thread_id 隔离是多租户基础 |
 | 20 | `examples/05_checkpointing/03_time_travel.py` | get_state_history、从历史点分叉 | 调试和回溯的利器 |
 | 21 | `examples/05_checkpointing/04_redis_checkpointer.py` | AsyncRedisSaver、降级策略 | 生产级持久化边界 |
-| 22 | `examples/06_streaming/01_stream_values.py` | `values`：完整状态快照 | 调试和状态监控 |
-| 23 | `examples/06_streaming/02_stream_updates.py` | `updates`：节点级增量 | 前端状态同步 |
-| 24 | `examples/06_streaming/03_stream_events.py` | `astream_events()`：细粒度事件流 | trace / observability |
-| 25 | `examples/06_streaming/04_token_streaming.py` | `messages`：token 级流式 + SSE | 聊天界面逐字输出 |
+| 22 | `examples/05_checkpointing/05_checkpoint_schema_evolution.py` | state schema 演进兼容 | 避免旧 checkpoint 在升级后炸掉 |
+| 23 | `examples/05_checkpointing/06_subgraph_thread_strategy.py` | Global/Subtask thread_id 规范 | 父图与子图不能串 checkpoint |
+| 24 | `examples/05_checkpointing/07_idempotent_resume_side_effects.py` | 恢复后的副作用幂等 | execution_id 是关键防线 |
+| 25 | `examples/06_streaming/01_stream_values.py` | `values`：完整状态快照 | 调试和状态监控 |
+| 26 | `examples/06_streaming/02_stream_updates.py` | `updates`：节点级增量 | 前端状态同步 |
+| 27 | `examples/06_streaming/03_stream_events.py` | `astream_events()`：细粒度事件流 | trace / observability |
+| 28 | `examples/06_streaming/04_token_streaming.py` | `messages`：token 级流式 + SSE | 聊天界面逐字输出 |
+| 29 | `examples/06_streaming/05_sse_replay_and_heartbeat.py` | Last-Event-ID + heartbeat | 真实 SSE 主反馈语义 |
+| 30 | `examples/06_streaming/06_dual_channel_streaming.py` | token / progress 双通道 | 结构化事件不要和 token 混流 |
+| 31 | `examples/06_streaming/07_store_backed_event_replay.py` | store-backed event replay | token 流不能做 durable replay |
 
 这一阶段的关键口径：
 
@@ -83,18 +90,22 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 26 | `examples/07_subgraph_composition/01_subgraph_as_node.py` | 子图作为节点嵌入父图 | 图的模块化复用 |
-| 27 | `examples/07_subgraph_composition/02_state_mapping.py` | 父子图状态 schema 映射 | 解决状态不一致问题 |
-| 28 | `examples/07_subgraph_composition/03_command_handoff.py` | Command 原语跨图切换 | Agent 间 handoff |
-| 29 | `examples/07_subgraph_composition/04_nested_dual_graph.py` | 双图架构（Global + Subtask） | 直接模拟 AgenticRAG 双图 |
-| 30 | `examples/08_human_in_the_loop/03_dynamic_breakpoints.py` | 动态 `interrupt()` | 生产主线的人机协作 |
-| 31 | `examples/08_human_in_the_loop/04_approval_workflow.py` | 完整审批流 + Clarify | 企业级人机协作 |
-| 32 | `examples/08_human_in_the_loop/01_interrupt_before.py` | interrupt_before | 静态断点补充 |
-| 33 | `examples/08_human_in_the_loop/02_interrupt_after.py` | interrupt_after | 静态断点补充 |
-| 34 | `examples/09_error_and_resilience/01_safe_node_wrapper.py` | safe_node 装饰器 | 节点级错误隔离 |
-| 35 | `examples/09_error_and_resilience/02_retry_with_backoff.py` | 条件边重试 + 指数退避 | TRANSIENT/PERMANENT/DEGRADABLE |
-| 36 | `examples/09_error_and_resilience/03_fallback_chain.py` | 多级降级 | 非关键路径的优雅降级 |
-| 37 | `examples/09_error_and_resilience/04_escalation_protocol.py` | 子任务升级到全局循环 | 结构化升级协议 |
+| 32 | `examples/07_subgraph_composition/01_subgraph_as_node.py` | 子图作为节点嵌入父图 | 图的模块化复用 |
+| 33 | `examples/07_subgraph_composition/02_state_mapping.py` | 父子图状态 schema 映射 | 解决状态不一致问题 |
+| 34 | `examples/07_subgraph_composition/03_command_handoff.py` | Command 原语跨图切换 | Agent 间 handoff |
+| 35 | `examples/07_subgraph_composition/04_nested_dual_graph.py` | 双图架构（Global + Subtask） | 直接模拟 AgenticRAG 双图 |
+| 36 | `examples/07_subgraph_composition/05_command_parent_handoff.py` | `Command.PARENT` 控制权回收 | 子图如何把决策交回父图 |
+| 37 | `examples/08_human_in_the_loop/03_dynamic_breakpoints.py` | 动态 `interrupt()` | 生产主线的人机协作 |
+| 38 | `examples/08_human_in_the_loop/04_approval_workflow.py` | toy baseline 审批流 | 先理解 interrupt，再看结构化版 |
+| 39 | `examples/08_human_in_the_loop/05_structured_approval_contract.py` | 结构化审批恢复 | 企业审批不该用裸字符串 |
+| 40 | `examples/08_human_in_the_loop/06_clarify_with_timeout_default.py` | Clarify 默认项恢复 | 超时默认项必须显式可审计 |
+| 41 | `examples/08_human_in_the_loop/01_interrupt_before.py` | interrupt_before | 静态断点补充 |
+| 42 | `examples/08_human_in_the_loop/02_interrupt_after.py` | interrupt_after | 静态断点补充 |
+| 43 | `examples/09_error_and_resilience/01_safe_node_wrapper.py` | safe_node 装饰器 | 节点级错误隔离 |
+| 44 | `examples/09_error_and_resilience/02_retry_with_backoff.py` | 条件边重试 + 指数退避 | TRANSIENT/PERMANENT/DEGRADABLE |
+| 45 | `examples/09_error_and_resilience/03_fallback_chain.py` | 多级降级 | 非关键路径的优雅降级 |
+| 46 | `examples/09_error_and_resilience/04_escalation_protocol.py` | 子任务升级到全局循环 | 结构化升级协议 |
+| 47 | `examples/09_error_and_resilience/05_retry_policy_and_cache_policy.py` | 内置 retry/cache policy | 不只会手写 retry/fallback |
 
 重点提醒：
 
@@ -108,21 +119,28 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 38 | `examples/10_multi_agent/01_supervisor_pattern.py` | Supervisor 中心调度 | 最常用的多 Agent 模式 |
-| 39 | `examples/10_multi_agent/02_swarm_pattern.py` | Swarm 去中心化协作 | Agent 自主 handoff |
-| 40 | `examples/10_multi_agent/03_plan_execute_replan.py` | Plan-Execute-Replan 循环 | 模拟 AgenticRAG 全局循环 |
-| 41 | `examples/10_multi_agent/04_hierarchical_agents.py` | 两层 Agent：全局调度 + 子任务执行 | 大规模 Agent 组织 |
-| 42 | `examples/10_multi_agent/05_blackboard_pattern.py` | 黑板模式 | 共享状态协调 |
-| 43 | `examples/11_dynamic_and_parallel/01_send_api_fanout.py` | Send API 动态 fan-out | 运行时决定并行数量 |
-| 44 | `examples/11_dynamic_and_parallel/02_send_vs_command.py` | Send vs Command 对比 | 一对多 vs 一对一 |
-| 45 | `examples/11_dynamic_and_parallel/03_configurable_graph.py` | configurable | 同图多配置变体 |
-| 46 | `examples/11_dynamic_and_parallel/04_map_reduce_aggregation.py` | 并行执行后聚合结果 | map-reduce 模式 |
-| 47 | `examples/12_memory_and_store/01_short_term_memory.py` | Graph State 作为短期记忆 | 消息窗口管理、摘要压缩 |
-| 48 | `examples/12_memory_and_store/02_long_term_store.py` | Store 跨线程长期记忆 | namespace 隔离、KV 存储 |
-| 49 | `examples/12_memory_and_store/03_multi_layer_memory.py` | 五层记忆架构（L1-L5） | 短期+长期+外部协同 |
-| 50 | `examples/13_functional_api/01_entrypoint_basics.py` | @entrypoint 工作流入口 | 原生 if/for 控制流 |
-| 51 | `examples/13_functional_api/02_task_decorator.py` | @task 可检查点子任务 | 自动 checkpoint |
-| 52 | `examples/13_functional_api/03_functional_vs_graph.py` | Functional vs Graph API 并排对比 | 何时用哪种 API |
+| 48 | `examples/10_multi_agent/01_supervisor_pattern.py` | toy baseline Supervisor | 先理解控制平面概念 |
+| 49 | `examples/10_multi_agent/02_swarm_pattern.py` | Swarm 去中心化协作 | Agent 自主 handoff |
+| 50 | `examples/10_multi_agent/03_plan_execute_replan.py` | toy baseline Plan-Execute-Replan | 先理解循环形状 |
+| 51 | `examples/10_multi_agent/04_hierarchical_agents.py` | toy baseline 双图 | 先理解父图调子图 |
+| 52 | `examples/10_multi_agent/05_blackboard_pattern.py` | 黑板模式 | 共享状态协调 |
+| 53 | `examples/10_multi_agent/06_supervisor_with_subgraphs.py` | 真实版 graph worker | 子 agent 也是图 |
+| 54 | `examples/10_multi_agent/07_replan_with_fingerprint.py` | 结构化 planner + fingerprint | replan 不能只靠 iteration |
+| 55 | `examples/10_multi_agent/08_partial_plan_reuse.py` | 部分结果复用 | replan 不是推倒重来 |
+| 56 | `examples/11_dynamic_and_parallel/01_send_api_fanout.py` | Send API 动态 fan-out | 运行时决定并行数量 |
+| 54 | `examples/11_dynamic_and_parallel/02_send_vs_command.py` | Send vs Command 对比 | 一对多 vs 一对一 |
+| 55 | `examples/11_dynamic_and_parallel/03_configurable_graph.py` | configurable | 同图多配置变体 |
+| 56 | `examples/11_dynamic_and_parallel/04_map_reduce_aggregation.py` | 并行执行后聚合结果 | map-reduce 模式 |
+| 60 | `examples/12_memory_and_store/01_short_term_memory.py` | Graph State 作为短期记忆 | 消息窗口管理、摘要压缩 |
+| 61 | `examples/12_memory_and_store/02_long_term_store.py` | Store 跨线程长期记忆 | namespace 隔离、KV 存储 |
+| 62 | `examples/12_memory_and_store/03_multi_layer_memory.py` | 五层记忆架构（L1-L5） | 短期+长期+外部协同 |
+| 63 | `examples/12_memory_and_store/04_state_vs_store_boundary.py` | state/store 边界 | 大对象不要进 checkpoint |
+| 64 | `examples/12_memory_and_store/05_store_namespace_and_recall.py` | namespace 设计 | 租户与用户隔离 |
+| 65 | `examples/12_memory_and_store/06_tool_with_injected_store.py` | InjectedStore/InjectedState | tool 的系统参数注入 |
+| 66 | `examples/12_memory_and_store/07_store_lifecycle_management.py` | Store 生命周期 | 覆盖、删除、冷数据清理 |
+| 67 | `examples/13_functional_api/01_entrypoint_basics.py` | @entrypoint 工作流入口 | 原生 if/for 控制流 |
+| 68 | `examples/13_functional_api/02_task_decorator.py` | @task 可检查点子任务 | 自动 checkpoint |
+| 69 | `examples/13_functional_api/03_functional_vs_graph.py` | Functional vs Graph API 并排对比 | 何时用哪种 API |
 
 这一阶段最重要的边界：
 
@@ -137,18 +155,22 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 
 | 顺序 | 文件 | 学什么 | 为什么在这里 |
 |------|------|--------|-------------|
-| 53 | `examples/14_testing_and_debugging/01_unit_test_nodes.py` | 节点函数单元测试 | 节点是纯函数，最小测试粒度 |
-| 54 | `examples/14_testing_and_debugging/02_integration_test_graph.py` | 完整图集成测试 | 端到端验证图行为 |
-| 55 | `examples/14_testing_and_debugging/03_mock_llm.py` | FakeListChatModel Mock | 无需 API key 的确定性测试 |
-| 56 | `examples/14_testing_and_debugging/04_debug_visualization.py` | state + Mermaid 调试 | 运行时状态追踪 |
-| 57 | `examples/15_production_deployment/01_fastapi_sse_integration.py` | FastAPI + SSE | Web 服务部署 |
-| 58 | `examples/15_production_deployment/02_observability.py` | 结构化日志 + trace ID | 生产可观测性 |
-| 59 | `examples/15_production_deployment/03_double_texting.py` | 重复请求处理策略 | 并发安全 |
-| 60 | `examples/15_production_deployment/04_graceful_shutdown.py` | signal handler + checkpoint | 零丢失停机 |
-| 61 | `examples/16_agentic_rag_patterns/01_global_graph_skeleton.py` | GlobalState + 等待态恢复 | AgenticRAG 顶层编排 |
-| 62 | `examples/16_agentic_rag_patterns/02_subtask_graph_skeleton.py` | SubtaskState + loop guard | 检索/生成子图 |
-| 63 | `examples/16_agentic_rag_patterns/03_celery_bridge.py` | dispatch + waiting + resume | 异步任务卸载 |
-| 64 | `examples/16_agentic_rag_patterns/04_dag_dispatch_pattern.py` | READY batch dispatch | 多步检索 DAG 编排 |
+| 70 | `examples/14_testing_and_debugging/01_unit_test_nodes.py` | 节点函数单元测试 | 节点是纯函数，最小测试粒度 |
+| 71 | `examples/14_testing_and_debugging/02_integration_test_graph.py` | 完整图集成测试 | 端到端验证图行为 |
+| 72 | `examples/14_testing_and_debugging/03_mock_llm.py` | fake tool call / 结构化输出 / resume | 更接近真实测试矩阵 |
+| 73 | `examples/14_testing_and_debugging/04_debug_visualization.py` | state + Mermaid 调试 | 运行时状态追踪 |
+| 74 | `examples/14_testing_and_debugging/05_resume_and_replay_tests.py` | resume/replay/stale guard | 恢复链路回归测试 |
+| 75 | `examples/15_production_deployment/01_fastapi_sse_integration.py` | FastAPI + SSE | heartbeat / replay / Last-Event-ID / store-backed events |
+| 76 | `examples/15_production_deployment/02_observability.py` | 结构化日志 + trace ID | async-safe 可观测性 |
+| 77 | `examples/15_production_deployment/03_double_texting.py` | 同线程等待态重复请求 | reject/enqueue/interrupt/idempotency |
+| 78 | `examples/15_production_deployment/04_graceful_shutdown.py` | signal handler + checkpoint | 零丢失停机 |
+| 79 | `examples/16_agentic_rag_patterns/01_global_graph_skeleton.py` | GlobalState + Clarify/Subtask 等待链路 | AgenticRAG 顶层编排 |
+| 80 | `examples/16_agentic_rag_patterns/02_subtask_graph_skeleton.py` | SubtaskState + WorkerResultEnvelope | 检索/生成子图 |
+| 81 | `examples/16_agentic_rag_patterns/03_celery_bridge.py` | dispatch + waiting + accepted/stale + duplicate resume | 异步任务卸载 |
+| 82 | `examples/16_agentic_rag_patterns/04_dag_dispatch_pattern.py` | READY batch dispatch | 多步检索 DAG 编排 |
+| 83 | `examples/16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py` | 控制面 vs runtime state | checkpoint 不是业务真理源 |
+| 84 | `examples/16_agentic_rag_patterns/06_resume_orchestrator_contract.py` | result accepted -> resume | 薄恢复器契约 |
+| 85 | `examples/16_agentic_rag_patterns/07_stale_result_fencing.py` | stale result fencing | execution_id 防旧结果污染 |
 
 > 16 章是全教程的综合实战，建议前 15 章全部完成后再进入。直接对应 `案例/用户AgenticRAG检索/技术拆解.md`。
 
@@ -200,6 +222,8 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
    - 切换 `stream_mode`
    - 更换 `thread_id`
    - 调整 `Send` fan-out 数量
+   - 改 `execution_id` 看 stale fencing 是否生效
+   - 改 `Last-Event-ID` 看 SSE replay 是否只回放未消费事件
 5. 最后用 `smoke/run_all_examples.py` 验证全部通过
 
 ## Async-First 阅读建议

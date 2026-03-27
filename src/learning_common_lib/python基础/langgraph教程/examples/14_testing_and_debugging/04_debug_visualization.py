@@ -1,22 +1,32 @@
-"""调试技巧：状态检查、Mermaid 图
+"""
+调试技巧：状态检查、Mermaid 图
 
-目标：
+目标:
     演示 LangGraph 的调试工具：运行时状态检查、Mermaid 图可视化、
     步骤追踪等实用调试技巧。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - graph.get_state(config) —— 获取当前状态快照
     - graph.get_state_history(config) —— 获取状态历史
     - graph.get_graph().draw_mermaid() —— 生成 Mermaid 图
     - stream mode "debug" —— 详细调试信息
 
-运行命令：
-    python 04_debug_visualization.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/14_testing_and_debugging/04_debug_visualization.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/14_testing_and_debugging/04_debug_visualization.py
+
+预期现象:
     输出 Mermaid 图定义、状态快照、执行历史等调试信息。
 
-生产提醒：
+生产提醒:
     - Mermaid 图可粘贴到 GitHub/Notion 等支持 Mermaid 的平台渲染
     - get_state_history 在大量 checkpoint 时可能较慢，建议限制查询范围
     - 生产环境建议集成 LangSmith 进行全链路追踪

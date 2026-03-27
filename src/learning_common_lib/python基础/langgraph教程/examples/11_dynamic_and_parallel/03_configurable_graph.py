@@ -1,20 +1,30 @@
-"""运行时配置切换图行为
+"""
+运行时配置切换图行为
 
-目标：
+目标:
     演示通过 configurable 字段在运行时动态切换图的行为，
     同一张图可以根据不同配置产生不同的执行路径和结果。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - RunnableConfig["configurable"] —— 运行时配置字典
     - graph.ainvoke(state, config={"configurable": {...}})
 
-运行命令：
-    python 03_configurable_graph.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/11_dynamic_and_parallel/03_configurable_graph.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/11_dynamic_and_parallel/03_configurable_graph.py
+
+预期现象:
     同一张图分别以 "详细模式" 和 "简洁模式" 运行，输出不同风格的结果。
 
-生产提醒：
+生产提醒:
     - configurable 适合 A/B 测试、多租户配置、模型切换等场景
     - 配置值在整个图执行期间保持不变，所有节点共享同一份 config
     - 生产环境建议对 configurable 字段做 schema 校验

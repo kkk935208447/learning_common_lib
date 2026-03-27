@@ -166,6 +166,7 @@ graph.astream_events(..., version="v2")
 
 - 旧文档里常把“events”直接和 stream_mode 并列
 - 当前教程明确区分：`astream_events()` 是事件追踪接口，不是默认聊天流式接口
+- 当前教程还额外强调：token 流只负责即时渲染，`store-backed progress events` 才是 replay 真理源
 
 ## 6. 多 Agent 模式架构图
 
@@ -218,6 +219,8 @@ graph.astream_events(..., version="v2")
 - 大多数企业场景优先 `Supervisor` / `GlobalGraph`
 - `Swarm` 作为 handoff 思路补充
 - 双图架构用于复杂 AgenticRAG
+- 真实版 graph worker 见 `10_multi_agent/06_supervisor_with_subgraphs.py`
+- 子图把控制权交回父图时，参考 `07_subgraph_composition/05_command_parent_handoff.py`
 
 ## 7. AgenticRAG 双图架构详细图
 
@@ -229,19 +232,23 @@ graph.astream_events(..., version="v2")
 ```text
 ┌────────────────── GlobalGraph（控制平面）──────────────────┐
 │  GlobalState:                                             │
-│    task_id / request_id / waiting_reason / next_action    │
+│    task_id / request_id / waiting_reason / current_execution_id │
+│    latest_result_ref / next_action                        │
 │                                                           │
-│  planner → clarify → scheduler → finalize → output        │
-│                │                │                         │
-│                │                └─ dispatch / wait / resume│
+│  planner → clarify → scheduler → wait_subtasks → step_gate│
+│                │                │               │          │
+│                │                └─ dispatch ----┘          │
+│                └─ WAITING_CLARIFICATION                    │
+│                              finalize → output            │
 └──────────────────────────────┬────────────────────────────┘
                                │
                                ▼
 ┌────────────────── SubtaskGraph（局部执行平面）──────────────┐
 │  SubtaskState:                                            │
-│    subtask_code / query / retry_count / quality_score     │
+│    subtask_code / execution_id / query / evidence_ref     │
+│    eval_score / result_envelope                           │
 │                                                           │
-│  route → retrieve → evaluate → retry / complete / escalate│
+│  prepare → retrieve → evaluate → complete / escalate      │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -298,21 +305,21 @@ node_A → node_B → [暂停] → END
 | 核心概念 | 教程文件 | 模板文件 |
 |----------|----------|----------|
 | StateGraph 基础 | `01_graph_fundamentals/01-04` | `templates/graph_builder.py` |
-| TypedDict / reducer | `02_state_deep_dive/01-05` | `templates/state_schemas.py` |
+| TypedDict / reducer / state-config-context 边界 | `02_state_deep_dive/01-06` | `templates/state_schemas.py` |
 | 条件边路由 | `03_edges_and_routing/01-04` | — |
 | 工具调用 | `04_tool_calling/01-04` | — |
-| Checkpoint 持久化 | `05_checkpointing/01-04` | `templates/checkpoint_manager.py` |
-| 流式输出 | `06_streaming/01-04` | `templates/fastapi_graph_app.py` |
-| 子图组合 | `07_subgraph_composition/01-04` | — |
-| 人机协作 | `08_human_in_the_loop/01-04` | — |
-| 错误处理 | `09_error_and_resilience/01-04` | `templates/safe_node.py` |
-| 多 Agent | `10_multi_agent/01-05` | `templates/multi_agent_orchestrator.py` |
+| Checkpoint 持久化 / schema 演进 / 幂等恢复 | `05_checkpointing/01-07` | `templates/checkpoint_manager.py` |
+| 流式输出 / replay / dual channel | `06_streaming/01-07` | `templates/fastapi_graph_app.py` |
+| 子图组合 / `Command.PARENT` | `07_subgraph_composition/01-05` | — |
+| 人机协作 / 结构化审批 / Clarify 默认项 | `08_human_in_the_loop/01-06` | — |
+| 错误处理 / RetryPolicy / CachePolicy | `09_error_and_resilience/01-05` | `templates/safe_node.py` |
+| 多 Agent / graph worker / partial reuse | `10_multi_agent/01-08` | `templates/multi_agent_orchestrator.py` |
 | 动态并行 | `11_dynamic_and_parallel/01-04` | — |
-| 记忆系统 | `12_memory_and_store/01-03` | — |
+| 记忆系统 / InjectedStore / Store 生命周期 | `12_memory_and_store/01-07` | `templates/store_manager.py` |
 | 函数式 API | `13_functional_api/01-03` | — |
-| 测试调试 | `14_testing_and_debugging/01-04` | — |
+| 测试调试 / resume/replay 测试 | `14_testing_and_debugging/01-05` | — |
 | 生产部署 | `15_production_deployment/01-04` | `templates/fastapi_graph_app.py` |
-| AgenticRAG | `16_agentic_rag_patterns/01-04` | `templates/celery_graph_bridge.py` |
+| AgenticRAG / 控制面恢复 / stale fencing | `16_agentic_rag_patterns/01-07` | `templates/celery_graph_bridge.py` |
 
 ## 10. Graph API vs Functional API 对比
 

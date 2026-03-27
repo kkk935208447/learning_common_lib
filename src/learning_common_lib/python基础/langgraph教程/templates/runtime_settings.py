@@ -1,7 +1,27 @@
-"""Redis-first 运行时配置。
+"""
+Redis-first 运行时配置。
 
-为生产章节和模板提供统一的 Redis / thread_id / key prefix 约定，
-保持配置集中且易读，不引入复杂配置框架。
+目标:
+    Redis-first 运行时配置。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: templates/runtime_settings.py
+
+运行方式:
+    - 通常作为模块导入，不建议单独运行
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
 from __future__ import annotations
 

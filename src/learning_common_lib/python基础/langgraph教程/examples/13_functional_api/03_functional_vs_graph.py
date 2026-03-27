@@ -1,20 +1,30 @@
-"""函数式 vs Graph API 对比
+"""
+函数式 vs Graph API 对比
 
-目标：
+目标:
     用同一个工作流（文本处理管道）分别用 Functional API 和 Graph API 实现，
     对比两种风格的代码结构、适用场景和取舍。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - Functional: @entrypoint + @task
     - Graph: StateGraph + add_node + add_edge
 
-运行命令：
-    python 03_functional_vs_graph.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/13_functional_api/03_functional_vs_graph.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/13_functional_api/03_functional_vs_graph.py
+
+预期现象:
     两种实现产生相同的输出结果，但代码风格截然不同。
 
-生产提醒：
+生产提醒:
     - 简单线性/分支流程 → Functional API（代码更简洁）
     - 复杂拓扑（循环、并行、子图）→ Graph API（更灵活）
     - 两种 API 可以混用：Graph 节点内部调用 @task

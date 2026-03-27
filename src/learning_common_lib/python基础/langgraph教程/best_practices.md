@@ -5,6 +5,7 @@
 ## 1. 状态设计
 
 - 最小化状态：只存必要字段，大对象用引用（ID/URL/外部工件 ref）而非内联
+- 把 `thread_id` / `tenant_id` / `trace_id` 放到 config/context，不要混进业务 state
 - 不可变更新：节点返回增量 `dict`，不要直接修改 state
 - TypedDict 用 `total=False` 标记可选字段，避免初始化时缺字段报错
 - Reducer 选择：
@@ -93,6 +94,8 @@ graph.add_edge("tools", "llm")
 - 开发 / 测试：`MemorySaver`
 - 生产环境：Redis / Postgres 类后端
 - `thread_id` 命名必须带业务语义
+- checkpoint 是运行时恢复点，不是业务真理源
+- state schema 演进时，新节点必须为缺失字段补默认值
 - Redis checkpoint 要明确环境前提：
   - 安装 `langgraph-checkpoint-redis`
   - Redis 具备 RediSearch / Redis Stack 能力
@@ -122,6 +125,9 @@ async for chunk, metadata in graph.astream(inputs, stream_mode="messages"):
 SSE 端点建议：
 
 - 15-30s 心跳
+- 支持 `Last-Event-ID`
+- 结构化业务事件持久化后再回放，不只依赖 token 流
+- token stream 负责即时渲染，progress event 负责 durable replay
 - `Cache-Control: no-cache`
 - `X-Accel-Buffering: no`
 - 并发限制使用 `asyncio.Semaphore`
@@ -133,6 +139,7 @@ SSE 端点建议：
 - 父图与子图职责边界要清晰：
   - 父图负责控制面
   - 子图负责局部执行闭环
+- 当子图需要把决策权交回父图时，优先考虑 `Command(graph=Command.PARENT, ...)`
 - 子图调用也建议 async-first：
 
 ```python
@@ -146,8 +153,8 @@ sub_result = await sub_graph.ainvoke(sub_input)
 - `interrupt_after` 用于固定结果审核点
 - 恢复时必须带相同 `thread_id`
 - 审批流设计：
-  - `interrupt(payload)`
-  - 用户输入
+  - `interrupt(payload)` 返回结构化请求
+  - 用户输入结构化 decision / clarify reply
   - `Command(resume=value)`
   - 从 checkpoint 恢复继续执行
 
@@ -157,6 +164,7 @@ sub_result = await sub_graph.ainvoke(sub_input)
   - TRANSIENT：可重试
   - PERMANENT：不可重试
   - DEGRADABLE：可降级
+- 手写 retry/fallback 之外，也要知道节点级 `RetryPolicy` / `CachePolicy`
 - 错误统一写回 `state["error"]`
 - 路由函数依据错误字段决定 retry / fallback / escalate
 - 使用指数退避控制重试节奏
@@ -173,6 +181,7 @@ return {"next_action": "fallback", "error": str(exc)}
 
 - 单控制平面原则：一个 Supervisor / GlobalGraph 负责推进决策
 - Worker 间默认不直接通信，通过共享状态或外部工件协调
+- 真实项目里，worker 更适合是“子图”，而不是一个裸函数
 - Plan-Execute-Replan 要设 `max_replan_count`
 - 双图架构是复杂 AgenticRAG 的主力模式
 - 黑板模式要约束“每个 Agent 只写自己的字段”
@@ -186,6 +195,7 @@ return {"next_action": "fallback", "error": str(exc)}
   3. worker 外部回写结果
   4. 同 `thread_id` 恢复图执行
 - `resume_orchestrator` 是“薄同步包装 + async 恢复逻辑”
+- 外部 worker 回写时至少校验 `execution_id`，避免 stale result 污染当前计划
 
 ```python
 async def dispatch_node(state: dict) -> dict:

@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 04_approval_workflow
 
+目标:
+    完整审批流 + Clarify 模式（toy baseline）
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt + Command(resume=...)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/04_approval_workflow.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/04_approval_workflow.py
+
+预期现象:
+    请求进入审批流，审批者可批准/拒绝/要求澄清，澄清后重新提交
+
+生产提醒:
+    审批流是企业级 Agent 的核心模式，需要持久化 checkpointer 保证状态不丢失
 """
-目标: 完整审批流 + Clarify 模式，参考 AgenticRAG 的 clarification_source 机制
-关键 API: interrupt + Command(resume=...)
-运行命令: python 04_approval_workflow.py
-预期现象: 请求进入审批流，审批者可批准/拒绝/要求澄清，澄清后重新提交
-生产提醒: 审批流是企业级 Agent 的核心模式，需要持久化 checkpointer 保证状态不丢失
-"""
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 

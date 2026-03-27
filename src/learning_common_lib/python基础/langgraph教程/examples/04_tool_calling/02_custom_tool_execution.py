@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+04_tool_calling / 02_custom_tool_execution
 
+目标:
+    手动解析 tool_calls 并执行，理解 ToolMessage 构造细节
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    AIMessage.tool_calls, ToolMessage(tool_call_id=...)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/04_tool_calling/02_custom_tool_execution.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/04_tool_calling/02_custom_tool_execution.py
+
+预期现象:
+    1. 手动解析 AIMessage 中的 tool_calls
+    2. 根据工具名称路由到对应函数并执行
+    3. 构造 ToolMessage 并回传，演示多工具并行调用
+
+生产提醒:
+    - tool_call_id 必须与 AIMessage 中的 id 一一对应，否则 LLM 无法关联结果
+    - 并行调用多个工具时，所有 ToolMessage 应一次性追加到消息列表
 """
-目标：手动解析 tool_calls 并执行，理解 ToolMessage 构造细节
-关键 API：AIMessage.tool_calls, ToolMessage(tool_call_id=...)
-运行命令：python 02_custom_tool_execution.py
-预期现象：
-  1. 手动解析 AIMessage 中的 tool_calls
-  2. 根据工具名称路由到对应函数并执行
-  3. 构造 ToolMessage 并回传，演示多工具并行调用
-生产提醒：
-  - tool_call_id 必须与 AIMessage 中的 id 一一对应，否则 LLM 无法关联结果
-  - 并行调用多个工具时，所有 ToolMessage 应一次性追加到消息列表
-"""
+from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool

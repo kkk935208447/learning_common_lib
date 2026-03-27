@@ -1,22 +1,32 @@
-"""DAG 调度：READY 批次分发 + 结果回收
+"""
+DAG 调度：READY 批次分发 + 结果回收
 
-目标：
+目标:
     演示 AgenticRAG 的 DAG 调度模式：
     compute_ready_codes 找出可执行节点 → claim 认领 → dispatch 分发 → 结果回收。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - compute_ready_codes —— 计算 READY 状态的节点
     - claim —— 认领节点（防止重复执行）
     - Send API —— 由路由函数并行分发 READY 节点
 
-运行命令：
-    python 04_dag_dispatch_pattern.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/16_agentic_rag_patterns/04_dag_dispatch_pattern.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/16_agentic_rag_patterns/04_dag_dispatch_pattern.py
+
+预期现象:
     DAG 按拓扑顺序分批执行：先执行无依赖的节点，
     完成后解锁下游节点，直到所有节点完成。
 
-生产提醒：
+生产提醒:
     - claim 操作需要原子性（生产环境用 Redis 分布式锁）
     - 每批 dispatch 后需要等待所有结果回收再计算下一批
     - DAG 指纹用于检测拓扑变化，避免重复执行

@@ -1,4 +1,30 @@
-"""Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。"""
+"""
+Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。
+
+目标:
+    Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: smoke/run_all_examples.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        env LANGGRAPH_STRICT_REDIS=1 uv run python smoke/run_all_examples.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
+"""
 from __future__ import annotations
 
 import os
@@ -13,10 +39,39 @@ INTEGRATION_EXAMPLES = {
     "16_agentic_rag_patterns/03_celery_bridge.py",
 }
 
+REALISTIC_MULTI_AGENT_EXAMPLES = {
+    "07_subgraph_composition/05_command_parent_handoff.py",
+    "10_multi_agent/06_supervisor_with_subgraphs.py",
+    "10_multi_agent/07_replan_with_fingerprint.py",
+    "10_multi_agent/08_partial_plan_reuse.py",
+}
+
+RESUME_RECOVERY_EXAMPLES = {
+    "05_checkpointing/05_checkpoint_schema_evolution.py",
+    "05_checkpointing/06_subgraph_thread_strategy.py",
+    "05_checkpointing/07_idempotent_resume_side_effects.py",
+    "06_streaming/07_store_backed_event_replay.py",
+    "08_human_in_the_loop/05_structured_approval_contract.py",
+    "08_human_in_the_loop/06_clarify_with_timeout_default.py",
+    "09_error_and_resilience/05_retry_policy_and_cache_policy.py",
+    "12_memory_and_store/07_store_lifecycle_management.py",
+    "14_testing_and_debugging/05_resume_and_replay_tests.py",
+    "15_production_deployment/03_double_texting.py",
+    "16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py",
+    "16_agentic_rag_patterns/06_resume_orchestrator_contract.py",
+    "16_agentic_rag_patterns/07_stale_result_fencing.py",
+}
+
 
 def classify_example(rel_path: str) -> str:
     """按教程维度给示例分类。"""
-    return "integration" if rel_path in INTEGRATION_EXAMPLES else "core"
+    if rel_path in INTEGRATION_EXAMPLES:
+        return "integration"
+    if rel_path in REALISTIC_MULTI_AGENT_EXAMPLES:
+        return "realistic_multi_agent"
+    if rel_path in RESUME_RECOVERY_EXAMPLES:
+        return "resume_recovery"
+    return "core"
 
 
 def validate_integration_output(rel_path: str, stdout: str) -> str | None:
@@ -46,6 +101,8 @@ def run_all() -> dict[str, list]:
     kind_summary = {
         "core": {"passed": 0, "failed": 0, "skipped": 0},
         "integration": {"passed": 0, "failed": 0, "skipped": 0},
+        "realistic_multi_agent": {"passed": 0, "failed": 0, "skipped": 0},
+        "resume_recovery": {"passed": 0, "failed": 0, "skipped": 0},
     }
 
     if not examples_dir.exists():

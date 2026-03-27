@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+05_checkpointing / 01_memory_saver
 
+目标:
+    演示 MemorySaver 内存 checkpointer 的基本用法和 thread_id 隔离
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    MemorySaver, config={"configurable": {"thread_id": ...}}
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/01_memory_saver.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/01_memory_saver.py
+
+预期现象:
+    1. 同一 thread_id 下多次调用，状态自动累积
+    2. 不同 thread_id 之间状态完全隔离
+    3. 每个 superstep 自动保存 checkpoint
+
+生产提醒:
+    - MemorySaver 仅存储在内存中，进程重启后数据丢失
+    - 生产环境应使用 AsyncRedisSaver 等持久化方案
+    - thread_id 是字符串，建议使用有意义的命名（如 user:123:session:456）
 """
-目标：演示 MemorySaver 内存 checkpointer 的基本用法和 thread_id 隔离
-关键 API：MemorySaver, config={"configurable": {"thread_id": ...}}
-运行命令：python 01_memory_saver.py
-预期现象：
-  1. 同一 thread_id 下多次调用，状态自动累积
-  2. 不同 thread_id 之间状态完全隔离
-  3. 每个 superstep 自动保存 checkpoint
-生产提醒：
-  - MemorySaver 仅存储在内存中，进程重启后数据丢失
-  - 生产环境应使用 AsyncRedisSaver 等持久化方案
-  - thread_id 是字符串，建议使用有意义的命名（如 user:123:session:456）
-"""
+from __future__ import annotations
 
 import asyncio
 

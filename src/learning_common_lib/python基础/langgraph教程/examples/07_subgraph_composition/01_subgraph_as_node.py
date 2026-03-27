@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+07_subgraph_composition / 01_subgraph_as_node
 
+目标:
+    演示将编译后的子图作为父图节点使用
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    add_node("sub", compiled_subgraph)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/07_subgraph_composition/01_subgraph_as_node.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/07_subgraph_composition/01_subgraph_as_node.py
+
+预期现象:
+    父图依次执行 pre → 子图(step1→step2) → post，打印完整执行链路
+
+生产提醒:
+    子图独立编译后拥有独立状态空间，父子图通过重叠 key 共享数据
 """
-目标: 演示将编译后的子图作为父图节点使用
-关键 API: add_node("sub", compiled_subgraph)
-运行命令: python 01_subgraph_as_node.py
-预期现象: 父图依次执行 pre → 子图(step1→step2) → post，打印完整执行链路
-生产提醒: 子图独立编译后拥有独立状态空间，父子图通过重叠 key 共享数据
-"""
+from __future__ import annotations
 
 import operator
 from typing import Annotated, TypedDict
