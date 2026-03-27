@@ -1,19 +1,35 @@
+"""
+12_memory_and_store / 07_store_lifecycle_management
+
+目标:
+    演示 Store 数据的生命周期管理，而不只是 put/get/search。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    put/get/search/delete
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/07_store_lifecycle_management.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/07_store_lifecycle_management.py
+
+预期现象:
+    1. 初次写入用户偏好
+    2. 覆盖更新版本号
+    3. 删除过时记录
+    4. 打印每一步前后的 namespace 内容
+
+生产提醒:
+    - Store 不只是“能存下来”，还要考虑覆盖策略、删除策略和冷数据清理
+    - 生命周期管理越明确，越不容易把 Store 变成无限增长的垃圾堆
+"""
 from __future__ import annotations
-
-"""
-目标：演示 Store 数据的生命周期管理，而不只是 put/get/search。
-关键 API：put/get/search/delete
-运行命令：python 07_store_lifecycle_management.py
-预期现象：
-  1. 初次写入用户偏好
-  2. 覆盖更新版本号
-  3. 删除过时记录
-  4. 打印每一步前后的 namespace 内容
-
-生产提醒：
-  - Store 不只是“能存下来”，还要考虑覆盖策略、删除策略和冷数据清理
-  - 生命周期管理越明确，越不容易把 Store 变成无限增长的垃圾堆
-"""
 
 from langgraph.store.memory import InMemoryStore
 

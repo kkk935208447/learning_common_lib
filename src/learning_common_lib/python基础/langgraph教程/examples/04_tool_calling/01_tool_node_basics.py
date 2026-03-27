@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+04_tool_calling / 01_tool_node_basics
 
+目标:
+    演示 @tool 定义、手动执行 tool_call，以及在 StateGraph 中集成 ToolNode
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    @tool, ChatModel.bind_tools, ToolNode
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/04_tool_calling/01_tool_node_basics.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/04_tool_calling/01_tool_node_basics.py
+
+预期现象:
+    1. 打印工具 schema（JSON 格式）
+    2. FakeLLM 返回带 tool_calls 的 AIMessage
+    3. 手动执行 tool_call，理解底层消息结构
+    4. 在 StateGraph 中集成 ToolNode，展示生产中的常见写法
+
+生产提醒:
+    - 真实场景请替换 FakeListChatModel 为 ChatOpenAI / ChatAnthropic
+    - @tool 的 docstring 会作为工具描述传给 LLM，务必写清楚
 """
-目标：演示 @tool 定义、手动执行 tool_call，以及在 StateGraph 中集成 ToolNode
-关键 API：@tool, ChatModel.bind_tools, ToolNode
-运行命令：python 01_tool_node_basics.py
-预期现象：
-  1. 打印工具 schema（JSON 格式）
-  2. FakeLLM 返回带 tool_calls 的 AIMessage
-  3. 手动执行 tool_call，理解底层消息结构
-  4. 在 StateGraph 中集成 ToolNode，展示生产中的常见写法
-生产提醒：
-  - 真实场景请替换 FakeListChatModel 为 ChatOpenAI / ChatAnthropic
-  - @tool 的 docstring 会作为工具描述传给 LLM，务必写清楚
-"""
+from __future__ import annotations
 
 import asyncio
 import json

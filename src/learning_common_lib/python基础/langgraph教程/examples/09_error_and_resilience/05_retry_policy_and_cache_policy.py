@@ -1,18 +1,34 @@
+"""
+09_error_and_resilience / 05_retry_policy_and_cache_policy
+
+目标:
+    演示 LangGraph 内置 `RetryPolicy` 和 `CachePolicy`。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph.add_node(..., retry_policy=..., cache_policy=...)、InMemoryCache
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/09_error_and_resilience/05_retry_policy_and_cache_policy.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/09_error_and_resilience/05_retry_policy_and_cache_policy.py
+
+预期现象:
+    1. 不稳定节点第一次失败，`RetryPolicy` 自动重试后成功
+    2. 昂贵节点首次运行后写入缓存，同样输入第二次执行直接命中缓存
+
+生产提醒:
+    - `RetryPolicy` 适合处理真正可重试的异常，不要替代业务级 fallback
+    - `CachePolicy` 只适合纯函数/幂等节点，避免缓存带副作用的节点
+    - 本例用全局计数器打印中间态，方便观察自动重试和缓存命中
+"""
 from __future__ import annotations
-
-"""
-目标：演示 LangGraph 内置 `RetryPolicy` 和 `CachePolicy`。
-关键 API：StateGraph.add_node(..., retry_policy=..., cache_policy=...)、InMemoryCache
-运行命令：python 05_retry_policy_and_cache_policy.py
-预期现象：
-  1. 不稳定节点第一次失败，`RetryPolicy` 自动重试后成功
-  2. 昂贵节点首次运行后写入缓存，同样输入第二次执行直接命中缓存
-
-生产提醒：
-  - `RetryPolicy` 适合处理真正可重试的异常，不要替代业务级 fallback
-  - `CachePolicy` 只适合纯函数/幂等节点，避免缓存带副作用的节点
-  - 本例用全局计数器打印中间态，方便观察自动重试和缓存命中
-"""
 
 import asyncio
 from typing import TypedDict

@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+10_multi_agent / 06_supervisor_with_subgraphs
 
+目标:
+    演示 Supervisor 选择“子图 worker”，而不是普通函数。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph 嵌套、结构化 WorkerResultEnvelope
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/06_supervisor_with_subgraphs.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/06_supervisor_with_subgraphs.py
+
+预期现象:
+    1. Supervisor 先把任务派给 research 子图
+    2. 再把结果交给 reviewer 子图
+    3. reviewer 可返回 COMPLETED 或 ESCALATED
+
+生产提醒:
+    - 真正的 multi-agent 中，worker 更像“局部闭环子图”而不是一个裸函数
+    - 父图只做控制面决策，子图只做本地任务闭环
 """
-目标：演示 Supervisor 选择“子图 worker”，而不是普通函数。
-关键 API：StateGraph 嵌套、结构化 WorkerResultEnvelope
-运行命令：python 06_supervisor_with_subgraphs.py
-预期现象：
-  1. Supervisor 先把任务派给 research 子图
-  2. 再把结果交给 reviewer 子图
-  3. reviewer 可返回 COMPLETED 或 ESCALATED
-生产提醒：
-  - 真正的 multi-agent 中，worker 更像“局部闭环子图”而不是一个裸函数
-  - 父图只做控制面决策，子图只做本地任务闭环
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict

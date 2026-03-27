@@ -1,21 +1,31 @@
-"""@task 定义可检查点的子任务
+"""
+@task 定义可检查点的子任务
 
-目标：
+目标:
     演示 @task 装饰器将函数标记为可检查点的子任务，
     任务执行结果自动持久化，失败后可从断点恢复。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - @task —— 标记可检查点的子任务
     - @entrypoint —— 工作流入口（组合多个 task）
 
-运行命令：
-    python 02_task_decorator.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/13_functional_api/02_task_decorator.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/13_functional_api/02_task_decorator.py
+
+预期现象:
     多个 @task 子任务依次执行，每个任务完成后自动 checkpoint。
     模拟中断恢复场景。
 
-生产提醒：
+生产提醒:
     - @task 的参数和返回值必须可序列化（JSON-safe）
     - 每个 @task 完成后自动创建 checkpoint，粒度比节点级更细
     - @task 内部不应有副作用（如发送邮件），否则恢复时会重复执行

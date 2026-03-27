@@ -1,7 +1,29 @@
-"""多 Agent 编排骨架：Supervisor + Graph Worker 和 Plan-Execute-Replan。
+"""
+多 Agent 编排骨架：Supervisor + Graph Worker 和 Plan-Execute-Replan。
 
-这个模板刻意保持轻量，但不再把 worker 限制成“普通函数”。
-教程里的真实版示例会复用这里的契约：worker 可以是函数，也可以是已编译子图。
+目标:
+    多 Agent 编排骨架：Supervisor + Graph Worker 和 Plan-Execute-Replan。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: templates/multi_agent_orchestrator.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python templates/multi_agent_orchestrator.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
 from __future__ import annotations
 

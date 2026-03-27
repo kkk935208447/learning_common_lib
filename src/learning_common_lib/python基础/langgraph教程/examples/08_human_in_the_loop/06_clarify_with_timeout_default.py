@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 06_clarify_with_timeout_default
 
+目标:
+    演示 Clarify 的结构化恢复和超时默认项。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt、Command(resume=...)、默认项 helper
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/06_clarify_with_timeout_default.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/06_clarify_with_timeout_default.py
+
+预期现象:
+    1. 缺少时间范围时进入结构化 Clarify
+    2. 超时后可自动应用默认项继续执行
+    3. 用户也可以显式回复结构化答案
+
+生产提醒:
+    - Clarify 默认项必须显式可审计，不能静默改 query
+    - 重复提交时应该基于 clarification_id 做幂等保护
 """
-目标：演示 Clarify 的结构化恢复和超时默认项。
-关键 API：interrupt、Command(resume=...)、默认项 helper
-运行命令：python 06_clarify_with_timeout_default.py
-预期现象：
-  1. 缺少时间范围时进入结构化 Clarify
-  2. 超时后可自动应用默认项继续执行
-  3. 用户也可以显式回复结构化答案
-生产提醒：
-  - Clarify 默认项必须显式可审计，不能静默改 query
-  - 重复提交时应该基于 clarification_id 做幂等保护
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

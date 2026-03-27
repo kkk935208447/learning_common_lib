@@ -1,15 +1,34 @@
-from __future__ import annotations
+"""
+14_testing_and_debugging / 05_resume_and_replay_tests
 
+目标:
+    演示 resume / replay 相关测试。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    MemorySaver、interrupt、Command(resume=...)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/14_testing_and_debugging/05_resume_and_replay_tests.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/14_testing_and_debugging/05_resume_and_replay_tests.py
+
+预期现象:
+    1. 同一 thread_id 能正确恢复
+    2. 不同 thread_id 不会串线
+    3. full fencing tuple 能拦住旧执行结果
+    4. duplicate resume 不会重复处理相同 result_ref
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
-目标：演示 resume / replay 相关测试。
-关键 API：MemorySaver、interrupt、Command(resume=...)
-运行命令：python 05_resume_and_replay_tests.py
-预期现象：
-  1. 同一 thread_id 能正确恢复
-  2. 不同 thread_id 不会串线
-  3. full fencing tuple 能拦住旧执行结果
-  4. duplicate resume 不会重复处理相同 result_ref
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

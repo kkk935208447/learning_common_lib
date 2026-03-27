@@ -1,20 +1,30 @@
-"""Send vs Command 对比：何时用哪个
+"""
+Send vs Command 对比：何时用哪个
 
-目标：
+目标:
     对比 Send 和 Command 两种路由机制的适用场景。
     Send = 并行 fan-out（一对多），Command = 单路由 handoff（一对一）。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - Send(node, state) —— 并行分发，创建多个分支
     - Command(goto, update) —— 单路由跳转，可附带状态更新
 
-运行命令：
-    python 02_send_vs_command.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/11_dynamic_and_parallel/02_send_vs_command.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/11_dynamic_and_parallel/02_send_vs_command.py
+
+预期现象:
     分别演示 Send 并行处理和 Command 单路由跳转，对比两者行为差异。
 
-生产提醒：
+生产提醒:
     - Send 适合 map-reduce、并行搜索等场景
     - Command 适合条件路由、agent handoff、工具调用后跳转
     - 两者不要混用：一个节点要么返回 list[Send]，要么返回 Command

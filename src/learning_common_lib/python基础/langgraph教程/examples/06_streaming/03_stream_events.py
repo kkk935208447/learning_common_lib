@@ -1,19 +1,36 @@
-from __future__ import annotations
+"""
+06_streaming / 03_stream_events
 
+目标:
+    演示 astream_events(version="v2") 模式——细粒度事件流
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    graph.astream_events(inputs, version="v2")
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/06_streaming/03_stream_events.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/06_streaming/03_stream_events.py
+
+预期现象:
+    1. 输出细粒度事件：on_chain_start/end, on_chat_model_stream, on_tool_start/end
+    2. 每个事件包含 event, name, data 等字段
+    3. 可以精确追踪每个节点和工具的执行过程
+
+生产提醒:
+    - 必须使用 version="v2"，v1 已废弃
+    - 事件量大，生产环境应按 event 类型过滤
+    - 适合构建详细的执行追踪 UI 或调试面板
+    - 此文件使用异步 API，需要 asyncio 运行
 """
-目标：演示 astream_events(version="v2") 模式——细粒度事件流
-关键 API：graph.astream_events(inputs, version="v2")
-运行命令：python 03_stream_events.py
-预期现象：
-  1. 输出细粒度事件：on_chain_start/end, on_chat_model_stream, on_tool_start/end
-  2. 每个事件包含 event, name, data 等字段
-  3. 可以精确追踪每个节点和工具的执行过程
-生产提醒：
-  - 必须使用 version="v2"，v1 已废弃
-  - 事件量大，生产环境应按 event 类型过滤
-  - 适合构建详细的执行追踪 UI 或调试面板
-  - 此文件使用异步 API，需要 asyncio 运行
-"""
+from __future__ import annotations
 
 import asyncio
 

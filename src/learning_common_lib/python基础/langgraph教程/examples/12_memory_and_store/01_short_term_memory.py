@@ -1,22 +1,32 @@
-"""Graph State 作为短期记忆（线程内）
+"""
+Graph State 作为短期记忆（线程内）
 
-目标：
+目标:
     演示使用 MessagesState + checkpointer 实现线程内短期记忆，
     包括消息窗口管理和摘要压缩策略。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - MessagesState —— 内置消息列表状态
     - MemorySaver —— 内存 checkpointer（线程内持久化）
     - trim_messages / summarize —— 窗口管理
 
-运行命令：
-    python 01_short_term_memory.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/01_short_term_memory.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/01_short_term_memory.py
+
+预期现象:
     多轮对话中，图能记住之前的消息内容（同一 thread_id）。
     切换 thread_id 后记忆清空。演示消息窗口裁剪。
 
-生产提醒：
+生产提醒:
     - MemorySaver 仅适合开发调试，生产环境使用 PostgresSaver / RedisSaver
     - 消息列表无限增长会导致 token 超限，务必实现窗口管理
     - 摘要压缩可以在保留语义的同时大幅减少 token 消耗

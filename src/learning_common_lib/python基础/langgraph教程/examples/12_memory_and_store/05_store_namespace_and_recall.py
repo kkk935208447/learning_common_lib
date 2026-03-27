@@ -1,16 +1,33 @@
-from __future__ import annotations
+"""
+12_memory_and_store / 05_store_namespace_and_recall
 
+目标:
+    演示 store namespace 设计与召回。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    InMemoryStore.put/get/search
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/05_store_namespace_and_recall.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/05_store_namespace_and_recall.py
+
+预期现象:
+    1. 不同 tenant/user 的 namespace 相互隔离
+    2. search 可以按 namespace 前缀召回
+
+生产提醒:
+    - namespace 设计是长期记忆隔离的第一道防线
+    - 不要把所有用户偏好都塞进一个扁平 key 空间
 """
-目标：演示 store namespace 设计与召回。
-关键 API：InMemoryStore.put/get/search
-运行命令：python 05_store_namespace_and_recall.py
-预期现象：
-  1. 不同 tenant/user 的 namespace 相互隔离
-  2. search 可以按 namespace 前缀召回
-生产提醒：
-  - namespace 设计是长期记忆隔离的第一道防线
-  - 不要把所有用户偏好都塞进一个扁平 key 空间
-"""
+from __future__ import annotations
 
 from langgraph.store.memory import InMemoryStore
 

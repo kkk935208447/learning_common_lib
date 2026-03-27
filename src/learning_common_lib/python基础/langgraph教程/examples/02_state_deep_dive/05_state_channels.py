@@ -1,10 +1,29 @@
-"""Channel 类型深入：LastValue、BinaryOperator、EphemeralValue。
+"""
+Channel 类型深入：LastValue、BinaryOperator、EphemeralValue。
 
-目标：理解 LangGraph 底层的 Channel 抽象
-关键 API：Channels（概念层面）、Annotated reducers（用户层面）
-运行命令：python 05_state_channels.py
-预期现象：演示三种 channel 语义的行为差异
-生产提醒：大多数场景用 Annotated + reducer 即可，无需直接操作 Channel
+目标:
+    理解 LangGraph 底层的 Channel 抽象
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Channels（概念层面）、Annotated reducers（用户层面）
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/02_state_deep_dive/05_state_channels.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/02_state_deep_dive/05_state_channels.py
+
+预期现象:
+    演示三种 channel 语义的行为差异
+
+生产提醒:
+    大多数场景用 Annotated + reducer 即可，无需直接操作 Channel
 """
 from __future__ import annotations
 

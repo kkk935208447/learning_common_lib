@@ -1,4 +1,28 @@
-"""可复用状态 schema 基类，为 LangGraph 图提供标准化的状态定义。"""
+"""
+可复用状态 schema 基类，为 LangGraph 图提供标准化的状态定义。
+
+目标:
+    可复用状态 schema 基类，为 LangGraph 图提供标准化的状态定义。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: templates/state_schemas.py
+
+运行方式:
+    - 通常作为模块导入，不建议单独运行
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
+"""
 from __future__ import annotations
 
 from typing import Annotated, TypedDict

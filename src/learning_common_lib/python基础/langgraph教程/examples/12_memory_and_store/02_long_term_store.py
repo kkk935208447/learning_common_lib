@@ -1,24 +1,34 @@
-"""Redis-first Store 实现跨线程长期记忆。
+"""
+Redis-first Store 实现跨线程长期记忆。
 
-目标：
+目标:
     演示使用 Redis-first Store 实现跨线程的长期记忆存储，
     不同对话线程可以共享用户偏好、历史摘要等持久化信息。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - RedisStore / InMemoryStore —— 长期记忆后端
     - store.put(namespace, key, value) —— 写入
     - store.get(namespace, key) —— 读取
     - store.search(namespace_prefix) —— 搜索
 
-运行命令：
-    python 02_long_term_store.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/02_long_term_store.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/02_long_term_store.py
+
+预期现象:
     1. 优先尝试 Redis store
     2. 线程 A 中保存用户偏好
     3. 线程 B 中读取之前保存的偏好
 
-生产提醒：
+生产提醒:
     - 生产环境优先使用 RedisStore，初始化失败时再降级为 InMemoryStore
     - namespace 设计要考虑多租户隔离
     - Store 适合结构化长期记忆，大文本建议存外部系统

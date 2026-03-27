@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+10_multi_agent / 07_replan_with_fingerprint
 
+目标:
+    演示结构化 planner + fingerprint + replan。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Pydantic schema、FakeListChatModel、条件边循环
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/07_replan_with_fingerprint.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/07_replan_with_fingerprint.py
+
+预期现象:
+    1. planner 返回结构化计划而不是字符串列表
+    2. evaluator 根据 gap_type 决定是否 replan
+    3. fingerprint 防止“换汤不换药”的重复重规划
+
+生产提醒:
+    - replan 不应该只靠 iteration 计数
+    - planner 输出最好是 schema 化，而不是自由文本
 """
-目标：演示结构化 planner + fingerprint + replan。
-关键 API：Pydantic schema、FakeListChatModel、条件边循环
-运行命令：python 07_replan_with_fingerprint.py
-预期现象：
-  1. planner 返回结构化计划而不是字符串列表
-  2. evaluator 根据 gap_type 决定是否 replan
-  3. fingerprint 防止“换汤不换药”的重复重规划
-生产提醒：
-  - replan 不应该只靠 iteration 计数
-  - planner 输出最好是 schema 化，而不是自由文本
-"""
+from __future__ import annotations
 
 import asyncio
 import hashlib

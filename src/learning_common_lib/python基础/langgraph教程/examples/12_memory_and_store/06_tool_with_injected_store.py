@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+12_memory_and_store / 06_tool_with_injected_store
 
+目标:
+    演示 ToolNode 中的 InjectedStore / InjectedState。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    InjectedStore、InjectedState、ToolNode
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/06_tool_with_injected_store.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/06_tool_with_injected_store.py
+
+预期现象:
+    1. 模型只生成普通工具参数
+    2. store 和 user_id 由系统注入，不暴露给模型
+    3. 工具可跨会话读取长期偏好
+
+生产提醒:
+    - 不要把整个 state 明文交给模型
+    - tool 的系统注入参数应该对模型不可见
+    - 本例中模型只能生成 `topic` 或空参数，`store` 和 `user_id` 都由系统注入
 """
-目标：演示 ToolNode 中的 InjectedStore / InjectedState。
-关键 API：InjectedStore、InjectedState、ToolNode
-运行命令：python 06_tool_with_injected_store.py
-预期现象：
-  1. 模型只生成普通工具参数
-  2. store 和 user_id 由系统注入，不暴露给模型
-  3. 工具可跨会话读取长期偏好
-生产提醒：
-  - 不要把整个 state 明文交给模型
-  - tool 的系统注入参数应该对模型不可见
-  - 本例中模型只能生成 `topic` 或空参数，`store` 和 `user_id` 都由系统注入
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Annotated, TypedDict

@@ -1,21 +1,31 @@
-"""并行执行后聚合结果（Map-Reduce 聚合）
+"""
+并行执行后聚合结果（Map-Reduce 聚合）
 
-目标：
+目标:
     演示 Send + reducer 实现完整的 map-reduce 模式：
     分发多个并行任务 → 各自独立处理 → 结果自动聚合 → 最终汇总。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - Send(node, state) —— 路由函数中动态分发
     - add_conditional_edges(...) —— 将准备好的任务 fan-out 到 worker
     - Annotated[list, operator.add] —— reducer 自动聚合
 
-运行命令：
-    python 04_map_reduce_aggregation.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/11_dynamic_and_parallel/04_map_reduce_aggregation.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/11_dynamic_and_parallel/04_map_reduce_aggregation.py
+
+预期现象:
     3 个文档并行分析，各自生成摘要，最终聚合为一份综合报告。
 
-生产提醒：
+生产提醒:
     - reducer 的选择决定聚合行为：operator.add 适合列表拼接
     - 如果 worker 可能失败，建议在 worker 内部 try-except 并返回错误标记
     - 大规模并行时注意内存占用，可分批 dispatch

@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+09_error_and_resilience / 01_safe_node_wrapper
 
+目标:
+    safe_node 装饰器 — 异常捕获 + 超时 + 结构化日志，参考 AgenticRAG 实现
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    asyncio.wait_for, functools.wraps
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/09_error_and_resilience/01_safe_node_wrapper.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/09_error_and_resilience/01_safe_node_wrapper.py
+
+预期现象:
+    正常节点顺利执行，超时节点被捕获，异常节点被捕获，均不会导致图崩溃
+
+生产提醒:
+    生产环境中每个节点都应包裹 safe_node，确保单节点故障不会导致整个图失败
 """
-目标: safe_node 装饰器 — 异常捕获 + 超时 + 结构化日志，参考 AgenticRAG 实现
-关键 API: asyncio.wait_for, functools.wraps
-运行命令: python 01_safe_node_wrapper.py
-预期现象: 正常节点顺利执行，超时节点被捕获，异常节点被捕获，均不会导致图崩溃
-生产提醒: 生产环境中每个节点都应包裹 safe_node，确保单节点故障不会导致整个图失败
-"""
+from __future__ import annotations
 
 import asyncio
 import logging

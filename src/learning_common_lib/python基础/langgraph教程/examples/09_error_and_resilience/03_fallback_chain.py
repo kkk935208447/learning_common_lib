@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+09_error_and_resilience / 03_fallback_chain
 
+目标:
+    多级降级链 — 主路径→备选→兜底，参考 AgenticRAG 的 DEGRADED 状态
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    条件边 + 降级状态标记
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/09_error_and_resilience/03_fallback_chain.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/09_error_and_resilience/03_fallback_chain.py
+
+预期现象:
+    主路径失败时自动切换到备选方案，备选也失败则使用兜底方案
+
+生产提醒:
+    降级链确保系统在部分组件故障时仍能提供有限服务，而非完全不可用
 """
-目标: 多级降级链 — 主路径→备选→兜底，参考 AgenticRAG 的 DEGRADED 状态
-关键 API: 条件边 + 降级状态标记
-运行命令: python 03_fallback_chain.py
-预期现象: 主路径失败时自动切换到备选方案，备选也失败则使用兜底方案
-生产提醒: 降级链确保系统在部分组件故障时仍能提供有限服务，而非完全不可用
-"""
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 

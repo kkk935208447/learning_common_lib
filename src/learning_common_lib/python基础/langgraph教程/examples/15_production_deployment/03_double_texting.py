@@ -1,13 +1,29 @@
-"""Double-texting 处理策略（更真实的等待/恢复版）。
+"""
+Double-texting 处理策略（更真实的等待/恢复版）。
 
-目标：
+目标:
     演示同一 thread_id 上，用户在任务等待阶段再次发送消息时的处理策略：
     enqueue / reject / interrupt / rollback / idempotency。
 
-运行命令：
-    python 03_double_texting.py
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
 
-生产提醒：
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/15_production_deployment/03_double_texting.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/15_production_deployment/03_double_texting.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
     - 本例是“单进程网关 + 图等待态”示例，不代表多实例网关实现
     - 真正生产环境还需要共享幂等缓存、分布式锁或统一入口层策略
 """

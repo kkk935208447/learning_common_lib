@@ -1,10 +1,29 @@
-"""五路路由器（模拟 AgenticRAG step_gate_router）。
+"""
+五路路由器（模拟 AgenticRAG step_gate_router）。
 
-目标：实现多路条件路由，模拟真实 AgenticRAG 场景中的决策分发
-关键 API：add_conditional_edges, 路由映射 dict
-运行命令：python 03_multi_way_router.py
-预期现象：根据 next_action 字段分发到 5 个不同处理节点，未知动作走 fallback
-生产提醒：路由映射应覆盖所有可能的返回值，建议始终设置 fallback 兜底
+目标:
+    实现多路条件路由，模拟真实 AgenticRAG 场景中的决策分发
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    add_conditional_edges, 路由映射 dict
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/03_edges_and_routing/03_multi_way_router.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/03_edges_and_routing/03_multi_way_router.py
+
+预期现象:
+    根据 next_action 字段分发到 5 个不同处理节点，未知动作走 fallback
+
+生产提醒:
+    路由映射应覆盖所有可能的返回值，建议始终设置 fallback 兜底
 """
 from __future__ import annotations
 

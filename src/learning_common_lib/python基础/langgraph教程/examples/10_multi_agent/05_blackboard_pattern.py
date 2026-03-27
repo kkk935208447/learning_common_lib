@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+10_multi_agent / 05_blackboard_pattern
 
+目标:
+    黑板模式 — 共享状态协调多 Agent，参考 AgenticRAG "受控角色 + 共享状态" 设计
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Annotated reducer + 多节点读写同一状态
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/05_blackboard_pattern.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/05_blackboard_pattern.py
+
+预期现象:
+    多个 Agent 读写共享黑板状态，每个 Agent 只修改自己负责的部分
+
+生产提醒:
+    黑板模式的核心是状态隔离 — 每个 Agent 只写自己的 key，通过 reducer 合并
 """
-目标: 黑板模式 — 共享状态协调多 Agent，参考 AgenticRAG "受控角色 + 共享状态" 设计
-关键 API: Annotated reducer + 多节点读写同一状态
-运行命令: python 05_blackboard_pattern.py
-预期现象: 多个 Agent 读写共享黑板状态，每个 Agent 只修改自己负责的部分
-生产提醒: 黑板模式的核心是状态隔离 — 每个 Agent 只写自己的 key，通过 reducer 合并
-"""
+from __future__ import annotations
 
 import asyncio
 import operator

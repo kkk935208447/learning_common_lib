@@ -1,19 +1,35 @@
+"""
+06_streaming / 07_store_backed_event_replay
+
+目标:
+    演示 store-backed progress events，建立“可 replay 真理源”的心智。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    InMemoryStore / aput / asearch
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/06_streaming/07_store_backed_event_replay.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/06_streaming/07_store_backed_event_replay.py
+
+预期现象:
+    1. 结构化 progress event 写入 store
+    2. `Last-Event-ID` 只回放未消费的业务事件
+    3. token 流不会被持久化，也不会被 replay
+
+生产提醒:
+    - token stream 只适合 UI 即时渲染
+    - replay 真理源必须是结构化事件或事件表
+    - 本例用 InMemoryStore 演示接口，生产环境可替换为 RedisStore/DB 事件表
+"""
 from __future__ import annotations
-
-"""
-目标：演示 store-backed progress events，建立“可 replay 真理源”的心智。
-关键 API：InMemoryStore / aput / asearch
-运行命令：python 07_store_backed_event_replay.py
-预期现象：
-  1. 结构化 progress event 写入 store
-  2. `Last-Event-ID` 只回放未消费的业务事件
-  3. token 流不会被持久化，也不会被 replay
-
-生产提醒：
-  - token stream 只适合 UI 即时渲染
-  - replay 真理源必须是结构化事件或事件表
-  - 本例用 InMemoryStore 演示接口，生产环境可替换为 RedisStore/DB 事件表
-"""
 
 import asyncio
 import json

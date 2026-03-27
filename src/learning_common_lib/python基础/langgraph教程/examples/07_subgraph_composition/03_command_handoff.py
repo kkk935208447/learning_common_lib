@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+07_subgraph_composition / 03_command_handoff
 
+目标:
+    使用 Command 原语实现子图间控制权移交 (handoff)
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Command(goto=..., update=...)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/07_subgraph_composition/03_command_handoff.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/07_subgraph_composition/03_command_handoff.py
+
+预期现象:
+    请求从 triage 节点根据类型分发到不同子图，子图处理后通过 Command 移交控制权
+
+生产提醒:
+    Command 是 AgenticRAG escalation 模式的核心原语，可跨子图边界传递控制
 """
-目标: 使用 Command 原语实现子图间控制权移交 (handoff)
-关键 API: Command(goto=..., update=...)
-运行命令: python 03_command_handoff.py
-预期现象: 请求从 triage 节点根据类型分发到不同子图，子图处理后通过 Command 移交控制权
-生产提醒: Command 是 AgenticRAG escalation 模式的核心原语，可跨子图边界传递控制
-"""
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 

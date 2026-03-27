@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+06_streaming / 05_sse_replay_and_heartbeat
 
+目标:
+    演示生产级 SSE 的 replay + heartbeat 语义。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    事件持久化、Last-Event-ID、heartbeat
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/06_streaming/05_sse_replay_and_heartbeat.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/06_streaming/05_sse_replay_and_heartbeat.py
+
+预期现象:
+    1. 图执行时先写结构化事件
+    2. 第一次连接能收到完整事件流
+    3. 断线后带 Last-Event-ID 重新连接，只回放未消费事件
+    4. 没有新业务事件时仍发送 heartbeat
+
+生产提醒:
+    - replay 依赖持久化事件，不依赖内存 token 流
+    - SSE 的 `id` 应该是单调递增事件 ID，而不是随机 UUID
 """
-目标：演示生产级 SSE 的 replay + heartbeat 语义。
-关键 API：事件持久化、Last-Event-ID、heartbeat
-运行命令：python 05_sse_replay_and_heartbeat.py
-预期现象：
-  1. 图执行时先写结构化事件
-  2. 第一次连接能收到完整事件流
-  3. 断线后带 Last-Event-ID 重新连接，只回放未消费事件
-  4. 没有新业务事件时仍发送 heartbeat
-生产提醒：
-  - replay 依赖持久化事件，不依赖内存 token 流
-  - SSE 的 `id` 应该是单调递增事件 ID，而不是随机 UUID
-"""
+from __future__ import annotations
 
 import asyncio
 import json

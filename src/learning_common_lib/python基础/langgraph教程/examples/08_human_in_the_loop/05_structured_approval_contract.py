@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 05_structured_approval_contract
 
+目标:
+    演示结构化审批契约，而不是自由字符串 resume。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt + Command(resume={...})
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/05_structured_approval_contract.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/05_structured_approval_contract.py
+
+预期现象:
+    1. 图产出结构化审批请求
+    2. 审批人提交结构化 decision
+    3. 图根据结构化字段路由到 execute / reject
+
+生产提醒:
+    - 企业审批流应该恢复“结构化决策”，而不是 `approve` 这种裸字符串
+    - 审批请求至少要带 approval_id / expires_at / reviewer_role
 """
-目标：演示结构化审批契约，而不是自由字符串 resume。
-关键 API：interrupt + Command(resume={...})
-运行命令：python 05_structured_approval_contract.py
-预期现象：
-  1. 图产出结构化审批请求
-  2. 审批人提交结构化 decision
-  3. 图根据结构化字段路由到 execute / reject
-生产提醒：
-  - 企业审批流应该恢复“结构化决策”，而不是 `approve` 这种裸字符串
-  - 审批请求至少要带 approval_id / expires_at / reviewer_role
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict

@@ -1,20 +1,30 @@
-"""节点函数单元测试
+"""
+节点函数单元测试
 
-目标：
+目标:
     演示如何对 LangGraph 节点函数进行单元测试。
     节点本质是纯函数：构造输入状态 → 调用 → 断言输出。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - 直接调用节点函数（无需构建图）
     - assert 断言验证输出
 
-运行命令：
-    python 01_unit_test_nodes.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/14_testing_and_debugging/01_unit_test_nodes.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/14_testing_and_debugging/01_unit_test_nodes.py
+
+预期现象:
     所有 assert 通过，打印测试成功信息。
 
-生产提醒：
+生产提醒:
     - 节点函数应设计为纯函数（相同输入 → 相同输出）
     - 副作用（API 调用、数据库写入）应通过依赖注入或 mock 隔离
     - 生产项目建议使用 pytest 框架，这里用 assert 简化演示

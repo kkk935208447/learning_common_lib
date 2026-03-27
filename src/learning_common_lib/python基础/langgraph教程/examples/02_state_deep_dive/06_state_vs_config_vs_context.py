@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+02_state_deep_dive / 06_state_vs_config_vs_context
 
+目标:
+    讲清 state / config / runtime context 的边界。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    节点签名中的 RunnableConfig
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/02_state_deep_dive/06_state_vs_config_vs_context.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/02_state_deep_dive/06_state_vs_config_vs_context.py
+
+预期现象:
+    1. 业务字段进入 state
+    2. thread_id / tenant_id / trace_id 进入 config
+    3. 外部依赖和凭证不进入 state
+
+生产提醒:
+    - 不要把 thread_id / trace_id / tenant_id 当普通业务字段塞进 state
+    - state 用来描述“当前任务进展”，config 用来携带“本次运行上下文”
 """
-目标：讲清 state / config / runtime context 的边界。
-关键 API：节点签名中的 RunnableConfig
-运行命令：python 06_state_vs_config_vs_context.py
-预期现象：
-  1. 业务字段进入 state
-  2. thread_id / tenant_id / trace_id 进入 config
-  3. 外部依赖和凭证不进入 state
-生产提醒：
-  - 不要把 thread_id / trace_id / tenant_id 当普通业务字段塞进 state
-  - state 用来描述“当前任务进展”，config 用来携带“本次运行上下文”
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

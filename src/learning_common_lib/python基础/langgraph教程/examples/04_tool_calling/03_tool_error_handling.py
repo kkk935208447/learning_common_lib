@@ -1,19 +1,36 @@
-from __future__ import annotations
+"""
+04_tool_calling / 03_tool_error_handling
 
+目标:
+    演示工具执行失败时的处理策略——错误消息回传、LLM 自我纠正与安全退出
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    ToolNode(handle_tool_errors=True), ToolException
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/04_tool_calling/03_tool_error_handling.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/04_tool_calling/03_tool_error_handling.py
+
+预期现象:
+    1. 工具首次调用抛出异常
+    2. ToolNode 在图内捕获异常并将错误信息作为 ToolMessage 回传
+    3. LLM 根据错误信息自我纠正，发起第二次调用
+    4. 第二次调用成功，Agent 循环正常结束
+
+生产提醒:
+    - handle_tool_errors=True 会将异常信息暴露给 LLM，注意不要泄露敏感堆栈
+    - 可传入自定义函数 handle_tool_errors=my_handler 来格式化错误消息
+    - 建议设置最大重试次数，防止无限循环
 """
-目标：演示工具执行失败时的处理策略——错误消息回传、LLM 自我纠正与安全退出
-关键 API：ToolNode(handle_tool_errors=True), ToolException
-运行命令：python 03_tool_error_handling.py
-预期现象：
-  1. 工具首次调用抛出异常
-  2. ToolNode 在图内捕获异常并将错误信息作为 ToolMessage 回传
-  3. LLM 根据错误信息自我纠正，发起第二次调用
-  4. 第二次调用成功，Agent 循环正常结束
-生产提醒：
-  - handle_tool_errors=True 会将异常信息暴露给 LLM，注意不要泄露敏感堆栈
-  - 可传入自定义函数 handle_tool_errors=my_handler 来格式化错误消息
-  - 建议设置最大重试次数，防止无限循环
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal

@@ -1,9 +1,31 @@
-"""节点错误处理中间件：为 LangGraph 节点提供统一的超时、异常捕获与降级能力。
+"""
+节点错误处理中间件：为 LangGraph 节点提供统一的超时、异常捕获与降级能力。
 
-注意：
-- 当前版本最适合包装 `func(state)` 这种节点签名
-- 如果节点还依赖 `RunnableConfig` / store / injected context，需要更高阶包装器
-- 因此不要把这个示例模板误当成所有生产节点的最终通用解
+目标:
+    节点错误处理中间件：为 LangGraph 节点提供统一的超时、异常捕获与降级能力。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: templates/safe_node.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python templates/safe_node.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    - 当前版本最适合包装 `func(state)` 这种节点签名
+    - 如果节点还依赖 `RunnableConfig` / store / injected context，需要更高阶包装器
+    - 因此不要把这个示例模板误当成所有生产节点的最终通用解
 """
 from __future__ import annotations
 

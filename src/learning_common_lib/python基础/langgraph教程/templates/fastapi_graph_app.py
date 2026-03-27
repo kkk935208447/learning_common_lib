@@ -1,17 +1,36 @@
-"""FastAPI + LangGraph 集成：SSE 流式端点、lifespan 管理、健康检查。
+"""
+FastAPI + LangGraph 集成：SSE 流式端点、lifespan 管理、健康检查。
 
-模板版本不追求完整业务系统，但至少提供：
-- heartbeat
-- Last-Event-ID
-- store-backed progress event replay
+目标:
+    FastAPI + LangGraph 集成：SSE 流式端点、lifespan 管理、健康检查。
 
-注意：
-- token stream 仍然只是即时渲染通道
-- replay 真理源是结构化 progress events，不是 token chunk
-- 当前模板仍故意省略：
-  - client disconnect 检测
-  - 多 writer 事件 ID 原子性
-  - backlog retention / trim
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: templates/fastapi_graph_app.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python templates/fastapi_graph_app.py
+    - 如需启动服务:
+        uvicorn src.learning_common_lib.python基础.langgraph教程.templates.fastapi_graph_app:app --reload
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    - token stream 仍然只是即时渲染通道
+    - replay 真理源是结构化 progress events，不是 token chunk
+    - 当前模板仍故意省略：
+    - client disconnect 检测
+    - 多 writer 事件 ID 原子性
+    - backlog retention / trim
 """
 from __future__ import annotations
 

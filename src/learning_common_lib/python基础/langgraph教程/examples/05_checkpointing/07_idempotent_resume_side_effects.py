@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+05_checkpointing / 07_idempotent_resume_side_effects
 
+目标:
+    演示恢复后副作用如何做到幂等。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt、同一 execution_id 的外部幂等保护
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/07_idempotent_resume_side_effects.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/07_idempotent_resume_side_effects.py
+
+预期现象:
+    1. 图先进入等待态
+    2. 恢复后发送 webhook
+    3. 模拟同一执行实例被重复回放时，不会重复发送 webhook
+
+生产提醒:
+    - checkpoint 恢复意味着“节点可能被再次执行”
+    - 任何写 DB / 发消息 / 调外部 API 的副作用，都必须有 execution_id 幂等键
 """
-目标：演示恢复后副作用如何做到幂等。
-关键 API：interrupt、同一 execution_id 的外部幂等保护
-运行命令：python 07_idempotent_resume_side_effects.py
-预期现象：
-  1. 图先进入等待态
-  2. 恢复后发送 webhook
-  3. 模拟同一执行实例被重复回放时，不会重复发送 webhook
-生产提醒：
-  - checkpoint 恢复意味着“节点可能被再次执行”
-  - 任何写 DB / 发消息 / 调外部 API 的副作用，都必须有 execution_id 幂等键
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

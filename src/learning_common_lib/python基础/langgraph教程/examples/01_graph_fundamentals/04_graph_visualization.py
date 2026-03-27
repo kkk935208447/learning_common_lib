@@ -1,10 +1,29 @@
-"""Mermaid 可视化与 draw_mermaid_png 导出。
+"""
+Mermaid 可视化与 draw_mermaid_png 导出。
 
-目标：学会将 LangGraph 图导出为可视化图表
-关键 API：get_graph(), draw_mermaid(), draw_mermaid_png(), draw_png()
-运行命令：python 04_graph_visualization.py
-预期现象：打印 Mermaid 文本，并尝试生成 PNG 图片文件
-生产提醒：draw_mermaid_png 需要网络访问 mermaid.ink；draw_png 需要本地安装 graphviz
+目标:
+    学会将 LangGraph 图导出为可视化图表
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    get_graph(), draw_mermaid(), draw_mermaid_png(), draw_png()
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/01_graph_fundamentals/04_graph_visualization.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/01_graph_fundamentals/04_graph_visualization.py
+
+预期现象:
+    打印 Mermaid 文本，并尝试生成 PNG 图片文件
+
+生产提醒:
+    draw_mermaid_png 需要网络访问 mermaid.ink；draw_png 需要本地安装 graphviz
 """
 from __future__ import annotations
 

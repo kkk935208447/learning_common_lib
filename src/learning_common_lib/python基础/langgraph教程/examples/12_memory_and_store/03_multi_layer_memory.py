@@ -1,15 +1,34 @@
-"""多层记忆系统设计。
+"""
+多层记忆系统设计。
 
-目标：
+目标:
     演示参考 AgenticRAG L1-L5 五层记忆架构的多层记忆系统设计，
     并将 L2/L3 的主线运行时切换为 Redis-first。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - Graph State —— L1 工作记忆
     - Redis-first Checkpointer —— L2 短期记忆（checkpoint）
     - Redis-first Store —— L3 长期记忆（跨线程 KV）
     - 向量数据库接口 —— L4 外部记忆（知识库检索）
     - 聚合统计 —— L5 集体记忆（跨用户）
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/12_memory_and_store/03_multi_layer_memory.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/12_memory_and_store/03_multi_layer_memory.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
 from __future__ import annotations
 

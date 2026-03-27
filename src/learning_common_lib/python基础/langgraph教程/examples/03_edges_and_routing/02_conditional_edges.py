@@ -1,10 +1,29 @@
-"""二路/多路条件边。
+"""
+二路/多路条件边。
 
-目标：掌握 add_conditional_edges 实现动态路由
-关键 API：add_conditional_edges, 路由函数, 路由映射 dict
-运行命令：python 02_conditional_edges.py
-预期现象：根据状态中的 sentiment 字段动态选择不同处理路径
-生产提醒：路由函数必须返回映射 dict 中的 key；建议设置默认路由防止遗漏
+目标:
+    掌握 add_conditional_edges 实现动态路由
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    add_conditional_edges, 路由函数, 路由映射 dict
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/03_edges_and_routing/02_conditional_edges.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/03_edges_and_routing/02_conditional_edges.py
+
+预期现象:
+    根据状态中的 sentiment 字段动态选择不同处理路径
+
+生产提醒:
+    路由函数必须返回映射 dict 中的 key；建议设置默认路由防止遗漏
 """
 from __future__ import annotations
 

@@ -1,21 +1,31 @@
-"""Send API 动态 fan-out 并行分发
+"""
+Send API 动态 fan-out 并行分发
 
-目标：
+目标:
     演示 Send API 实现 map-reduce 模式，将不同输入动态分发到多个 worker 并行处理。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - Send(node_name, state) —— 路由函数中动态创建并行分支
     - add_conditional_edges(...) —— 将 dispatch 结果 fan-out 到 worker
     - reducer（Annotated list）—— 聚合并行结果
 
-运行命令：
-    python 01_send_api_fanout.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/11_dynamic_and_parallel/01_send_api_fanout.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/11_dynamic_and_parallel/01_send_api_fanout.py
+
+预期现象:
     scatter 节点根据任务列表动态分发 3 个 worker，每个 worker 独立处理后
     结果汇聚到 gather 节点输出聚合结果。
 
-生产提醒：
+生产提醒:
     - Send 的数量没有硬性上限，但过多并行分支会占用大量内存
     - 每个 Send 分支拥有独立的状态副本，修改不会互相影响
     - 生产环境建议配合 checkpointer 使用，确保中间状态可恢复

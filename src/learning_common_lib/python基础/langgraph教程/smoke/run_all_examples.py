@@ -1,4 +1,30 @@
-"""Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。"""
+"""
+Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。
+
+目标:
+    Smoke 测试：遍历 examples/ 下所有 .py 文件，逐个运行并收集结果。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: smoke/run_all_examples.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        env LANGGRAPH_STRICT_REDIS=1 uv run python smoke/run_all_examples.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
+"""
 from __future__ import annotations
 
 import os

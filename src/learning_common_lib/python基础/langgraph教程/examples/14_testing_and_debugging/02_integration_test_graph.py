@@ -1,21 +1,31 @@
-"""完整图集成测试
+"""
+完整图集成测试
 
-目标：
+目标:
     演示如何对完整的 LangGraph 图进行端到端集成测试，
     使用 mock checkpointer 验证图的整体行为。
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - graph.invoke() —— 执行完整图
     - MemorySaver —— 测试用 checkpointer
     - graph.get_state() —— 检查中间状态
 
-运行命令：
-    python 02_integration_test_graph.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/14_testing_and_debugging/02_integration_test_graph.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/14_testing_and_debugging/02_integration_test_graph.py
+
+预期现象:
     构建完整图并执行端到端测试，验证输入→输出的正确性。
 
-生产提醒：
+生产提醒:
     - 集成测试应覆盖主要执行路径（happy path + edge cases）
     - 使用 FakeListChatModel 避免依赖外部 API
     - 测试 checkpointer 的状态恢复能力

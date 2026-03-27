@@ -1,13 +1,34 @@
-"""FastAPI + LangGraph SSE 流式端点（store-backed replay 版）。
+"""
+FastAPI + LangGraph SSE 流式端点（store-backed replay 版）。
 
-目标：
+目标:
     演示 FastAPI 集成 LangGraph 的 SSE 端点，并补上更真实的生产语义：
     - heartbeat
     - Last-Event-ID 回放
     - 结构化事件与 token 事件分离
     - 结构化事件写入 store 作为 replay 真理源
 
-生产提醒：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/15_production_deployment/01_fastapi_sse_integration.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        env LANGGRAPH_STRICT_REDIS=1 uv run python examples/15_production_deployment/01_fastapi_sse_integration.py
+    - 如需启动服务:
+        uvicorn src.learning_common_lib.python基础.langgraph教程.examples.15_production_deployment.01_fastapi_sse_integration:app --reload
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
     - token 流只适合实时渲染，不适合 durable replay
     - replay 应依赖结构化业务事件真理源，而不是内存 chunk
     - 本例用 RedisStore/InMemoryStore 演示事件持久化接口；生产中应结合真正的事件表或 durable store

@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+16_agentic_rag_patterns / 05_control_plane_vs_runtime_state
 
+目标:
+    演示控制面真理源和 LangGraph runtime state 的职责分层。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    最小 graph state + 外部控制面记录
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py
+
+预期现象:
+    1. graph state 只保留 execution_ref / waiting_reason / latest_result_ref
+    2. 控制面保留 task status / events / 审计信息
+
+生产提醒:
+    - checkpoint 不是业务真理源
+    - 图越复杂，越需要把审计和恢复判定放到控制面
+    - 本例中 CONTROL_PLANE 负责 status/events/current_execution_id，RuntimeState 只负责等待与恢复引用
 """
-目标：演示控制面真理源和 LangGraph runtime state 的职责分层。
-关键 API：最小 graph state + 外部控制面记录
-运行命令：python 05_control_plane_vs_runtime_state.py
-预期现象：
-  1. graph state 只保留 execution_ref / waiting_reason / latest_result_ref
-  2. 控制面保留 task status / events / 审计信息
-生产提醒：
-  - checkpoint 不是业务真理源
-  - 图越复杂，越需要把审计和恢复判定放到控制面
-  - 本例中 CONTROL_PLANE 负责 status/events/current_execution_id，RuntimeState 只负责等待与恢复引用
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+05_checkpointing / 03_time_travel
 
+目标:
+    演示时间旅行——回溯到历史 checkpoint 并从任意历史点分叉执行
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    get_state_history, checkpoint_id, update_state
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/03_time_travel.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/03_time_travel.py
+
+预期现象:
+    1. 多轮对话后，列出所有历史 checkpoint
+    2. 选择某个历史 checkpoint，查看当时的状态
+    3. 从历史 checkpoint 分叉，注入新消息继续执行
+
+生产提醒:
+    - get_state_history 返回的是倒序列表（最新在前）
+    - 从历史点恢复时，后续的 checkpoint 不会被删除（分叉而非覆盖）
+    - 大量 checkpoint 会占用内存，生产环境需要 TTL 策略
 """
-目标：演示时间旅行——回溯到历史 checkpoint 并从任意历史点分叉执行
-关键 API：get_state_history, checkpoint_id, update_state
-运行命令：python 03_time_travel.py
-预期现象：
-  1. 多轮对话后，列出所有历史 checkpoint
-  2. 选择某个历史 checkpoint，查看当时的状态
-  3. 从历史 checkpoint 分叉，注入新消息继续执行
-生产提醒：
-  - get_state_history 返回的是倒序列表（最新在前）
-  - 从历史点恢复时，后续的 checkpoint 不会被删除（分叉而非覆盖）
-  - 大量 checkpoint 会占用内存，生产环境需要 TTL 策略
-"""
+from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver

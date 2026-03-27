@@ -1,10 +1,29 @@
-"""最小两节点图 START → A → END。
+"""
+最小两节点图 START → A → END。
 
-目标：理解 LangGraph 最基本的图构建流程
-关键 API：StateGraph, add_node, add_edge, compile, invoke
-运行命令：python 01_minimal_graph.py
-预期现象：打印 "开始 -> 经过节点A"，展示状态在节点间的传递
-生产提醒：compile() 会冻结拓扑并校验边的合法性，编译后不可再修改图结构
+目标:
+    理解 LangGraph 最基本的图构建流程
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph, add_node, add_edge, compile, invoke
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/01_graph_fundamentals/01_minimal_graph.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/01_graph_fundamentals/01_minimal_graph.py
+
+预期现象:
+    打印 "开始 -> 经过节点A"，展示状态在节点间的传递
+
+生产提醒:
+    compile() 会冻结拓扑并校验边的合法性，编译后不可再修改图结构
 """
 from __future__ import annotations
 

@@ -1,13 +1,32 @@
-"""LangGraph + Celery 桥接模式（完整 fencing + duplicate resume 版）。
+"""
+LangGraph + Celery 桥接模式（完整 fencing + duplicate resume 版）。
 
-目标：
+目标:
     演示“分发 -> 等待 -> 外部结果回写 -> accepted/stale 判定 -> 恢复”链路。
 
-关键点：
+关键概念:
     - fencing 主键不只看 execution_id，还看 task_id / plan_version / subtask_code
     - duplicate resume 不应重复推进 finalize
     - 中间态打印必须让读者看见 waiting snapshot 和 accepted/stale 差异
     - 本例仍故意省略 maintenance/reaper/outbox 补偿，只聚焦恢复主链和 fencing
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/16_agentic_rag_patterns/03_celery_bridge.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        env LANGGRAPH_STRICT_REDIS=1 uv run python examples/16_agentic_rag_patterns/03_celery_bridge.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
 from __future__ import annotations
 

@@ -1,19 +1,38 @@
-from __future__ import annotations
+"""
+06_streaming / 04_token_streaming
 
+目标:
+    演示 LLM token 级流式输出 + 自定义回调处理
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    astream_events + on_chat_model_stream 事件
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/06_streaming/04_token_streaming.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/06_streaming/04_token_streaming.py
+    - 如需启动服务:
+        uvicorn src.learning_common_lib.python基础.langgraph教程.examples.06_streaming.04_token_streaming:app --reload
+
+预期现象:
+    1. 逐 token 输出 LLM 生成的内容（模拟）
+    2. 自定义回调处理 token 流
+    3. 参考 AgenticRAG SSE 实现的 token 流式推送模式
+
+生产提醒:
+    - 真实场景需要替换为支持流式的 LLM（如 ChatOpenAI(streaming=True)）
+    - FakeListChatModel 不支持真正的 token 流式，此处模拟演示
+    - SSE 推送时注意设置正确的 Content-Type: text/event-stream
+    - 此文件使用异步 API，需要 asyncio 运行
 """
-目标：演示 LLM token 级流式输出 + 自定义回调处理
-关键 API：astream_events + on_chat_model_stream 事件
-运行命令：python 04_token_streaming.py
-预期现象：
-  1. 逐 token 输出 LLM 生成的内容（模拟）
-  2. 自定义回调处理 token 流
-  3. 参考 AgenticRAG SSE 实现的 token 流式推送模式
-生产提醒：
-  - 真实场景需要替换为支持流式的 LLM（如 ChatOpenAI(streaming=True)）
-  - FakeListChatModel 不支持真正的 token 流式，此处模拟演示
-  - SSE 推送时注意设置正确的 Content-Type: text/event-stream
-  - 此文件使用异步 API，需要 asyncio 运行
-"""
+from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator

@@ -1,16 +1,33 @@
-from __future__ import annotations
+"""
+05_checkpointing / 06_subgraph_thread_strategy
 
+目标:
+    演示 GlobalGraph / SubtaskGraph 的 thread_id 规范。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    同一个 checkpointer、不同 thread_id、aget_state()
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/06_subgraph_thread_strategy.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/06_subgraph_thread_strategy.py
+
+预期现象:
+    1. GlobalGraph 和两个子任务图分别写入不同 thread_id
+    2. checkpoint 相互隔离，不会串状态
+
+生产提醒:
+    - 父图和子图不能共用同一个 thread_id
+    - 不同 execution_id 的子任务更不能复用同一 subtask thread_id
 """
-目标：演示 GlobalGraph / SubtaskGraph 的 thread_id 规范。
-关键 API：同一个 checkpointer、不同 thread_id、aget_state()
-运行命令：python 06_subgraph_thread_strategy.py
-预期现象：
-  1. GlobalGraph 和两个子任务图分别写入不同 thread_id
-  2. checkpoint 相互隔离，不会串状态
-生产提醒：
-  - 父图和子图不能共用同一个 thread_id
-  - 不同 execution_id 的子任务更不能复用同一 subtask thread_id
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

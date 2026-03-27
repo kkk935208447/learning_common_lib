@@ -1,16 +1,31 @@
+"""
+10_multi_agent / 04_hierarchical_agents
+
+目标:
+    两层 Agent — 全局调度 + 子任务执行（toy baseline）
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    StateGraph 嵌套、子图独立编译
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/04_hierarchical_agents.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/04_hierarchical_agents.py
+
+预期现象:
+    全局调度器分解任务 → 子任务 Agent 独立执行 → 结果汇总到全局
+
+生产提醒:
+    层级 Agent 适合任务可分解的场景，注意子任务间的依赖关系
+"""
 from __future__ import annotations
-
-"""
-目标: 两层 Agent — 全局调度 + 子任务执行（toy baseline）
-关键 API: StateGraph 嵌套、子图独立编译
-运行命令: python 04_hierarchical_agents.py
-预期现象: 全局调度器分解任务 → 子任务 Agent 独立执行 → 结果汇总到全局
-生产提醒: 层级 Agent 适合任务可分解的场景，注意子任务间的依赖关系
-
-注意：
-  - 这个文件仍是 toy baseline，但已经改成“最小局部闭环子图”，不再是单节点 execute
-  - 如果你要看真实版 graph worker 和结构化结果契约，请继续看 `06_supervisor_with_subgraphs.py`
-"""
 
 import asyncio
 import operator

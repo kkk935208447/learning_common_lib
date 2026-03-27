@@ -1,16 +1,33 @@
-from __future__ import annotations
+"""
+06_streaming / 06_dual_channel_streaming
 
+目标:
+    演示 token 流和业务事件流双通道输出。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    独立的 token channel / progress channel
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/06_streaming/06_dual_channel_streaming.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/06_streaming/06_dual_channel_streaming.py
+
+预期现象:
+    1. 业务事件先告诉前端“当前在哪个阶段”
+    2. token 通道只负责最终自然语言逐字输出
+
+生产提醒:
+    - 不要把结构化进度和 token chunk 混成一个事件流
+    - 结构化事件适合 replay，token 流适合即时渲染
 """
-目标：演示 token 流和业务事件流双通道输出。
-关键 API：独立的 token channel / progress channel
-运行命令：python 06_dual_channel_streaming.py
-预期现象：
-  1. 业务事件先告诉前端“当前在哪个阶段”
-  2. token 通道只负责最终自然语言逐字输出
-生产提醒：
-  - 不要把结构化进度和 token chunk 混成一个事件流
-  - 结构化事件适合 replay，token 流适合即时渲染
-"""
+from __future__ import annotations
 
 import asyncio
 import json

@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+09_error_and_resilience / 04_escalation_protocol
 
+目标:
+    子任务升级到全局循环，5 种升级触发条件
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    EscalationReport 结构化升级报告
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/09_error_and_resilience/04_escalation_protocol.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/09_error_and_resilience/04_escalation_protocol.py
+
+预期现象:
+    子任务根据不同失败原因生成升级报告，全局循环根据报告决定后续动作
+
+生产提醒:
+    升级协议是 AgenticRAG 容错的核心，确保子任务失败不会静默丢失
 """
-目标: 子任务升级到全局循环，5 种升级触发条件
-关键 API: EscalationReport 结构化升级报告
-运行命令: python 04_escalation_protocol.py
-预期现象: 子任务根据不同失败原因生成升级报告，全局循环根据报告决定后续动作
-生产提醒: 升级协议是 AgenticRAG 容错的核心，确保子任务失败不会静默丢失
-"""
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 

@@ -1,23 +1,33 @@
-"""AgenticRAG GlobalGraph 骨架（等待/恢复主链路版）。
+"""
+AgenticRAG GlobalGraph 骨架（等待/恢复主链路版）。
 
-目标：
+目标:
     演示 GlobalGraph 的两种等待态：
     - WAITING_CLARIFICATION
     - WAITING_SUBTASKS
 
-关键 API：
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
     - interrupt / Command(resume=...)
     - 同一 thread_id 恢复
     - 最小控制字段：waiting_reason / current_execution_id / latest_result_ref / next_action
 
-运行命令：
-    python 01_global_graph_skeleton.py
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/16_agentic_rag_patterns/01_global_graph_skeleton.py
 
-预期现象：
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/16_agentic_rag_patterns/01_global_graph_skeleton.py
+
+预期现象:
     1. 正常查询会进入 WAITING_SUBTASKS，外部结果回写后继续 finalize
     2. 空查询会先进入 WAITING_CLARIFICATION，补充后再进入 WAITING_SUBTASKS
 
-生产提醒：
+生产提醒:
     - 这已经比 toy baseline 更接近真实控制面，但仍然故意省略了 MySQL 真理源、task_events、预算和 replan 细节
     - 父图不在图内等待 worker `.get()`，而是 interrupt 后由外部恢复
 """

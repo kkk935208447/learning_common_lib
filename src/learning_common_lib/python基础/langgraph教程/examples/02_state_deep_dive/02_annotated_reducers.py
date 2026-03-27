@@ -1,10 +1,29 @@
-"""Annotated + reducer：追加语义与自定义归约。
+"""
+Annotated + reducer：追加语义与自定义归约。
 
-目标：掌握 Annotated[type, reducer] 机制，实现追加、累加、去重等语义
-关键 API：Annotated, operator.add, 自定义 reducer 函数
-运行命令：python 02_annotated_reducers.py
-预期现象：messages 列表追加而非覆盖，count 累加，unique_tags 自动去重
-生产提醒：reducer 签名为 (left, right) -> merged，必须是纯函数且幂等
+目标:
+    掌握 Annotated[type, reducer] 机制，实现追加、累加、去重等语义
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Annotated, operator.add, 自定义 reducer 函数
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/02_state_deep_dive/02_annotated_reducers.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/02_state_deep_dive/02_annotated_reducers.py
+
+预期现象:
+    messages 列表追加而非覆盖，count 累加，unique_tags 自动去重
+
+生产提醒:
+    reducer 签名为 (left, right) -> merged，必须是纯函数且幂等
 """
 from __future__ import annotations
 

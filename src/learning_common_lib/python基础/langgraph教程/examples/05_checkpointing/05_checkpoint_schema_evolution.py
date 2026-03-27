@@ -1,18 +1,35 @@
-from __future__ import annotations
+"""
+05_checkpointing / 05_checkpoint_schema_evolution
 
+目标:
+    演示 checkpoint schema 演进时，如何兼容旧状态。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    MemorySaver、同一个 thread_id、ainvoke(None, config)
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/05_checkpointing/05_checkpoint_schema_evolution.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/05_checkpointing/05_checkpoint_schema_evolution.py
+
+预期现象:
+    1. V1 图先写入旧 checkpoint
+    2. V2 图用同一 checkpointer + 同一 thread_id 恢复旧状态
+    3. V2 节点为缺失字段补默认值，而不是假设字段一定存在
+
+生产提醒:
+    - 新增 state 字段时，节点必须用 `state.get(...)` 提供默认值
+    - checkpoint 是运行时恢复点，不是 schema 严格受控的业务真理源
+    - 本例通过 `aget_state()` 读取旧 checkpoint 后再交给 V2 图，目的是显式展示“兼容旧 state 结构”的心智
 """
-目标：演示 checkpoint schema 演进时，如何兼容旧状态。
-关键 API：MemorySaver、同一个 thread_id、ainvoke(None, config)
-运行命令：python 05_checkpoint_schema_evolution.py
-预期现象：
-  1. V1 图先写入旧 checkpoint
-  2. V2 图用同一 checkpointer + 同一 thread_id 恢复旧状态
-  3. V2 节点为缺失字段补默认值，而不是假设字段一定存在
-生产提醒：
-  - 新增 state 字段时，节点必须用 `state.get(...)` 提供默认值
-  - checkpoint 是运行时恢复点，不是 schema 严格受控的业务真理源
-  - 本例通过 `aget_state()` 读取旧 checkpoint 后再交给 V2 图，目的是显式展示“兼容旧 state 结构”的心智
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

@@ -1,19 +1,35 @@
+"""
+07_subgraph_composition / 05_command_parent_handoff
+
+目标:
+    演示子图通过 `Command(graph=Command.PARENT, ...)` 把控制权交回父图。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    Command.PARENT、subgraph as node
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/07_subgraph_composition/05_command_parent_handoff.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/07_subgraph_composition/05_command_parent_handoff.py
+
+预期现象:
+    1. 父图把任务交给子图
+    2. 子图检测到需要人工复核时，不在子图内继续兜圈子
+    3. 子图直接把控制权交还父图，由父图进入 manual_review
+
+生产提醒:
+    - 子图适合解决局部闭环，父图负责全局推进决策
+    - `Command.PARENT` 常用于 escalation / handoff / parent-only control flow
+    - 本例故意保持两层图，避免把控制权回收机制和业务逻辑混在一起
+"""
 from __future__ import annotations
-
-"""
-目标：演示子图通过 `Command(graph=Command.PARENT, ...)` 把控制权交回父图。
-关键 API：Command.PARENT、subgraph as node
-运行命令：python 05_command_parent_handoff.py
-预期现象：
-  1. 父图把任务交给子图
-  2. 子图检测到需要人工复核时，不在子图内继续兜圈子
-  3. 子图直接把控制权交还父图，由父图进入 manual_review
-
-生产提醒：
-  - 子图适合解决局部闭环，父图负责全局推进决策
-  - `Command.PARENT` 常用于 escalation / handoff / parent-only control flow
-  - 本例故意保持两层图，避免把控制权回收机制和业务逻辑混在一起
-"""
 
 import asyncio
 from typing import Literal, TypedDict

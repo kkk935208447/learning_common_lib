@@ -1,13 +1,32 @@
-"""结构化日志 + 指标（async-safe 观测版）。
+"""
+结构化日志 + 指标（async-safe 观测版）。
 
-目标：
+目标:
     演示 LangGraph 生产环境中更真实的可观测性设计：
     - trace 上下文通过 config 传递，而不是全局变量
     - 节点内只用 async-safe 等待，不阻塞事件循环
     - 打印 request/session/run/node 四级关键标识
 
-运行命令：
-    python 02_observability.py
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    见本文件导入、节点函数和构图代码
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/15_production_deployment/02_observability.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/15_production_deployment/02_observability.py
+
+预期现象:
+    运行后可观察本文件对应的状态推进、输出或集成行为
+
+生产提醒:
+    迁移到业务代码前，请结合 README / best_practices / pitfalls 一起阅读
 """
 from __future__ import annotations
 

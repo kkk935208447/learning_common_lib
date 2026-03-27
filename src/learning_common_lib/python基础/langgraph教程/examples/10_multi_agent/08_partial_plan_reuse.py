@@ -1,16 +1,33 @@
-from __future__ import annotations
+"""
+10_multi_agent / 08_partial_plan_reuse
 
+目标:
+    演示 replan 时的部分结果复用。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    计划版本切换、completed task reuse
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/10_multi_agent/08_partial_plan_reuse.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/10_multi_agent/08_partial_plan_reuse.py
+
+预期现象:
+    1. 第一版计划执行后发现缺口
+    2. 第二版计划保留已完成节点，只补新节点
+
+生产提醒:
+    - replan 不是推倒重来
+    - 要明确哪些节点可复用，哪些节点必须重跑
 """
-目标：演示 replan 时的部分结果复用。
-关键 API：计划版本切换、completed task reuse
-运行命令：python 08_partial_plan_reuse.py
-预期现象：
-  1. 第一版计划执行后发现缺口
-  2. 第二版计划保留已完成节点，只补新节点
-生产提醒：
-  - replan 不是推倒重来
-  - 要明确哪些节点可复用，哪些节点必须重跑
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import TypedDict

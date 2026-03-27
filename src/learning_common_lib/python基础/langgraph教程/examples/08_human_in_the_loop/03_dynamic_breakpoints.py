@@ -1,12 +1,31 @@
-from __future__ import annotations
+"""
+08_human_in_the_loop / 03_dynamic_breakpoints
 
+目标:
+    使用 interrupt() 函数在节点内部动态中断，仅在特定条件下暂停
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    interrupt() 函数（langgraph.types）
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/08_human_in_the_loop/03_dynamic_breakpoints.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/08_human_in_the_loop/03_dynamic_breakpoints.py
+
+预期现象:
+    低风险操作直接执行，高风险操作触发中断等待人工确认
+
+生产提醒:
+    动态中断比 interrupt_before/after 更灵活，可根据运行时状态决定是否暂停
 """
-目标: 使用 interrupt() 函数在节点内部动态中断，仅在特定条件下暂停
-关键 API: interrupt() 函数（langgraph.types）
-运行命令: python 03_dynamic_breakpoints.py
-预期现象: 低风险操作直接执行，高风险操作触发中断等待人工确认
-生产提醒: 动态中断比 interrupt_before/after 更灵活，可根据运行时状态决定是否暂停
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

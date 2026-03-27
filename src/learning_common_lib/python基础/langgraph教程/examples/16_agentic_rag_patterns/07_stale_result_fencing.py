@@ -1,17 +1,34 @@
-from __future__ import annotations
+"""
+16_agentic_rag_patterns / 07_stale_result_fencing
 
+目标:
+    演示 stale result fencing。
+
+关键概念:
+    见本文件目标、代码注释与状态/路由设计
+
+关键 API:
+    execution_id 校验、旧结果忽略、新结果接受
+
+目录导航:
+    - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
+    - 当前文件: examples/16_agentic_rag_patterns/07_stale_result_fencing.py
+
+运行方式:
+    - 从项目根目录:
+        cd src/learning_common_lib/python基础/langgraph教程
+        uv run python examples/16_agentic_rag_patterns/07_stale_result_fencing.py
+
+预期现象:
+    1. stale 结果回写后，不推进 finalize
+    2. current 结果回写后，图继续完成
+
+生产提醒:
+    - stale result 也要落审计，但不能污染当前计划
+    - execution_id 是最小 fencing 主键
+    - 更真实的生产路径还应叠加 task_id / plan_version / subtask_code
 """
-目标：演示 stale result fencing。
-关键 API：execution_id 校验、旧结果忽略、新结果接受
-运行命令：python 07_stale_result_fencing.py
-预期现象：
-  1. stale 结果回写后，不推进 finalize
-  2. current 结果回写后，图继续完成
-生产提醒：
-  - stale result 也要落审计，但不能污染当前计划
-  - execution_id 是最小 fencing 主键
-  - 更真实的生产路径还应叠加 task_id / plan_version / subtask_code
-"""
+from __future__ import annotations
 
 import asyncio
 from typing import Literal, TypedDict
