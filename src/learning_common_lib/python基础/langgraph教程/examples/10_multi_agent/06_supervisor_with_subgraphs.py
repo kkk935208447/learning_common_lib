@@ -143,6 +143,10 @@ async def main() -> None:
         if cursor >= len(tasks):
             return {"next_action": "__end__"}
         current = tasks[cursor]
+        print(
+            f"[supervisor] task_cursor={cursor} "
+            f"current_task={current['task_id']} objective={current['objective']}"
+        )
         chosen = llm.invoke(f"为当前任务选择 worker: {current['objective']}").content
         chosen = "researcher" if "researcher" in chosen else ("reviewer" if "reviewer" in chosen else "__end__")
         print(f"[supervisor] 第 {cursor + 1} 步 -> {chosen}")
@@ -151,6 +155,7 @@ async def main() -> None:
     async def run_researcher(state: SupervisorState) -> dict:
         result = await research_graph.ainvoke({"task": state["current_task"], "notes": []})
         envelope = result["result"]
+        print(f"[researcher] envelope={envelope}")
         return {
             "latest_result": envelope,
             "collected_results": [*state.get("collected_results", []), envelope],
@@ -165,6 +170,8 @@ async def main() -> None:
             }
         )
         envelope = result["result"]
+        print(f"[reviewer] input.latest_result={state.get('latest_result')}")
+        print(f"[reviewer] envelope={envelope}")
         return {
             "latest_result": envelope,
             "collected_results": [*state.get("collected_results", []), envelope],
@@ -214,6 +221,8 @@ async def main() -> None:
     print("\n最终结果:")
     for item in result.get("collected_results", []):
         print(f"  - {item['worker_name']} [{item['status']}] {item['summary']}")
+    print(f"  latest_result={result.get('latest_result')}")
+    print(f"  task_cursor={result.get('task_cursor')}")
 
 
 if __name__ == "__main__":

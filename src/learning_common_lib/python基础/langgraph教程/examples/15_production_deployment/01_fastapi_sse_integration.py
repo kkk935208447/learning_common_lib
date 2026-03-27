@@ -1,10 +1,17 @@
-"""FastAPI + LangGraph SSE 流式端点（生产语义增强版）。
+"""FastAPI + LangGraph SSE 流式端点（store-backed replay 版）。
 
 目标：
     演示 FastAPI 集成 LangGraph 的 SSE 端点，并补上更真实的生产语义：
     - heartbeat
     - Last-Event-ID 回放
     - 结构化事件与 token 事件分离
+    - 结构化事件写入 store 作为 replay 真理源
+
+生产提醒：
+    - token 流只适合实时渲染，不适合 durable replay
+    - replay 应依赖结构化业务事件真理源，而不是内存 chunk
+    - 本例用 RedisStore/InMemoryStore 演示事件持久化接口；生产中应结合真正的事件表或 durable store
+    - 本例仍故意省略 client disconnect 检测、事件 ID 并发原子性和 retention/trim
 """
 from __future__ import annotations
 
@@ -35,8 +42,6 @@ except ImportError:  # pragma: no cover - 允许直接运行脚本
     )
 
 STRICT_REDIS = DEFAULT_RUNTIME_SETTINGS.strict_redis
-EVENT_BACKLOG: dict[str, list[dict]] = {}
-EVENT_COUNTER: dict[str, int] = {}
 
 
 def emit_runtime_status() -> None:
@@ -80,19 +85,46 @@ def resolve_thread_id(thread_id: str | None, *, label: str) -> str:
     return thread_id or DEFAULT_RUNTIME_SETTINGS.demo_thread_id(label)
 
 
-def next_event_id(thread_id: str) -> int:
-    current = EVENT_COUNTER.get(thread_id, 0) + 1
-    EVENT_COUNTER[thread_id] = current
+def event_namespace(thread_id: str) -> tuple[str, str, str]:
+    return ("threads", thread_id, "events")
+
+
+async def store_get(namespace: tuple[str, ...], key: str):
+    if hasattr(store_instance, "aget"):
+        return await store_instance.aget(namespace, key)
+    return store_instance.get(namespace, key)
+
+
+async def store_put(namespace: tuple[str, ...], key: str, value: dict) -> None:
+    if hasattr(store_instance, "aput"):
+        await store_instance.aput(namespace, key, value)
+        return
+    store_instance.put(namespace, key, value)
+
+
+async def store_search(namespace: tuple[str, ...]):
+    if hasattr(store_instance, "asearch"):
+        return await store_instance.asearch(namespace, limit=100)
+    return store_instance.search(namespace, limit=100)
+
+
+async def next_event_id(thread_id: str) -> int:
+    namespace = event_namespace(thread_id)
+    meta = await store_get(namespace, "__meta__")
+    current = 1
+    if meta is not None:
+        current = int(meta.value.get("last_event_id", 0)) + 1
+    await store_put(namespace, "__meta__", {"last_event_id": current})
     return current
 
 
-def append_event(thread_id: str, event: str, data: dict) -> dict:
+async def append_event(thread_id: str, event: str, data: dict) -> dict:
     record = {
-        "id": next_event_id(thread_id),
+        "id": await next_event_id(thread_id),
         "event": event,
         "data": {"thread_id": thread_id, **data},
     }
-    EVENT_BACKLOG.setdefault(thread_id, []).append(record)
+    await store_put(event_namespace(thread_id), f"{record['id']:08d}", record)
     return record
 
 
@@ -105,14 +137,18 @@ def format_sse_event(record: dict) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def replay_events(thread_id: str, last_event_id: int | None) -> list[dict]:
+async def replay_events(thread_id: str, last_event_id: int | None) -> list[dict]:
     if last_event_id is None:
         return []
-    return [
-        item
-        for item in EVENT_BACKLOG.get(thread_id, [])
-        if item["id"] > last_event_id
-    ]
+    items = await store_search(event_namespace(thread_id))
+    records = [item.value for item in items if item.key != "__meta__"]
+    records.sort(key=lambda item: item["id"])
+    replay = [item for item in records if item["id"] > last_event_id]
+    print(
+        f"[replay] thread_id={thread_id} last_event_id={last_event_id} "
+        f"replayed_ids={[item['id'] for item in replay]}"
+    )
+    return replay
 
 
 def build_chat_graph(store, checkpointer):
@@ -182,10 +218,10 @@ async def event_generator(
     async with semaphore:
         effective_thread_id = resolve_thread_id(thread_id, label="stream")
 
-        for record in replay_events(effective_thread_id, last_event_id):
+        for record in await replay_events(effective_thread_id, last_event_id):
             yield format_sse_event(record)
 
-        accepted = append_event(
+        accepted = await append_event(
             effective_thread_id,
             "task.accepted",
             {"query": query, "status": "PENDING"},
@@ -193,6 +229,7 @@ async def event_generator(
         yield format_sse_event(accepted)
 
         await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        print(f"[heartbeat] thread_id={effective_thread_id}")
         yield format_sse_event(
             {
                 "event": "heartbeat",
@@ -219,7 +256,7 @@ async def event_generator(
                 }
             )
 
-        completed = append_event(
+        completed = await append_event(
             effective_thread_id,
             "task.completed",
             {"status": "COMPLETED", "message": "token stream finished"},
@@ -307,7 +344,7 @@ async def demo_sse_flow() -> None:
 if __name__ == "__main__":
     print("=== FastAPI + LangGraph SSE 集成演示 ===\n")
     print("路由: POST /chat/stream, POST /chat/invoke, GET /health")
-    print("支持: heartbeat / Last-Event-ID / persisted progress events / token channel\n")
+    print("支持: heartbeat / Last-Event-ID / store-backed progress events / token channel\n")
     asyncio.run(demo_sse_flow())
     print("\n生产环境启动命令:")
     print("  uvicorn 01_fastapi_sse_integration:app --host 0.0.0.0 --port 8000")

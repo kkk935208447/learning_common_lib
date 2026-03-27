@@ -71,13 +71,22 @@ def to_sse(record: dict) -> str:
 
 
 async def stream_events(*, request_id: str, last_event_id: int | None = None):
-    replay = [
+    records = [
         record for record in EVENT_LOG
         if record["data"].get("request_id") == request_id
-        and (last_event_id is None or record["id"] > last_event_id)
     ]
+    replay = (
+        records
+        if last_event_id is None
+        else [record for record in records if record["id"] > last_event_id]
+    )
     if replay:
-        print(f"[replay] 从 Last-Event-ID={last_event_id} 回放 {len(replay)} 条事件")
+        print(
+            f"[replay] request_id={request_id} "
+            f"last_event_id={last_event_id} "
+            f"available_ids={[item['id'] for item in records]} "
+            f"replayed_ids={[item['id'] for item in replay]}"
+        )
         for record in replay:
             yield to_sse(record)
             await asyncio.sleep(0.01)

@@ -108,11 +108,13 @@ async def main() -> None:
     llm = planner_factory()
 
     def planner(state: ReplanState) -> dict:
+        print(f"[planner] incoming_query={state['query']}")
         raw = llm.invoke(state["query"]).content
         plan = PlanModel.model_validate_json(raw)
         fingerprint = compute_fingerprint(plan)
         print(f"[planner] rationale={plan.rationale}")
         print(f"[planner] fingerprint={fingerprint}")
+        print(f"[planner] steps={[step.model_dump() for step in plan.steps]}")
         return {
             "plan_json": plan.model_dump_json(ensure_ascii=False),
             "fingerprint": fingerprint,
@@ -130,6 +132,7 @@ async def main() -> None:
         history = list(state.get("fingerprint_history", []))
         fingerprint = state["fingerprint"]
         replan_count = state.get("replan_count", 0)
+        print(f"[evaluator] fingerprint_history(before)={history}")
 
         if fingerprint in history:
             print("[evaluator] 指纹重复，直接 fallback/finalize")
@@ -138,12 +141,14 @@ async def main() -> None:
         history.append(fingerprint)
         if replan_count == 0:
             print("[evaluator] 第一轮缺少时间范围，触发 replan")
+            next_query = f"{state['query']}（补充：近 30 天）"
+            print(f"[evaluator] replanned_query={next_query}")
             return {
                 "gap_type": "user_input_gap",
                 "next_action": "planner",
                 "fingerprint_history": history,
                 "replan_count": replan_count + 1,
-                "query": f"{state['query']}（补充：近 30 天）",
+                "query": next_query,
             }
 
         print("[evaluator] 计划已足够，进入 finalize")

@@ -10,6 +10,7 @@ from __future__ import annotations
 生产提醒：
   - stale result 也要落审计，但不能污染当前计划
   - execution_id 是最小 fencing 主键
+  - 更真实的生产路径还应叠加 task_id / plan_version / subtask_code
 """
 
 import asyncio
@@ -42,6 +43,10 @@ def evaluate_result(state: FencingState) -> dict:
     result = state["incoming_result"]
     execution_id = result["execution_id"]
     current_execution_id = state["current_execution_id"]
+    print(
+        f"[evaluate] incoming_execution_id={execution_id} "
+        f"current_execution_id={current_execution_id}"
+    )
     if execution_id != current_execution_id:
         print(f"[evaluate] stale result ignored: {execution_id}")
         return {

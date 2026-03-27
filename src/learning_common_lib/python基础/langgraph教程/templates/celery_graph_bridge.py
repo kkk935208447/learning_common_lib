@@ -120,20 +120,44 @@ def accept_or_mark_stale(
     result: ResumeEnvelope,
     *,
     current_execution_id: str,
+    current_task_id: str | None = None,
+    current_plan_version: int | None = None,
+    current_subtask_code: str | None = None,
 ) -> ResumeDecision:
     """最小 stale result fencing。
 
-    教程里的真实版示例会在更高层补 `plan_version/subtask_code` 校验，
-    模板先固定最小可复用的 execution_id 判定。
+    生产主线通常至少校验：
+    - task_id
+    - plan_version
+    - subtask_code
+    - execution_id
+
+    这里保留最小可复用 helper，同时允许调用方把剩余主键一起传入。
     """
+    mismatches: list[str] = []
     if result.get("execution_id") != current_execution_id:
+        mismatches.append(
+            f"execution_id={result.get('execution_id')} != current_execution_id={current_execution_id}"
+        )
+    if current_task_id is not None and result.get("task_id") != current_task_id:
+        mismatches.append(
+            f"task_id={result.get('task_id')} != current_task_id={current_task_id}"
+        )
+    payload = result.get("result_payload") or {}
+    if current_plan_version is not None and payload.get("plan_version") != current_plan_version:
+        mismatches.append(
+            f"plan_version={payload.get('plan_version')} != current_plan_version={current_plan_version}"
+        )
+    if current_subtask_code is not None and payload.get("subtask_code") != current_subtask_code:
+        mismatches.append(
+            f"subtask_code={payload.get('subtask_code')} != current_subtask_code={current_subtask_code}"
+        )
+
+    if mismatches:
         return {
             "accepted": False,
             "status": "STALE_IGNORED",
-            "stale_reason": (
-                f"result.execution_id={result.get('execution_id')} "
-                f"!= current_execution_id={current_execution_id}"
-            ),
+            "stale_reason": "; ".join(mismatches),
         }
     return {
         "accepted": True,

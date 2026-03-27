@@ -58,8 +58,15 @@ async def main() -> None:
 
     result = await app.ainvoke({})
     print("\n对比:")
+    print(f"  bad_state_shape={{'bad_payload_size': {result['bad_payload_size']}}}")
+    print(
+        "  good_state_shape="
+        f"{{'document_ref': {result['document_ref']!r}, 'preview': {result['preview']!r}}}"
+    )
     print(f"  bad_payload_size={result['bad_payload_size']}")
     print(f"  good_payload_size={result['good_payload_size']}")
+    stored = store.get(("docs", "travel", "active"), "policy-001")
+    print(f"  store_snapshot={stored.value if stored else None}")
 
 
 if __name__ == "__main__":

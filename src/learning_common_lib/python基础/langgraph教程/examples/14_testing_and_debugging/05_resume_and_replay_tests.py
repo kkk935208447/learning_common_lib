@@ -7,7 +7,8 @@ from __future__ import annotations
 预期现象：
   1. 同一 thread_id 能正确恢复
   2. 不同 thread_id 不会串线
-  3. stale result helper 能拦住旧执行结果
+  3. full fencing tuple 能拦住旧执行结果
+  4. duplicate resume 不会重复处理相同 result_ref
 """
 
 import asyncio
@@ -16,6 +17,15 @@ from typing import TypedDict
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
+
+try:
+    from ...templates import accept_or_mark_stale
+except ImportError:  # pragma: no cover
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from templates import accept_or_mark_stale
 
 
 class ResumeState(TypedDict, total=False):
@@ -28,8 +38,11 @@ def wait_for_result(state: ResumeState) -> dict:
     return {"result": payload["result"]}
 
 
-def stale_guard(result_execution_id: str, current_execution_id: str) -> bool:
-    return result_execution_id == current_execution_id
+def duplicate_resume_guard(result_ref: str, seen_result_refs: set[str]) -> bool:
+    if result_ref in seen_result_refs:
+        return False
+    seen_result_refs.add(result_ref)
+    return True
 
 
 async def test_resume_same_thread() -> None:
@@ -65,16 +78,49 @@ async def test_thread_isolation() -> None:
     print("[PASS] test_thread_isolation")
 
 
-def test_stale_result_guard() -> None:
-    assert stale_guard("exec-002", "exec-002") is True
-    assert stale_guard("exec-001", "exec-002") is False
-    print("[PASS] test_stale_result_guard")
+def test_full_fencing_tuple() -> None:
+    accepted = accept_or_mark_stale(
+        {
+            "task_id": "task-1",
+            "execution_id": "exec-002",
+            "status": "COMPLETED",
+            "result_payload": {"plan_version": 1, "subtask_code": "ST-001"},
+        },
+        current_execution_id="exec-002",
+        current_task_id="task-1",
+        current_plan_version=1,
+        current_subtask_code="ST-001",
+    )
+    stale = accept_or_mark_stale(
+        {
+            "task_id": "task-old",
+            "execution_id": "exec-001",
+            "status": "COMPLETED",
+            "result_payload": {"plan_version": 0, "subtask_code": "ST-OLD"},
+        },
+        current_execution_id="exec-002",
+        current_task_id="task-1",
+        current_plan_version=1,
+        current_subtask_code="ST-001",
+    )
+    assert accepted["accepted"] is True
+    assert stale["accepted"] is False
+    print("[PASS] test_full_fencing_tuple")
+
+
+def test_duplicate_resume_guard() -> None:
+    seen: set[str] = set()
+    assert duplicate_resume_guard("run://3001", seen) is True
+    assert duplicate_resume_guard("run://3001", seen) is False
+    assert duplicate_resume_guard("run://3002", seen) is True
+    print("[PASS] test_duplicate_resume_guard")
 
 
 async def main() -> None:
     await test_resume_same_thread()
     await test_thread_isolation()
-    test_stale_result_guard()
+    test_full_fencing_tuple()
+    test_duplicate_resume_guard()
 
 
 if __name__ == "__main__":

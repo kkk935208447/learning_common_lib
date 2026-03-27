@@ -78,6 +78,9 @@ def test_tool_call_sequence() -> None:
     app = graph.compile()
 
     result = app.invoke({"messages": [HumanMessage(content="什么是 LangGraph？")]})
+    print("  消息流:")
+    for idx, message in enumerate(result["messages"]):
+        print(f"    [{idx}] {type(message).__name__}: {getattr(message, 'content', '') or getattr(message, 'tool_calls', '')}")
     assert "有状态工作流" in result["messages"][-1].content
     print("[PASS] test_tool_call_sequence")
 

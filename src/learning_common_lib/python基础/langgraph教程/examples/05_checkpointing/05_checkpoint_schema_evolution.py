@@ -11,6 +11,7 @@ from __future__ import annotations
 生产提醒：
   - 新增 state 字段时，节点必须用 `state.get(...)` 提供默认值
   - checkpoint 是运行时恢复点，不是 schema 严格受控的业务真理源
+  - 本例通过 `aget_state()` 读取旧 checkpoint 后再交给 V2 图，目的是显式展示“兼容旧 state 结构”的心智
 """
 
 import asyncio
@@ -87,6 +88,8 @@ async def main() -> None:
 
     print("=== 第二步：新版本图恢复旧 checkpoint ===")
     restored = await app_v2.aget_state(config)
+    print(f"恢复到的旧 state: {restored.values}")
+    print("兼容 checklist: 新字段用 get() / 旧字段可缺省 / 不假设 checkpoint 一定是当前版本")
     result_v2 = await app_v2.ainvoke(restored.values, config=config)
     print(f"V2 state: {result_v2}")
 

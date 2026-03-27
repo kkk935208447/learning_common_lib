@@ -6,6 +6,10 @@
 
 运行命令：
     python 03_double_texting.py
+
+生产提醒：
+    - 本例是“单进程网关 + 图等待态”示例，不代表多实例网关实现
+    - 真正生产环境还需要共享幂等缓存、分布式锁或统一入口层策略
 """
 from __future__ import annotations
 
@@ -110,12 +114,18 @@ class DoubleTextGateway:
     ) -> dict:
         if idempotency_key in self.idempotency_cache:
             cached = self.idempotency_cache[idempotency_key]
+            print(f"[gateway] idempotency hit key={idempotency_key} cached={cached}")
             return {**cached, "status": "idempotent_replay"}
 
         if not await self._is_waiting(thread_id):
+            print(f"[gateway] thread_id={thread_id} 当前无等待任务，直接启动")
             return await self._start_new(thread_id, message, idempotency_key)
 
         current_request_id = await self._current_request_id(thread_id)
+        print(
+            f"[gateway] thread_id={thread_id} active_request_id={current_request_id} "
+            f"strategy={strategy.value}"
+        )
         if strategy == Strategy.REJECT:
             response = {
                 "status": "rejected_busy",
@@ -127,6 +137,7 @@ class DoubleTextGateway:
 
         if strategy == Strategy.ENQUEUE:
             self.queues.setdefault(thread_id, deque()).append((message, idempotency_key))
+            print(f"[gateway] queue[{thread_id}]={list(self.queues[thread_id])}")
             response = {
                 "status": "enqueued",
                 "thread_id": thread_id,
@@ -138,22 +149,28 @@ class DoubleTextGateway:
 
         if strategy == Strategy.INTERRUPT:
             self.cancelled_requests.setdefault(thread_id, []).append(current_request_id or "unknown")
+            print(f"[gateway] interrupt cancel record={self.cancelled_requests[thread_id]}")
             return await self._start_new(thread_id, message, idempotency_key)
 
         if strategy == Strategy.ROLLBACK:
             self.cancelled_requests.setdefault(thread_id, []).append(f"rollback:{current_request_id or 'unknown'}")
             self.queues[thread_id] = deque()
+            print(f"[gateway] rollback cancel record={self.cancelled_requests[thread_id]}")
             return await self._start_new(thread_id, message, idempotency_key)
 
         raise ValueError(f"未知策略: {strategy}")
 
     async def resume_worker(self, *, thread_id: str, worker_summary: str) -> dict:
+        current_state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
+        print(f"[gateway.resume] before_state={current_state.values}")
         result = await self.app.ainvoke(
             Command(resume={"worker_summary": worker_summary}),
             config={"configurable": {"thread_id": thread_id}},
         )
+        print(f"[gateway.resume] completed_result={result}")
         if self.queues.get(thread_id):
             message, idem_key = self.queues[thread_id].popleft()
+            print(f"[gateway.resume] dequeue next message={message} remaining_queue={list(self.queues[thread_id])}")
             queued = await self._start_new(thread_id, message, idem_key)
             return {
                 "completed": result["final_answer"],

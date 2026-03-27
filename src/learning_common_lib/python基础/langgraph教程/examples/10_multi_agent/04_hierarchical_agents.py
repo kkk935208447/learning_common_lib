@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 """
-目标: 两层 Agent — 全局调度 + 子任务执行，参考 AgenticRAG GlobalGraph + SubtaskGraph 双图
+目标: 两层 Agent — 全局调度 + 子任务执行（toy baseline）
 关键 API: StateGraph 嵌套、子图独立编译
 运行命令: python 04_hierarchical_agents.py
 预期现象: 全局调度器分解任务 → 子任务 Agent 独立执行 → 结果汇总到全局
 生产提醒: 层级 Agent 适合任务可分解的场景，注意子任务间的依赖关系
+
+注意：
+  - 这个文件仍是 toy baseline，但已经改成“最小局部闭环子图”，不再是单节点 execute
+  - 如果你要看真实版 graph worker 和结构化结果契约，请继续看 `06_supervisor_with_subgraphs.py`
 """
 
 import asyncio
@@ -22,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 class SubAgentState(TypedDict, total=False):
     task: str
     agent_type: str  # "researcher" | "writer" | "reviewer"
+    prepared_context: str
     result: str
 
 
@@ -37,17 +42,28 @@ class GlobalState(TypedDict, total=False):
 # 子任务 Agent 图
 # ---------------------------------------------------------------------------
 
+def sub_prepare(state: SubAgentState) -> dict:
+    """子图预处理：为 execute 组装最小上下文"""
+    agent = state.get("agent_type", "unknown")
+    task = state.get("task", "")
+    prepared = f"{agent}::prepared::{task}"
+    print(f"  [{agent}.prepare] prepared_context={prepared}")
+    return {"prepared_context": prepared}
+
+
 def sub_execute(state: SubAgentState) -> dict:
     """子 Agent 执行"""
     agent = state.get("agent_type", "unknown")
-    task = state.get("task", "")
-    print(f"  [{agent}] 执行: {task}")
-    return {"result": f"{agent} 完成: {task}"}
+    prepared = state.get("prepared_context", "")
+    print(f"  [{agent}.execute] prepared_context={prepared}")
+    return {"result": f"{agent} 完成: {prepared}"}
 
 
 sub_builder = StateGraph(SubAgentState)
+sub_builder.add_node("prepare", sub_prepare)
 sub_builder.add_node("execute", sub_execute)
-sub_builder.add_edge(START, "execute")
+sub_builder.add_edge(START, "prepare")
+sub_builder.add_edge("prepare", "execute")
 sub_builder.add_edge("execute", END)
 sub_agent_graph = sub_builder.compile()
 
@@ -74,7 +90,9 @@ async def dispatch(state: GlobalState) -> dict:
     subtasks = state.get("subtasks", [])
     results: list[str] = []
     for st in subtasks:
+        print(f"[dispatch] -> subtask={st}")
         sub_result = await sub_agent_graph.ainvoke(st)
+        print(f"[dispatch] <- sub_result={sub_result}")
         results.append(sub_result.get("result", ""))
     return {"results": results}
 

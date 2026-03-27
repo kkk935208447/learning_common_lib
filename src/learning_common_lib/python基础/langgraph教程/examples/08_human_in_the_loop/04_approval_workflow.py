@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 """
-目标: 完整审批流 + Clarify 模式，参考 AgenticRAG 的 clarification_source 机制
+目标: 完整审批流 + Clarify 模式（toy baseline）
 关键 API: interrupt + Command(resume=...)
 运行命令: python 04_approval_workflow.py
 预期现象: 请求进入审批流，审批者可批准/拒绝/要求澄清，澄清后重新提交
 生产提醒: 审批流是企业级 Agent 的核心模式，需要持久化 checkpointer 保证状态不丢失
+
+注意：
+  - 这是旧版 baseline，恢复协议仍然是自由字符串
+  - 真实版请继续看 `05_structured_approval_contract.py` 和 `06_clarify_with_timeout_default.py`
 """
 
 from typing import Literal, TypedDict

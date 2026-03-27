@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 """
-目标: Plan-Execute-Replan 循环，直接模拟 AgenticRAG 全局循环
+目标: Plan-Execute-Replan 循环（toy baseline）
 关键 API: planner→executor→evaluator→replan 四节点循环
 运行命令: python 03_plan_execute_replan.py
 预期现象: 规划器生成计划 → 执行器逐步执行 → 评估器检查质量 → 不满意则重规划
 生产提醒: 控制最大迭代次数防止无限循环，每轮评估应有明确的通过/失败标准
+
+注意：
+  - 这是最小循环形状，不是生产级 replan 设计
+  - 更真实的版本请继续看 `07_replan_with_fingerprint.py` 和 `08_partial_plan_reuse.py`
 """
 
 import asyncio

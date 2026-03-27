@@ -1,4 +1,18 @@
-"""FastAPI + LangGraph 集成：SSE 流式端点、lifespan 管理、健康检查。"""
+"""FastAPI + LangGraph 集成：SSE 流式端点、lifespan 管理、健康检查。
+
+模板版本不追求完整业务系统，但至少提供：
+- heartbeat
+- Last-Event-ID
+- store-backed progress event replay
+
+注意：
+- token stream 仍然只是即时渲染通道
+- replay 真理源是结构化 progress events，不是 token chunk
+- 当前模板仍故意省略：
+  - client disconnect 检测
+  - 多 writer 事件 ID 原子性
+  - backlog retention / trim
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +21,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.responses import StreamingResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.runnables import RunnableConfig
@@ -33,6 +47,58 @@ _runtime_settings: RedisRuntimeSettings | None = None
 _checkpoint_manager: CheckpointManager | None = None
 _store_manager: StoreManager | None = None
 _store_instance: Any = None
+
+
+def _event_namespace(thread_id: str) -> tuple[str, str, str]:
+    return ("threads", thread_id, "events")
+
+
+async def _store_get(namespace: tuple[str, ...], key: str) -> Any:
+    if hasattr(_store_instance, "aget"):
+        return await _store_instance.aget(namespace, key)
+    return _store_instance.get(namespace, key)
+
+
+async def _store_put(namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+    if hasattr(_store_instance, "aput"):
+        await _store_instance.aput(namespace, key, value)
+        return
+    _store_instance.put(namespace, key, value)
+
+
+async def _store_search(namespace: tuple[str, ...]) -> list[Any]:
+    if hasattr(_store_instance, "asearch"):
+        return await _store_instance.asearch(namespace, limit=100)
+    return _store_instance.search(namespace, limit=100)
+
+
+async def _next_event_id(thread_id: str) -> int:
+    namespace = _event_namespace(thread_id)
+    meta = await _store_get(namespace, "__meta__")
+    current = 1
+    if meta is not None:
+        current = int(meta.value.get("last_event_id", 0)) + 1
+    await _store_put(namespace, "__meta__", {"last_event_id": current})
+    return current
+
+
+async def _append_event(thread_id: str, event: str, data: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "id": await _next_event_id(thread_id),
+        "event": event,
+        "data": {"thread_id": thread_id, **data},
+    }
+    await _store_put(_event_namespace(thread_id), f"{record['id']:08d}", record)
+    return record
+
+
+async def _replay_events(thread_id: str, last_event_id: int | None) -> list[dict[str, Any]]:
+    if last_event_id is None:
+        return []
+    items = await _store_search(_event_namespace(thread_id))
+    records = [item.value for item in items if item.key != "__meta__"]
+    records.sort(key=lambda item: item["id"])
+    return [item for item in records if item["id"] > last_event_id]
 
 
 def _resolve_thread_id(thread_id: str | None, *, label: str) -> str:
@@ -102,10 +168,27 @@ async def graph_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # SSE 流式生成器
 # ---------------------------------------------------------------------------
 
-async def _sse_stream(input_data: dict[str, Any], thread_id: str) -> AsyncGenerator[str, None]:
+async def _sse_stream(
+    input_data: dict[str, Any],
+    thread_id: str,
+    *,
+    last_event_id: int | None = None,
+) -> AsyncGenerator[str, None]:
     """SSE 流式输出图执行过程。"""
     config = {"configurable": {"thread_id": thread_id}}
-    yield f"data: {json.dumps({'event': 'start', 'thread_id': thread_id}, ensure_ascii=False)}\n\n"
+    for record in await _replay_events(thread_id, last_event_id):
+        yield (
+            f"id: {record['id']}\n"
+            f"event: {record['event']}\n"
+            f"data: {json.dumps(record['data'], ensure_ascii=False)}\n\n"
+        )
+    accepted = await _append_event(thread_id, "task.accepted", {"status": "PENDING"})
+    yield (
+        f"id: {accepted['id']}\n"
+        f"event: {accepted['event']}\n"
+        f"data: {json.dumps(accepted['data'], ensure_ascii=False)}\n\n"
+    )
+    yield f"event: heartbeat\ndata: {json.dumps({'thread_id': thread_id}, ensure_ascii=False)}\n\n"
     async for chunk, metadata in _graph_instance.astream(
         input_data,
         config=config,
@@ -114,9 +197,17 @@ async def _sse_stream(input_data: dict[str, Any], thread_id: str) -> AsyncGenera
         content = getattr(chunk, "content", "")
         if not content:
             continue
-        yield f"data: {json.dumps({'event': 'token', 'node': metadata.get('langgraph_node'), 'token': content}, ensure_ascii=False)}\n\n"
+        yield (
+            f"event: token\n"
+            f"data: {json.dumps({'node': metadata.get('langgraph_node'), 'token': content}, ensure_ascii=False)}\n\n"
+        )
         await asyncio.sleep(0)
-    yield f"data: {json.dumps({'event': 'end', 'thread_id': thread_id}, ensure_ascii=False)}\n\n"
+    completed = await _append_event(thread_id, "task.completed", {"status": "COMPLETED"})
+    yield (
+        f"id: {completed['id']}\n"
+        f"event: {completed['event']}\n"
+        f"data: {json.dumps(completed['data'], ensure_ascii=False)}\n\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -153,12 +244,15 @@ def create_graph_app(title: str = "LangGraph API") -> FastAPI:
         return {"thread_id": thread_id, "result": result["messages"][-1].content}
 
     @app.post("/stream")
-    async def stream(payload: dict[str, Any]) -> StreamingResponse:
+    async def stream(
+        payload: dict[str, Any],
+        last_event_id: int | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
         """SSE 流式调用图。"""
         thread_id = _resolve_thread_id(payload.get("thread_id"), label="stream")
         input_data = payload.get("input", {})
         return StreamingResponse(
-            _sse_stream(input_data, thread_id),
+            _sse_stream(input_data, thread_id, last_event_id=last_event_id),
             media_type="text/event-stream",
         )
 

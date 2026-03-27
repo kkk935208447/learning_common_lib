@@ -1,7 +1,13 @@
-"""LangGraph + Celery 桥接模式（更真实的 accepted/stale 语义）。
+"""LangGraph + Celery 桥接模式（完整 fencing + duplicate resume 版）。
 
 目标：
     演示“分发 -> 等待 -> 外部结果回写 -> accepted/stale 判定 -> 恢复”链路。
+
+关键点：
+    - fencing 主键不只看 execution_id，还看 task_id / plan_version / subtask_code
+    - duplicate resume 不应重复推进 finalize
+    - 中间态打印必须让读者看见 waiting snapshot 和 accepted/stale 差异
+    - 本例仍故意省略 maintenance/reaper/outbox 补偿，只聚焦恢复主链和 fencing
 """
 from __future__ import annotations
 
@@ -52,6 +58,9 @@ def require_real_redis(*, backend: str, degraded: bool, last_error: str | None =
 
 
 class BridgeState(TypedDict, total=False):
+    task_id: str
+    plan_version: int
+    subtask_code: str
     query: str
     thread_id: str
     current_execution_id: str
@@ -60,6 +69,7 @@ class BridgeState(TypedDict, total=False):
     latest_resume: ResumeEnvelope | None
     accepted_results: list[str]
     stale_results: list[str]
+    processed_resume_ids: list[str]
     next_action: str
     final_result: str
 
@@ -73,10 +83,10 @@ def dispatch(state: BridgeState) -> dict:
         "queue": "subtask_jobs",
         "task_name": "execute_subtask",
         "status": "DISPATCHED",
-        "plan_version": 1,
-        "subtask_code": "ST-001",
+        "plan_version": state["plan_version"],
+        "subtask_code": state["subtask_code"],
     }
-    print(f"[dispatch] {envelope}")
+    print(f"[dispatch] envelope={envelope}")
     return {
         "current_execution_id": execution_id,
         "dispatch_envelope": envelope,
@@ -86,36 +96,53 @@ def dispatch(state: BridgeState) -> dict:
 
 
 def wait_for_result(state: BridgeState) -> dict:
+    if state.get("latest_resume"):
+        print(f"[wait] latest_resume 已写回: {state['latest_resume']}")
+        return {"next_action": "evaluate"}
     result = interrupt(
         {
             "thread_id": state["thread_id"],
             "execution_id": state["current_execution_id"],
             "waiting_reason": state["waiting_reason"],
+            "task_id": state["task_id"],
+            "plan_version": state["plan_version"],
+            "subtask_code": state["subtask_code"],
         }
     )
     return {"latest_resume": result, "next_action": "evaluate"}
 
 
 def evaluate_result(state: BridgeState) -> dict:
+    result = state["latest_resume"]
+    result_ref = result.get("result_ref") or "unknown"
+    if result_ref in state.get("processed_resume_ids", []):
+        print(f"[evaluate] duplicate resume ignored: result_ref={result_ref}")
+        return {"latest_resume": None, "next_action": "wait"}
     decision = accept_or_mark_stale(
-        state["latest_resume"],
+        result,
         current_execution_id=state["current_execution_id"],
+        current_task_id=state["dispatch_envelope"]["task_id"],
+        current_plan_version=state["plan_version"],
+        current_subtask_code=state["subtask_code"],
     )
     if not decision["accepted"]:
         print(f"[evaluate] stale ignored: {decision['stale_reason']}")
         return {
             "stale_results": [
                 *state.get("stale_results", []),
-                state["latest_resume"]["execution_id"],
+                result["execution_id"],
             ],
+            "processed_resume_ids": [*state.get("processed_resume_ids", []), result_ref],
+            "latest_resume": None,
             "next_action": "wait",
         }
-    print(f"[evaluate] accepted: {state['latest_resume']['execution_id']}")
+    print(f"[evaluate] accepted: execution_id={result['execution_id']} result_ref={result_ref}")
     return {
         "accepted_results": [
             *state.get("accepted_results", []),
-            state["latest_resume"]["execution_id"],
+            result["execution_id"],
         ],
+        "processed_resume_ids": [*state.get("processed_resume_ids", []), result_ref],
         "next_action": "finalize",
     }
 
@@ -162,14 +189,18 @@ async def main() -> None:
     print("=== 第一次调用：只分发并进入等待态 ===")
     waiting = await app.ainvoke(
         {
+            "task_id": "task-001",
+            "plan_version": 1,
+            "subtask_code": "ST-001",
             "query": "分析近 30 天的差旅制度变化",
             "thread_id": thread_id,
             "accepted_results": [],
             "stale_results": [],
+            "processed_resume_ids": [],
         },
         config=config,
     )
-    print(waiting["dispatch_envelope"])
+    print(f"waiting_snapshot={waiting}\n")
 
     print("\n=== 旧结果回写：不会推进 finalize ===")
     stale_waiting = await app.ainvoke(
@@ -180,12 +211,36 @@ async def main() -> None:
                 "task_id": "task-stale",
                 "status": "COMPLETED",
                 "result_ref": "run://2999",
-                "result_payload": {"summary": "旧 worker 结果"},
+                "result_payload": {
+                    "summary": "旧 worker 结果",
+                    "plan_version": 0,
+                    "subtask_code": "ST-OLD",
+                },
             }
         ),
         config=config,
     )
-    print(f"stale_results={stale_waiting.get('stale_results')}")
+    print(f"after_stale_snapshot={stale_waiting}\n")
+
+    print("\n=== 重复回放同一 stale result：不会再次写 accepted/stale ===")
+    duplicate = await app.ainvoke(
+        Command(
+            resume={
+                "thread_id": thread_id,
+                "execution_id": "exec-stale-old",
+                "task_id": "task-stale",
+                "status": "COMPLETED",
+                "result_ref": "run://2999",
+                "result_payload": {
+                    "summary": "旧 worker 结果",
+                    "plan_version": 0,
+                    "subtask_code": "ST-OLD",
+                },
+            }
+        ),
+        config=config,
+    )
+    print(f"after_duplicate_snapshot={duplicate}\n")
 
     print("\n=== 当前结果回写：accepted 后完成 ===")
     completed = await app.ainvoke(
@@ -196,11 +251,16 @@ async def main() -> None:
                 "task_id": waiting["dispatch_envelope"]["task_id"],
                 "status": "COMPLETED",
                 "result_ref": "run://3001",
-                "result_payload": {"summary": "worker 已完成 evidence merge"},
+                "result_payload": {
+                    "summary": "worker 已完成 evidence merge",
+                    "plan_version": waiting["plan_version"],
+                    "subtask_code": waiting["subtask_code"],
+                },
             }
         ),
         config=config,
     )
+    print(f"completed_snapshot={completed}")
     print(completed["final_result"])
 
     await checkpoint_mgr.aclose()

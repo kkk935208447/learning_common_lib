@@ -10,6 +10,7 @@ from __future__ import annotations
   3. 恢复器先记录 accepted 事件，再用同一 thread_id 恢复图
 生产提醒：
   - resume_orchestrator 只负责 accepted + resume，不负责自己做调度决策
+  - 这个例子故意不演示调度，只聚焦 accepted + resume 契约
 """
 
 import asyncio
@@ -59,10 +60,14 @@ async def resume_orchestrator(
     config: dict,
     result: ResumeEnvelope,
 ) -> dict:
+    print(f"[resume_orchestrator] before events={TASK_EVENTS}")
     TASK_EVENTS.append(
         f"subtask_result_accepted:{result['execution_id']}:{result['status']}"
     )
-    return await app.ainvoke(Command(resume=result), config=config)
+    resumed = await app.ainvoke(Command(resume=result), config=config)
+    print(f"[resume_orchestrator] after events={TASK_EVENTS}")
+    print(f"[resume_orchestrator] resumed_state={resumed}")
+    return resumed
 
 
 async def main() -> None:

@@ -45,12 +45,14 @@ def planner(state: ReuseState) -> dict:
 
     reused = [item["code"] for item in plan if item["code"] in completed]
     print(f"[planner] 生成 plan_version={version}, reused={reused}")
+    print(f"[planner] plan={plan}")
     return {"plan_version": version, "plan": plan, "reused_codes": reused}
 
 
 def executor(state: ReuseState) -> dict:
     completed = list(state.get("completed_codes", []))
     reused = set(state.get("reused_codes", []))
+    print(f"[executor] completed(before)={completed}")
     for item in state.get("plan", []):
         code = item["code"]
         if code in reused:
@@ -60,6 +62,7 @@ def executor(state: ReuseState) -> dict:
         completed.append(code)
 
     if state["plan_version"] == 1:
+        print(f"[executor] completed(after)={completed}")
         return {"completed_codes": completed, "next_action": "planner"}
     return {
         "completed_codes": completed,

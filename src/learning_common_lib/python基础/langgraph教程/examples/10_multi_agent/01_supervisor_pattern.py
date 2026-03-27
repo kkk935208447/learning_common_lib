@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 """
-目标: Supervisor 模式 — 中心化调度器分配任务给 Worker
+目标: Supervisor 模式 — 中心化调度器分配任务给 Worker（toy baseline）
 关键 API: 条件边路由 + FakeListChatModel 模拟 LLM 决策
 运行命令: python 01_supervisor_pattern.py
 预期现象: Supervisor 根据查询类型将任务分配给不同 Worker，Worker 执行后返回结果
 生产提醒: Supervisor 是单控制平面原则的体现，所有决策由一个节点统一管理
+
+注意：
+  - 这是故意简化的 toy baseline，worker 仍然是普通函数
+  - 如果你要看更接近真实项目的写法，请继续看 `06_supervisor_with_subgraphs.py`
 """
 
 import asyncio

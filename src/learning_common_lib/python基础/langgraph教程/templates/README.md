@@ -140,8 +140,21 @@ app = create_graph_app(title="My LangGraph API")
 - checkpoint：Redis-first，失败降级到 `MemorySaver`
 - store：Redis-first，失败降级到 `InMemoryStore`
 - checkpoint / store 默认共享 db=0，通过不同 prefix 隔离
-- FastAPI SSE：`stream_mode="messages"`
+- FastAPI SSE：token channel + store-backed progress events replay
 - Celery：统一使用 runtime settings 中的 Redis URL
+
+当前模板边界：
+
+- FastAPI 模板已经包含 heartbeat / `Last-Event-ID` / store-backed replay 的最小语义
+- 但它仍然不是完整生产实现：未覆盖 client disconnect、事件 ID 多 writer 原子性、retention/trim
+- 因此它是“production-shaped skeleton”，不是“直接上线模板”
+
+## 何时进入模板层
+
+建议按下面这条规则判断：
+
+- 如果你还在理解 `graph worker / stale fencing / replay / structured approval` 为什么存在，先停留在 `examples/` 的 realistic example
+- 只有当你已经知道这些语义为什么需要，并准备抽出复用骨架时，再进入 `templates/`
 
 ## 教程映射
 

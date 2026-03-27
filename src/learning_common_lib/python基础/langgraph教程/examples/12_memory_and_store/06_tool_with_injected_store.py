@@ -11,6 +11,7 @@ from __future__ import annotations
 生产提醒：
   - 不要把整个 state 明文交给模型
   - tool 的系统注入参数应该对模型不可见
+  - 本例中模型只能生成 `topic` 或空参数，`store` 和 `user_id` 都由系统注入
 """
 
 import asyncio
@@ -61,6 +62,8 @@ def agent(state: PreferenceState) -> dict:
     last = state["messages"][-1]
     if isinstance(last, HumanMessage):
         if "记住" in last.content:
+            print("[agent] 模型可见参数: {'topic': 'Python'}")
+            print("[agent] 系统注入参数: store, user_id")
             return {
                 "messages": [
                     AIMessage(
@@ -75,6 +78,8 @@ def agent(state: PreferenceState) -> dict:
                     )
                 ]
             }
+        print("[agent] 模型可见参数: {}")
+        print("[agent] 系统注入参数: store, user_id")
         return {
             "messages": [
                 AIMessage(

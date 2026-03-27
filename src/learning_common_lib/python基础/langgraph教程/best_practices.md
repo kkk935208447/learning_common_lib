@@ -127,6 +127,7 @@ SSE 端点建议：
 - 15-30s 心跳
 - 支持 `Last-Event-ID`
 - 结构化业务事件持久化后再回放，不只依赖 token 流
+- token stream 负责即时渲染，progress event 负责 durable replay
 - `Cache-Control: no-cache`
 - `X-Accel-Buffering: no`
 - 并发限制使用 `asyncio.Semaphore`
@@ -138,6 +139,7 @@ SSE 端点建议：
 - 父图与子图职责边界要清晰：
   - 父图负责控制面
   - 子图负责局部执行闭环
+- 当子图需要把决策权交回父图时，优先考虑 `Command(graph=Command.PARENT, ...)`
 - 子图调用也建议 async-first：
 
 ```python
@@ -162,6 +164,7 @@ sub_result = await sub_graph.ainvoke(sub_input)
   - TRANSIENT：可重试
   - PERMANENT：不可重试
   - DEGRADABLE：可降级
+- 手写 retry/fallback 之外，也要知道节点级 `RetryPolicy` / `CachePolicy`
 - 错误统一写回 `state["error"]`
 - 路由函数依据错误字段决定 retry / fallback / escalate
 - 使用指数退避控制重试节奏

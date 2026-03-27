@@ -14,6 +14,7 @@ INTEGRATION_EXAMPLES = {
 }
 
 REALISTIC_MULTI_AGENT_EXAMPLES = {
+    "07_subgraph_composition/05_command_parent_handoff.py",
     "10_multi_agent/06_supervisor_with_subgraphs.py",
     "10_multi_agent/07_replan_with_fingerprint.py",
     "10_multi_agent/08_partial_plan_reuse.py",
@@ -23,8 +24,11 @@ RESUME_RECOVERY_EXAMPLES = {
     "05_checkpointing/05_checkpoint_schema_evolution.py",
     "05_checkpointing/06_subgraph_thread_strategy.py",
     "05_checkpointing/07_idempotent_resume_side_effects.py",
+    "06_streaming/07_store_backed_event_replay.py",
     "08_human_in_the_loop/05_structured_approval_contract.py",
     "08_human_in_the_loop/06_clarify_with_timeout_default.py",
+    "09_error_and_resilience/05_retry_policy_and_cache_policy.py",
+    "12_memory_and_store/07_store_lifecycle_management.py",
     "14_testing_and_debugging/05_resume_and_replay_tests.py",
     "15_production_deployment/03_double_texting.py",
     "16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py",

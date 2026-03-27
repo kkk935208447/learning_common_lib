@@ -1,4 +1,10 @@
-"""节点错误处理中间件：为 LangGraph 节点提供统一的超时、异常捕获与降级能力。"""
+"""节点错误处理中间件：为 LangGraph 节点提供统一的超时、异常捕获与降级能力。
+
+注意：
+- 当前版本最适合包装 `func(state)` 这种节点签名
+- 如果节点还依赖 `RunnableConfig` / store / injected context，需要更高阶包装器
+- 因此不要把这个示例模板误当成所有生产节点的最终通用解
+"""
 from __future__ import annotations
 
 import asyncio

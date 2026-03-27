@@ -401,3 +401,19 @@ def researcher(state): ...
 - 恢复器只做 accepted/stale 判定
 - 然后用同一个 `thread_id` 恢复图
 - 真正的下一步仍由 `GlobalGraph` 决定
+
+## 18. 把 token 流当成 replay 真理源
+
+如果你只保存：
+
+- `token: 差`
+- `token: 旅`
+- `token: 规`
+
+那么断线重连后，你并没有结构化业务进度可回放。
+
+更正确的做法是：
+
+- token 流只负责 UI 即时渲染
+- `task.accepted / task.planning / task.completed` 这类结构化事件单独落真理源
+- `Last-Event-ID` 只针对结构化事件 replay

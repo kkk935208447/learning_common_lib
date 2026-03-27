@@ -217,7 +217,11 @@ llm = FakeListChatModel(responses=["模拟回复"])
 - `10_multi_agent/08_partial_plan_reuse.py`
 - `05_checkpointing/05_checkpoint_schema_evolution.py`
 - `06_streaming/05_sse_replay_and_heartbeat.py`
+- `06_streaming/07_store_backed_event_replay.py`
 - `08_human_in_the_loop/05_structured_approval_contract.py`
+- `07_subgraph_composition/05_command_parent_handoff.py`
+- `09_error_and_resilience/05_retry_policy_and_cache_policy.py`
+- `12_memory_and_store/07_store_lifecycle_management.py`
 - `16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py`
 
 ## Async-First 教程约定
@@ -323,14 +327,15 @@ thread_id 命名约定（参考 AgenticRAG）：
 
 - `05_checkpointing`：thread_id、checkpoint、恢复、schema 演进、幂等副作用
 - `06_streaming`：`astream(..., stream_mode=...)` 与 `astream_events(...)` 的边界，SSE replay/heartbeat
+- `07_subgraph_composition`：父子图边界、`Command.PARENT` 控制权回收
 - `08_human_in_the_loop`：动态 `interrupt()` 为主，结构化审批与 Clarify 为主线
-- `09_error_and_resilience`：safe node、retry、fallback、escalation
+- `09_error_and_resilience`：safe node、retry、fallback、escalation、内置 retry/cache policy
 
 ### 架构能力
 
 - `10_multi_agent`：supervisor、swarm、plan-execute-replan、blackboard、graph worker
 - `11_dynamic_and_parallel`：`Send`、`Command`、map-reduce
-- `12_memory_and_store`：checkpoint 与 store 的职责边界、InjectedStore / InjectedState
+- `12_memory_and_store`：checkpoint 与 store 的职责边界、InjectedStore / InjectedState、Store 生命周期
 
 ### AgenticRAG 映射
 

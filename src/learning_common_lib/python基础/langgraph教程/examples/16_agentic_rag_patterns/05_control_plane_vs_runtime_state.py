@@ -10,6 +10,7 @@ from __future__ import annotations
 生产提醒：
   - checkpoint 不是业务真理源
   - 图越复杂，越需要把审计和恢复判定放到控制面
+  - 本例中 CONTROL_PLANE 负责 status/events/current_execution_id，RuntimeState 只负责等待与恢复引用
 """
 
 import asyncio
@@ -71,7 +72,9 @@ async def main() -> None:
     config = {"configurable": {"thread_id": "tenant:demo:task:101"}}
     waiting = await app.ainvoke({"task_id": "101"}, config=config)
     print("=== runtime state ===")
-    print(waiting)
+    print(f"  execution_ref={waiting.get('execution_ref')}")
+    print(f"  waiting_reason={waiting.get('waiting_reason')}")
+    print(f"  latest_result_ref={waiting.get('latest_result_ref')}")
     print("\n=== control plane ===")
     print(CONTROL_PLANE["101"])
 
@@ -80,8 +83,9 @@ async def main() -> None:
         config=config,
     )
     print("\n=== 完成后 ===")
-    print(completed["final_answer"])
-    print(CONTROL_PLANE["101"])
+    print(f"  final_answer={completed['final_answer']}")
+    print(f"  latest_result_ref={completed.get('latest_result_ref')}")
+    print(f"  control_plane={CONTROL_PLANE['101']}")
 
 
 if __name__ == "__main__":
