@@ -30,6 +30,7 @@
     - K8s 默认 SIGTERM 后 30 秒强制 SIGKILL，确保关闭逻辑在此之内完成
     - checkpoint 保存是关键：确保中断的任务可以从断点恢复
     - 使用 health check 端点配合 readiness probe
+    - 本例用 `interrupt_after=["process"]` 把每一步的 checkpoint 显式展示出来
 """
 from __future__ import annotations
 
@@ -65,13 +66,48 @@ def check_complete(state: TaskState) -> str:
     return END if state["progress"] >= 100 else "process"
 
 
-def build_task_graph():
+def build_task_graph(*, checkpointer=None, interrupt_after_process: bool = False):
     graph = StateGraph(TaskState)
     graph.add_node("process", process_step)
     graph.set_entry_point("process")
     graph.add_conditional_edges("process", check_complete, {END: END, "process": "process"})
-    checkpointer = MemorySaver()
-    return graph.compile(checkpointer=checkpointer)
+    compile_kwargs = {
+        "checkpointer": checkpointer or MemorySaver(),
+    }
+    if interrupt_after_process:
+        compile_kwargs["interrupt_after"] = ["process"]
+    return graph.compile(**compile_kwargs)
+
+
+def run_steps(app, *, config: dict, initial_state: TaskState | None, steps: int) -> dict:
+    """执行固定步数，便于观察每一步后的 checkpoint。"""
+    payload = initial_state
+    latest_result = {}
+    for step in range(1, steps + 1):
+        latest_result = app.invoke(payload, config=config)
+        snapshot = app.get_state(config)
+        print(
+            f"  [checkpoint] step={step} "
+            f"progress={snapshot.values.get('progress')}% next={snapshot.next}"
+        )
+        payload = None
+        if snapshot.values.get("progress", 0) >= 100:
+            break
+    return latest_result
+
+
+def run_until_complete(app, *, config: dict, initial_state: TaskState | None = None) -> dict:
+    """从当前 checkpoint 持续执行，直到任务完成。"""
+    payload = initial_state
+    while True:
+        result = app.invoke(payload, config=config)
+        snapshot = app.get_state(config)
+        print(
+            f"  [checkpoint] progress={snapshot.values.get('progress')}% next={snapshot.next}"
+        )
+        if snapshot.values.get("progress", 0) >= 100:
+            return result
+        payload = None
 
 
 # ══════════════════════════════════════════════════════════
@@ -145,7 +181,11 @@ class GracefulShutdownManager:
 
 def demo_graceful_shutdown() -> None:
     """模拟优雅关闭流程"""
-    app = build_task_graph()
+    checkpointer = MemorySaver()
+    app = build_task_graph(
+        checkpointer=checkpointer,
+        interrupt_after_process=True,
+    )
     manager = GracefulShutdownManager(timeout=5.0)
 
     # 模拟正常执行
@@ -153,9 +193,10 @@ def demo_graceful_shutdown() -> None:
     config = {"configurable": {"thread_id": "task-001"}}
     manager.register_task("task-001")
 
-    result = app.invoke(
-        {"task_id": "001", "progress": 0, "result": ""},
+    result = run_until_complete(
+        app,
         config=config,
+        initial_state={"task_id": "001", "progress": 0, "result": ""},
     )
     manager.unregister_task("task-001")
     print(f"  结果: {result['result']}\n")
@@ -163,14 +204,26 @@ def demo_graceful_shutdown() -> None:
     # 模拟中断恢复
     print("--- 阶段 2: 模拟中断 + 恢复 ---\n")
     config2 = {"configurable": {"thread_id": "task-002"}}
+    print("  先执行两个 superstep，让 checkpointer 留下真实断点...")
+    run_steps(
+        app,
+        config=config2,
+        initial_state={"task_id": "002", "progress": 0, "result": ""},
+        steps=2,
+    )
+    snapshot_before_shutdown = app.get_state(config2)
+    print(f"  关闭前 checkpoint: {snapshot_before_shutdown.values}")
 
-    # 执行到一半（通过 checkpoint 保存进度）
-    partial_state = {"task_id": "002", "progress": 50, "result": ""}
-    print(f"  模拟中断点: 进度 50%")
+    print("  模拟进程退出后重新编译图...")
+    recovered_app = build_task_graph(
+        checkpointer=checkpointer,
+        interrupt_after_process=True,
+    )
+    restored = recovered_app.get_state(config2)
+    print(f"  恢复到的 state: {restored.values}")
 
-    # 从 checkpoint 恢复
-    print("  从断点恢复执行...")
-    result2 = app.invoke(partial_state, config=config2)
+    print("  从 checkpoint 继续执行...")
+    result2 = run_until_complete(recovered_app, config=config2)
     print(f"  恢复后结果: {result2['result']}\n")
 
     # 模拟关闭流程

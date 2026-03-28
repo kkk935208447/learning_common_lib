@@ -26,6 +26,9 @@ Double-texting 处理策略（更真实的等待/恢复版）。
 生产提醒:
     - 本例是“单进程网关 + 图等待态”示例，不代表多实例网关实现
     - 真正生产环境还需要共享幂等缓存、分布式锁或统一入口层策略
+    - `interrupt` / `rollback` 在这里表示“用新请求替换同一 thread 的当前头”
+    - 因此 worker 回写结果时必须携带 request_id，并在 resume 前做 fencing
+    - 如果你想保留被替换请求的历史头，应该新开 thread_id，而不是覆盖当前线程
 """
 from __future__ import annotations
 
@@ -97,6 +100,7 @@ class DoubleTextGateway:
         self.queues: dict[str, deque[tuple[str, str]]] = {}
         self.idempotency_cache: dict[str, dict] = {}
         self.cancelled_requests: dict[str, list[str]] = {}
+        self.stale_worker_results: dict[str, list[str]] = {}
 
     async def _is_waiting(self, thread_id: str) -> bool:
         state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
@@ -176,11 +180,45 @@ class DoubleTextGateway:
 
         raise ValueError(f"未知策略: {strategy}")
 
-    async def resume_worker(self, *, thread_id: str, worker_summary: str) -> dict:
+    async def resume_worker(
+        self,
+        *,
+        thread_id: str,
+        request_id: str,
+        worker_summary: str,
+    ) -> dict:
         current_state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
         print(f"[gateway.resume] before_state={current_state.values}")
+        active_request_id = current_state.values.get("request_id") if current_state.values else None
+        waiting_reason = current_state.values.get("waiting_reason") if current_state.values else None
+
+        if waiting_reason != "WORKER":
+            print(
+                f"[gateway.resume] ignore because thread is not waiting: "
+                f"thread_id={thread_id} active_request_id={active_request_id}"
+            )
+            return {
+                "status": "not_waiting",
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "active_request_id": active_request_id,
+            }
+
+        if request_id != active_request_id:
+            self.stale_worker_results.setdefault(thread_id, []).append(request_id)
+            print(
+                f"[gateway.resume] stale worker result ignored: "
+                f"request_id={request_id} active_request_id={active_request_id}"
+            )
+            return {
+                "status": "stale_ignored",
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "active_request_id": active_request_id,
+            }
+
         result = await self.app.ainvoke(
-            Command(resume={"worker_summary": worker_summary}),
+            Command(resume={"request_id": request_id, "worker_summary": worker_summary}),
             config={"configurable": {"thread_id": thread_id}},
         )
         print(f"[gateway.resume] completed_result={result}")
@@ -210,14 +248,13 @@ async def main() -> None:
 
     thread_id = "chat-thread-001"
     print("=== 第一次消息：进入等待态 ===")
-    print(
-        await gateway.submit(
-            thread_id=thread_id,
-            message="整理公司的差旅规则变化",
-            strategy=Strategy.ENQUEUE,
-            idempotency_key="idem-001",
-        )
+    first_wait = await gateway.submit(
+        thread_id=thread_id,
+        message="整理公司的差旅规则变化",
+        strategy=Strategy.ENQUEUE,
+        idempotency_key="idem-001",
     )
+    print(first_wait)
 
     print("\n=== 同线程再次发送：reject ===")
     print(
@@ -243,24 +280,44 @@ async def main() -> None:
     print(
         await gateway.resume_worker(
             thread_id=thread_id,
+            request_id=first_wait["request_id"],
             worker_summary="已收集 2 条制度变化",
         )
     )
 
     print("\n=== 新线程演示 interrupt ===")
     interrupt_thread = "chat-thread-002"
-    await gateway.submit(
+    interrupted_wait = await gateway.submit(
         thread_id=interrupt_thread,
         message="先整理全部差旅制度",
         strategy=Strategy.ENQUEUE,
         idempotency_key="idem-010",
     )
+    replaced_wait = await gateway.submit(
+        thread_id=interrupt_thread,
+        message="不用全部了，只看近 30 天",
+        strategy=Strategy.INTERRUPT,
+        idempotency_key="idem-011",
+    )
     print(
-        await gateway.submit(
+        replaced_wait
+    )
+
+    print("\n=== 旧 worker 结果回写：会被 request_id fencing 忽略 ===")
+    print(
+        await gateway.resume_worker(
             thread_id=interrupt_thread,
-            message="不用全部了，只看近 30 天",
-            strategy=Strategy.INTERRUPT,
-            idempotency_key="idem-011",
+            request_id=interrupted_wait["request_id"],
+            worker_summary="这是旧请求的结果，不应污染新请求",
+        )
+    )
+
+    print("\n=== 新请求 worker 完成 ===")
+    print(
+        await gateway.resume_worker(
+            thread_id=interrupt_thread,
+            request_id=replaced_wait["request_id"],
+            worker_summary="已整理近 30 天范围的制度变化",
         )
     )
 
@@ -276,6 +333,8 @@ async def main() -> None:
 
     print("\n取消记录:")
     print(gateway.cancelled_requests)
+    print("stale worker 记录:")
+    print(gateway.stale_worker_results)
 
 
 if __name__ == "__main__":
