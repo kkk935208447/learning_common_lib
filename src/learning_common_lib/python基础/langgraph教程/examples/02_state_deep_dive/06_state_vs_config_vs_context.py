@@ -183,7 +183,7 @@ async def main() -> None:
     )
     print("\n第一次运行后的最终 state:")
     print(result)
-    snapshot1 = await app.aget_state({"configurable": {"thread_id": thread_id}})
+    snapshot1 = await app.aget_state({"configurable": {"thread_id": thread_id}})  # 获得 thread_id 对应的快照，.values 是 state 的值
     print("第一次运行后的 checkpoint state:")
     print(snapshot1.values)
 
@@ -207,7 +207,7 @@ async def main() -> None:
     )
     print("\n第二次运行后的最终 state:")
     print(result2)
-    snapshot2 = await app.aget_state({"configurable": {"thread_id": thread_id}})
+    snapshot2 = await app.aget_state({"configurable": {"thread_id": thread_id}})  # 获得 thread_id 对应的快照，.values 是 state 的值
     print("第二次运行后的 checkpoint state:")
     print(snapshot2.values)
 

@@ -77,12 +77,15 @@ async def main() -> None:
     print(f"  thread-002 消息数: {len(r3['messages'])}")
 
     # 验证 thread-001 不受影响
-    state_001 = await app.aget_state(thread_config)
+    state_001 = await app.aget_state(thread_config)   # 获得 thread-001 的快照，.values 是 state 的值
     print(f"  thread-001 消息数: {len(state_001.values['messages'])}（未受影响）")
 
     # ── 4. 查看 checkpoint 信息 ──────────────────────────────
     print("\n=== Checkpoint 信息 ===")
-    state = await app.aget_state(thread_config)
+    state = await app.aget_state(thread_config)       # 获得 thread-001 的快照，.values 是 state 的值
+    print(f"state: {state}")
+    print("\n\n")
+
     print(f"  checkpoint_id: {state.config['configurable'].get('checkpoint_id', 'N/A')}")
     print(f"  checkpoint_ns: {state.config['configurable'].get('checkpoint_ns', '')}")
     print(f"  消息数: {len(state.values['messages'])}")

@@ -90,7 +90,8 @@ async def main() -> None:
     print("\n=== Alice 完整对话历史 ===")
     for i, msg in enumerate(state_a.values["messages"]):
         role = "用户" if isinstance(msg, HumanMessage) else "助手"
-        print(f"  {i}. [{role}] {msg.content}")
+        # print(f"  {i}. [{role}] {msg.content}")
+        print(f"  {i}. [{role}] {msg}")
 
 
 if __name__ == "__main__":
