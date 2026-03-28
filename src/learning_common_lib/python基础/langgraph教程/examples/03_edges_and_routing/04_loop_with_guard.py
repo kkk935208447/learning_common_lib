@@ -99,7 +99,7 @@ def build_graph() -> StateGraph:
     拓扑：START → process → (guard) → process（循环）
                                     → exit → END
     """
-    graph = StateGraph(State)
+    graph = StateGraph[State, None, State, State](State)
     graph.add_node("process", process_node)
     graph.add_node("exit", exit_node)
 
@@ -115,6 +115,7 @@ def build_graph() -> StateGraph:
 
 async def main() -> None:
     app = build_graph().compile()
+    get_langgraph_png(app, "04_loop_with_guard.png")    # 导出图
 
     # 演示 1：达到最大迭代次数退出
     print("=== 演示 1: 最大迭代次数守卫 (max=3) ===")
@@ -126,6 +127,7 @@ async def main() -> None:
         "historical_fingerprints": [],
         "log": [],
     })
+    print(f"state = {result}")
     print(f"执行轨迹: {result['log']}")
     print(f"最终数据: {result['data']}\n")
 
@@ -140,8 +142,18 @@ async def main() -> None:
         "historical_fingerprints": [first_iteration_fp],
         "log": [],
     })
+    print(f"state = {result}")
     print(f"执行轨迹: {result['log']}")
     print(f"共迭代: {result['iteration']} 次")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

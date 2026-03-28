@@ -117,6 +117,7 @@ def build_graph() -> StateGraph:
 
 async def main() -> None:
     app = build_graph().compile()
+    get_langgraph_png(app, "02_conditional_edges.png")    # 导出图
 
     test_cases = [
         "这个产品真棒！",
@@ -126,9 +127,18 @@ async def main() -> None:
     for text in test_cases:
         print(f"\n--- 输入: '{text}' ---")
         result = await app.ainvoke({"text": text, "sentiment": "", "result": "", "log": []})
+        print(f"state = {result}")
         print(f"路由路径: {result['log']}")
         print(f"最终回复: {result['result']}")
 
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 if __name__ == "__main__":
     asyncio.run(main())

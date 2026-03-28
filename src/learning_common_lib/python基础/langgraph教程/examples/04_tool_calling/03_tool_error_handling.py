@@ -123,10 +123,11 @@ async def main() -> None:
     graph.add_node("llm", fake_llm_node)
     graph.add_node("tools", ToolNode(tools, handle_tool_errors=True))
     graph.set_entry_point("llm")
-    graph.add_conditional_edges("llm", should_continue)
+    graph.add_conditional_edges("llm", should_continue, {"tools": "tools", END: END})  # 需要显示执行路由节点，以免出现错误
     graph.add_edge("tools", "llm")
 
     app = graph.compile()
+    get_langgraph_png(app, "03_tool_error_handling.png")    # 导出图
     result = await app.ainvoke({"messages": [HumanMessage(content="查询 langgraph 信息")]})
 
     tool_messages = [msg for msg in result["messages"] if isinstance(msg, ToolMessage)]
@@ -142,7 +143,17 @@ async def main() -> None:
         role = type(msg).__name__
         status = getattr(msg, "status", "")
         status_str = f" (status={status})" if status else ""
-        print(f"  [{role}{status_str}] {msg.content[:80]}")
+        # print(f"  [{role}{status_str}] {msg.content[:80]}")
+        print(f"  [{role}{status_str}] {msg}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

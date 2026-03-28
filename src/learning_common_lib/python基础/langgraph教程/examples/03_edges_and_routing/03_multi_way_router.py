@@ -143,6 +143,7 @@ def build_graph() -> StateGraph:
 
 async def main() -> None:
     app = build_graph().compile()
+    get_langgraph_png(app, "03_multi_way_router.png")    # 导出图
 
     test_queries = [
         "帮我安排明天的会议",
@@ -157,9 +158,18 @@ async def main() -> None:
         result = await app.ainvoke({
             "query": query, "next_action": "", "response": "", "log": [],
         })
+        print(f"state = {result}")
         print(f"路径: {result['log']}")
         print(f"回复: {result['response']}")
 
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 if __name__ == "__main__":
     asyncio.run(main())

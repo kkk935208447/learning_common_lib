@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import ast
+import ast   # 用于解析字符串表达式
 from typing import Literal
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -77,7 +77,7 @@ def calculator(expression: str) -> str:
             return allowed_unary[type(node.op)](operand)
         raise ValueError("仅支持加减乘除和数字常量")
 
-    parsed = ast.parse(expression, mode="eval")
+    parsed = ast.parse(expression, mode="eval")   # 将字符串表达式解析为 AST
     result = eval_node(parsed)
     if result.is_integer():
         return str(int(result))
@@ -130,6 +130,8 @@ async def main() -> None:
         )
         manual_tool_messages.append(tool_message)
         print(f"  工具: {tool_message.name} | 结果: {tool_message.content}")
+    print(f"manual_tool_messages: {manual_tool_messages}")
+    print("\n\n")
 
     # ── 5. 在 StateGraph 中使用 ToolNode ─────────────────────
     print("\n=== 在 StateGraph 中集成 ToolNode ===")
@@ -160,15 +162,32 @@ async def main() -> None:
     graph = StateGraph(MessagesState)
     graph.add_node("llm", fake_llm_node)
     graph.add_node("tools", ToolNode(tools))
-    graph.set_entry_point("llm")
-    graph.add_conditional_edges("llm", should_continue)
+    graph.set_entry_point("llm")  # 设置入口点
+    graph.add_conditional_edges("llm", should_continue, {"tools": "tools", END: END})   # 需要显示执行路由节点，以免出现错误
     graph.add_edge("tools", END)
 
     app = graph.compile()
+    get_langgraph_png(app, "01_tool_node_basics.png")    # 导出图
     output = await app.ainvoke({"messages": []})
+    print("\n=== 最终消息列表 ===")
+    print(f"output: {output}")
+    print("\n\n")
+    
     for msg in output["messages"]:
-        payload = msg.content or msg.tool_calls
-        print(f"  [{type(msg).__name__}] {payload}")
+        role = type(msg).__name__
+        # payload = msg.content or msg.tool_calls
+        # print(f"  [{role}] {payload}")
+        print(f"  [{role}] {msg}")
+
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

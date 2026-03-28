@@ -142,11 +142,12 @@ def main() -> None:
     graph.set_entry_point("agent")
 
     # 条件边：agent 决定是否继续调用工具
-    graph.add_conditional_edges("agent", should_continue)
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})  # 需要显示执行路由节点，以免出现错误
     # 工具执行完毕后回到 agent（观察→思考）
     graph.add_edge("tools", "agent")
 
     app = graph.compile()
+    get_langgraph_png(app, "04_react_agent_pattern.png")    # 导出图
 
     # ── 5. 运行 Agent ───────────────────────────────────────
     print("=== ReAct Agent 执行过程 ===\n")
@@ -158,10 +159,20 @@ def main() -> None:
     print("\n=== 完整消息流 ===")
     for i, msg in enumerate(result["messages"]):
         role = type(msg).__name__
-        content = msg.content[:100] if msg.content else str(msg.tool_calls)
-        print(f"  {i}. [{role}] {content}")
+        # content = msg.content[:100] if msg.content else str(msg.tool_calls)
+        # print(f"  {i}. [{role}] {content}")
+        print(f"  {i}. [{role}] {msg}")
 
     print(f"\n总共经历 {step} 轮 LLM 调用（2 轮工具调用 + 1 轮最终回答）")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

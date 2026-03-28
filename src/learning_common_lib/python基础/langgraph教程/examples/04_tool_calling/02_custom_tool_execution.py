@@ -123,7 +123,7 @@ def main() -> None:
         # 第二轮：不再调用工具，给出最终回答
         return {"messages": [AIMessage(content="上海天气多云22°C，人口2487万。")]}
 
-    def should_continue(state: MessagesState) -> str:
+    def should_continue(state: MessagesState) -> str | END:
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:
             return "tools"
@@ -133,18 +133,32 @@ def main() -> None:
     graph.add_node("llm", fake_llm_node)
     graph.add_node("tools", custom_tool_executor)
     graph.set_entry_point("llm")
-    graph.add_conditional_edges("llm", should_continue)
+    graph.add_conditional_edges("llm", should_continue, {"tools": "tools", END: END})  # 需要显示执行路由节点，以免出现错误
     graph.add_edge("tools", "llm")
 
     app = graph.compile()
+    get_langgraph_png(app, "02_custom_tool_execution.png")    # 导出图
 
     print("\n=== 完整图执行 ===")
     result = app.invoke({"messages": [HumanMessage(content="上海的天气和人口是多少？")]})
     print("\n=== 最终消息列表 ===")
+    print(f"result: {result}")
+    print("\n\n")
+
     for msg in result["messages"]:
         role = type(msg).__name__
-        content = msg.content or str(msg.tool_calls)
-        print(f"  [{role}] {content}")
+        # content = msg.content or str(msg.tool_calls)
+        # print(f"  [{role}] {content}")
+        print(f"  [{role}] {msg}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":
