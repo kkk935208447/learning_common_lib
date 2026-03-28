@@ -187,7 +187,7 @@ async def bad_node(state: dict) -> dict:
 result = await asyncio.to_thread(task.get, timeout=30)
 ```
 
-推荐架构：
+推荐架构 (称为 fire and forget)：
 
 ```python
 async def good_node(state: dict) -> dict:

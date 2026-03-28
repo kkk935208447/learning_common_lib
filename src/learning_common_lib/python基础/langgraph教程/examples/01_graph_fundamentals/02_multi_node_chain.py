@@ -23,7 +23,7 @@
     消息依次经过三个节点，每个节点追加文本；step 计数递增
 
 生产提醒:
-    无 reducer 时字段采用 last-write-wins 策略，多节点并行写同一字段会丢失数据
+    无 reducer 时字段采用 last-write-wins（厚覆盖） 策略，多节点并行写同一字段会丢失数据
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class State(TypedDict):
 # ---------- 节点函数 ----------
 # 每个节点只返回需要更新的字段（partial state），
 # LangGraph 自动将返回值合并到当前状态。
-# 无 reducer 时，同名字段直接覆盖（last-write-wins）。
+# 无 reducer 时，同名字段直接覆盖（last-write-wins 后覆盖）。
 
 def node_a(state: State) -> dict:
     """节点 A：第一步处理。"""
@@ -87,8 +87,20 @@ def build_graph() -> StateGraph:
 
 def main() -> None:
     app = build_graph().compile()
+    # 导出 langgraph 图
+    get_langgraph_png(app, "02_multi_node_chain.png")
+
     result = app.invoke({"message": "开始", "step": 0})
     print(f"\n最终结果: message='{result['message']}', step={result['step']}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

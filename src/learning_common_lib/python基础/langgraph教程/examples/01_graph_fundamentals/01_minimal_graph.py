@@ -42,7 +42,7 @@ def node_a(state: State) -> dict:
     """节点 A：在消息后追加文本。
 
     节点函数接收当前完整状态，返回 *partial* 字典，
-    LangGraph 会自动合并到状态中（无 reducer 时为 last-write-wins）。
+    LangGraph 会自动合并到状态中（无 reducer 时为 last-write-wins 后覆盖）。
     """
     print(f"[节点A] 收到状态: {state}")
     return {"message": state["message"] + " -> 经过节点A"}
