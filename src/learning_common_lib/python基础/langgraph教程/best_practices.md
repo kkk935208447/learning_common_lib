@@ -5,7 +5,7 @@
 ## 1. 状态设计
 
 - 最小化状态：只存必要字段，大对象用引用（ID/URL/外部工件 ref）而非内联
-- 把 `thread_id` / `tenant_id` / `trace_id` 放到 config/context，不要混进业务 state
+- 把 `thread_id` / `trace_id` 放到 config，把 `tenant_id` / `user_id` / `api_base` / `auth_scope` 放到 runtime context，不要混进业务 state
 - 不可变更新：节点返回增量 `dict`，不要直接修改 state
 - TypedDict 用 `total=False` 标记可选字段，避免初始化时缺字段报错
 - Reducer 选择：
@@ -38,9 +38,31 @@ TypedDict vs Pydantic：
 - 内部运行状态优先 TypedDict，轻量且更适合频繁合并
 - 外部输入校验、复杂嵌套结构可以用 Pydantic
 
+state / config / runtime context 的推荐分工：
+
+- `state`
+  - 描述当前业务进展
+  - 会被节点更新
+  - 可能进入 checkpoint / state history
+- `config`
+  - 描述本次调用配置
+  - 典型字段：`thread_id`、`trace_id`、`idempotency_key`、`recursion_limit`
+  - 不应该承担长期业务含义
+- `runtime context`
+  - 描述本次运行环境、身份和依赖
+  - 典型字段：`tenant_id`、`user_id`、`api_base`、`auth_scope`、`feature_flags`
+  - 默认应视为只读，不建议在节点里把它当 state 回写
+
+一个简单判断规则：
+
+- “这个字段是否表示任务推进后的业务结果？” → 放 `state`
+- “这个字段是否只是本次调用的元信息/追踪配置？” → 放 `config`
+- “这个字段是否表示本次运行的环境/身份/依赖注入？” → 放 `runtime context`
+
 ## 2. 节点设计
 
 - 节点尽量保持纯函数：只依赖输入 state，不依赖隐式全局可变状态
+- 需要读取租户、用户、权限、外部依赖时，优先从 `runtime.context` 或显式注入读取，而不是偷偷塞进 `state`
 - 一个节点做一件事：检索、评估、生成、汇总分开
 - 生产环境建议统一包上 `safe_node`
 - 节点应具备幂等性：checkpoint 恢复后重复执行不应带来灾难性副作用
@@ -95,6 +117,7 @@ graph.add_edge("tools", "llm")
 - 生产环境：Redis / Postgres 类后端
 - `thread_id` 命名必须带业务语义
 - checkpoint 是运行时恢复点，不是业务真理源
+- 进入 checkpoint 的是 `state`，不是 `config` 和 `runtime context`
 - state schema 演进时，新节点必须为缺失字段补默认值
 - Redis checkpoint 要明确环境前提：
   - 安装 `langgraph-checkpoint-redis`
@@ -157,6 +180,12 @@ sub_result = await sub_graph.ainvoke(sub_input)
   - 用户输入结构化 decision / clarify reply
   - `Command(resume=value)`
   - 从 checkpoint 恢复继续执行
+
+恢复时也要记住：
+
+- `thread_id` 仍来自 `config`
+- 当前用户/租户/权限边界仍来自 `runtime context`
+- 不要为了“恢复方便”把这些字段拷回业务 `state`
 
 ## 9. 错误处理
 

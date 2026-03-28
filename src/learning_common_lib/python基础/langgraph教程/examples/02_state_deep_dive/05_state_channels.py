@@ -43,7 +43,7 @@ from langgraph.graph import END, START, StateGraph
 
 # ---------- 状态定义 ----------
 class State(TypedDict):
-    # LastValue 语义：无 reducer，last-write-wins
+    # LastValue 语义：无 reducer，last-write-wins （后写覆盖）
     current_step: str
 
     # BinaryOperatorAggregate 语义：通过 operator.add 追加

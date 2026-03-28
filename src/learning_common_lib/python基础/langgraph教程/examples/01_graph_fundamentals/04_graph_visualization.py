@@ -32,6 +32,7 @@ import operator
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from pathlib import Path
 
 
 # ---------- 状态与节点 ----------
@@ -83,21 +84,25 @@ async def main() -> None:
     mermaid_text: str = app.get_graph().draw_mermaid()
     print("=== Mermaid 图定义 ===")
     print(mermaid_text)
+    print("======================")
 
     # 2. 尝试生成 PNG（需要网络或 graphviz）
+    print("=== 尝试生成 PNG ===")
     try:
         png_bytes: bytes = app.get_graph().draw_mermaid_png()
-        output_path = "graph_visualization.png"
+        output_path = str(Path(__file__).resolve().parent / "graph_visualization.png")
         with open(output_path, "wb") as f:
             f.write(png_bytes)
         print(f"\nPNG 已保存到 {output_path}")
     except Exception as e:
         print(f"\ndraw_mermaid_png 失败（可能需要网络）: {e}")
+    print("======================")
 
     # 3. 如果安装了 pygraphviz，也可以用 draw_png
+    print("=== 尝试生成 PNG（需要 pygraphviz）===")
     try:
         png_bytes_gv: bytes = app.get_graph().draw_png()
-        with open("graph_visualization_graphviz.png", "wb") as f:
+        with open(str(Path(__file__).resolve().parent / "graph_visualization_graphviz.png"), "wb") as f:
             f.write(png_bytes_gv)
         print("graphviz PNG 已保存")
     except Exception:

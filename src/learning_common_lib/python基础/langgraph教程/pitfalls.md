@@ -359,7 +359,99 @@ return {"status": "COMPLETED", "final_answer": "..."}
 - 业务真理源写 MySQL / 事件表 / 任务表
 - checkpoint 只保留最小运行态
 
-## 15. 子 agent 只是函数，不是图
+## 15. 把 state / config / runtime context 混在一起
+
+这是当前最常见、也最容易在项目里越写越乱的一类问题。
+
+### 错误 1：把 thread_id / tenant_id 塞进业务 state
+
+```python
+# ❌ 错误
+class BadState(TypedDict, total=False):
+    query: str
+    thread_id: str
+    tenant_id: str
+```
+
+问题：
+
+- `thread_id` 是调用配置，不是业务结果
+- `tenant_id` / `user_id` 更适合放运行时上下文
+- 把这些字段塞进 state 后，checkpoint/history 会混入大量“并非业务推进”的噪声
+
+正确做法：
+
+- `thread_id` / `trace_id` → `config["configurable"]`
+- `tenant_id` / `user_id` / `api_base` / `auth_scope` → `runtime.context`
+- `query` / `normalized_query` / `result_summary` → `state`
+
+### 错误 2：把外部依赖塞进 configurable
+
+```python
+# ❌ 错误
+config = {
+    "configurable": {
+        "thread_id": "tenant:acme:task:42",
+        "api_base": "https://search.internal",
+        "auth_scope": "travel_rule.read",
+    }
+}
+```
+
+问题：
+
+- `configurable` 更适合“本次调用配置”
+- `api_base` / `auth_scope` 属于运行时环境/依赖边界
+- 长期会让 `configurable` 变成“什么都往里塞”的大杂烩
+
+更推荐：
+
+```python
+# ✅ 正确
+config = {
+    "configurable": {
+        "thread_id": "tenant:acme:task:42",
+        "trace_id": "trace-001",
+    }
+}
+
+context = {
+    "tenant_id": "acme",
+    "user_id": "u-001",
+    "api_base": "https://search.internal",
+    "auth_scope": "travel_rule.read",
+}
+```
+
+### 错误 3：把 runtime context 当成 state 回写
+
+```python
+# ❌ 错误
+def bad_node(state, runtime):
+    return {
+        "tenant_id": runtime.context["tenant_id"],
+        "api_base": runtime.context["api_base"],
+    }
+```
+
+问题：
+
+- 你把“环境/身份/依赖”硬写进了业务状态
+- checkpoint / state history 会充满无意义重复字段
+- 一旦 context 变化，还可能制造“旧上下文看起来像旧业务结果”的错觉
+
+更推荐：
+
+- 从 `runtime.context` 读取
+- 只把真正的业务产物写回 `state`
+- 例如把 `normalized_query`、`retrieval_plan`、`result_summary` 写回，而不是把 `api_base` 写回
+
+一句话判断：
+
+- 进入 checkpoint/history 的，应该主要是业务推进字段
+- 只影响“本次调用如何执行”的，不该随便写进 `state`
+
+## 16. 子 agent 只是函数，不是图
 
 ```python
 # ❌ 错误：worker 只是一个裸函数
@@ -376,7 +468,7 @@ def researcher(state): ...
 
 - worker 至少应是 `prepare -> execute -> verify -> done/escalate` 子图
 
-## 16. SSE 没有 heartbeat / Last-Event-ID
+## 17. SSE 没有 heartbeat / Last-Event-ID
 
 如果你只会：
 
@@ -390,7 +482,7 @@ def researcher(state): ...
 
 前端一断线就会失去进度上下文。
 
-## 17. resume_orchestrator 直接做调度
+## 18. resume_orchestrator 直接做调度
 
 错误心智：
 
@@ -402,7 +494,7 @@ def researcher(state): ...
 - 然后用同一个 `thread_id` 恢复图
 - 真正的下一步仍由 `GlobalGraph` 决定
 
-## 18. 把 token 流当成 replay 真理源
+## 19. 把 token 流当成 replay 真理源
 
 如果你只保存：
 
