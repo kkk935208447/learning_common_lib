@@ -25,6 +25,15 @@
     3. 模拟"跨进程恢复"：重新编译图并从 Redis 恢复状态
     4. 输出明确的运行时状态，便于 smoke / 排障判断是否真的用了 Redis
 
+LangGraph Redis Checkpointer 相关数据一览
+| 名称 / 前缀 | 类型（常见） | 作用 |
+|-------------|--------------|------|
+| `lg_tutorial_cp` | RediSearch 索引（checkpoint 前缀可配置） | 索引各条 **checkpoint** 的 JSON 键，供 `FT.SEARCH` 等查询与恢复状态 |
+| `lg_tutorial_cp_writes` | RediSearch 索引（writes 前缀可配置） | 索引各条 **channel write** 记录，与 checkpoint 配合还原中间写入 |
+| `checkpoint_latest` | 字符串键 `checkpoint_latest:{thread}:{ns}` | **最新 checkpoint 指针**，值为当前最新 checkpoint 对应 Redis 键，便于快速定位 |
+| `write_keys_zset` | 有序集合键 `write_keys_zset:{thread}:{ns}:{checkpoint_id}` | 每个 checkpoint 下登记相关 **write 键**，用 ZSET 顺序加速查找，减少对搜索的依赖 |
+默认前缀来自教程里的 `checkpoint_prefix` / `checkpoint_write_prefix` 参数。
+
 生产提醒:
     - 需要安装: pip install langgraph-checkpoint-redis
     - 需要带 RediSearch/Redis Stack 能力的 Redis 实例，普通 Redis 可能报 `FT._LIST` 不存在
@@ -40,6 +49,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import MessagesState, StateGraph
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
 try:
     from ...templates import DEFAULT_RUNTIME_SETTINGS
@@ -53,6 +63,7 @@ STRICT_REDIS = DEFAULT_RUNTIME_SETTINGS.strict_redis
 
 
 def emit_runtime_status(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    """输出运行时状态，便于 smoke / 排障判断是否真的用了 Redis"""
     line = f"RUNTIME_STATUS checkpoint={backend} degraded={degraded} strict={STRICT_REDIS}"
     if last_error:
         line += f" last_error={last_error}"
@@ -60,6 +71,7 @@ def emit_runtime_status(*, backend: str, degraded: bool, last_error: str | None 
 
 
 def require_real_redis(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    """要求 Redis 连接正常，否则抛出异常"""
     emit_runtime_status(backend=backend, degraded=degraded, last_error=last_error)
     if STRICT_REDIS and (backend != "redis" or degraded):
         raise RuntimeError(
@@ -86,32 +98,35 @@ def build_graph() -> StateGraph:
     return graph
 
 
-async def open_async_redis_saver(async_redis_saver_cls):
+async def open_async_redis_saver(async_redis_saver_cls: AsyncRedisSaver):
     """重复运行示例时复用现有索引，避免 `Index already exists` 误判为失败。"""
+    # from_conn_string 返回异步上下文管理器；等价于 async with 里「进入」前拿到的那个对象
     saver_cm = async_redis_saver_cls.from_conn_string(
         REDIS_URL,
         checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
         checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
     )
     try:
-        saver = await saver_cm.__aenter__()
-        return saver, saver_cm.__aexit__
+        saver = await saver_cm.__aenter__()  # __aenter__：建立连接、建索引等；成功则得到可用的 AsyncRedisSaver 实例
+        return saver, saver_cm.__aexit__    # 返回 __aexit__ 供调用方在 finally 里手动「退出」，与 async with 成对释放资源
     except Exception as exc:
         if "index already exists" not in str(exc).lower():
             raise
 
         from langgraph.checkpoint.redis.aio import AsyncKeyRegistry
 
+        # 索引已存在：跳过 from_conn_string 的建索引路径，手动构造 saver 并补齐初始化：
+        # 上一分支里 __aenter__ → asetup() 会在 Redis 里执行 FT.CREATE；重复跑示例时。索引已存在会报错。此处不再调用 index.create()，只复刻 asetup 里「建连接对象 + 集群检测 + 键注册表」等运行时所需状态（与库内 AsyncRedisSaver.__aenter__ 一致：await asetup() 中除两段 create 外的步骤 + await aset_client_info()）。
         saver = async_redis_saver_cls(
             redis_url=REDIS_URL,
             checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
             checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
         )
-        saver.create_indexes()
-        await saver._detect_cluster_mode()
-        saver._key_registry = AsyncKeyRegistry(saver._redis)
-        await saver.aset_client_info()
-        return saver, saver.__aexit__
+        saver.create_indexes()    # 在内存中挂好 checkpoints_index / checkpoint_writes_index（含 redis 客户端引用），不执行 RediSearch 的建索引 RPC；真正建库侧索引的是 asetup 里的 .create()。
+        await saver._detect_cluster_mode()   # 与 asetup 相同：判断是否 Cluster，影响 pipeline/键路由等行为。
+        saver._key_registry = AsyncKeyRegistry(saver._redis)   # 与 asetup 相同：写入路径用有序集合等加速按 checkpoint 查 writes。
+        await saver.aset_client_info()   # 与 __aenter__ 相同：向 Redis 声明 CLIENT SETINFO（可观测性），不依赖索引是否新建。
+        return saver, saver.__aexit__     # 与上面分支一致：用实例自带的 __aexit__ 作为关闭函数（签名与上下文管理器相同）
 
 
 async def main() -> None:
@@ -142,6 +157,7 @@ async def main() -> None:
         return
 
     try:
+        # close_checkpointer 即 __aexit__；正常结束时传入 (None, None, None) 表示是 __aexit__(exc_type, exc, tb)，三个 None 表示无异常、正常收尾。
         checkpointer, close_checkpointer = await open_async_redis_saver(AsyncRedisSaver)
         try:
             require_real_redis(backend="redis", degraded=False)
@@ -149,6 +165,7 @@ async def main() -> None:
             print(f"thread_id: {thread_id}")
 
             graph = build_graph()
+            # 同一 checkpointer 实例：checkpoint 读写都落在同一 Redis key 前缀与 thread_id 上
             app = graph.compile(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": thread_id}}
 
@@ -161,6 +178,7 @@ async def main() -> None:
                 print(f"  助手: {result['messages'][-1].content}")
 
             print("\n--- 进程 B：从 Redis 恢复状态 ---")
+            # 新编译的图 + 同一 checkpointer：模拟另一进程只凭 thread_id 从 Redis 拉状态
             graph2 = build_graph()
             app2 = graph2.compile(checkpointer=checkpointer)
 
@@ -169,7 +187,8 @@ async def main() -> None:
                 print(f"  恢复成功！消息数: {len(state.values['messages'])}")
                 for msg in state.values["messages"]:
                     role = "用户" if isinstance(msg, HumanMessage) else "助手"
-                    print(f"    [{role}] {msg.content}")
+                    # print(f"    [{role}] {msg.content}")
+                    print(f"    [{role}] {msg}")
 
                 result = await app2.ainvoke(
                     {"messages": [HumanMessage(content="继续上次的话题")]}, config=config
@@ -185,6 +204,7 @@ async def main() -> None:
             print("  - cache 或实验数据可单独放到 DB 2")
 
         finally:
+            # 调用异步上下文管理器的 __aexit__(exc_type, exc, tb)；三个 None 表示正常收尾
             await close_checkpointer(None, None, None)
             print("\n=== Redis 连接已关闭 ===")
     except Exception as exc:

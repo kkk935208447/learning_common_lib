@@ -109,7 +109,8 @@ def main() -> None:
         print(f"  该时刻的消息:")
         for msg in target_snapshot.values["messages"]:
             role = "用户" if isinstance(msg, HumanMessage) else "助手"
-            print(f"    [{role}] {msg.content}")
+            # print(f"    [{role}] {msg.content}")
+            print(f"    [{role}] {msg}")
 
         # ── 4. 从历史点分叉执行 ─────────────────────────────
         print("\n=== 从历史点分叉 ===")

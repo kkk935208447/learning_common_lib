@@ -30,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)   # slots 可以提高属性访问速度，减少内存占用
 class RedisRuntimeSettings:
     """教程生产章节默认的 Redis 运行时配置。"""
 
@@ -118,3 +118,15 @@ class RedisRuntimeSettings:
 
 
 DEFAULT_RUNTIME_SETTINGS = RedisRuntimeSettings()
+
+
+if __name__ == "__main__":
+    print(f"checkpoint_url: {DEFAULT_RUNTIME_SETTINGS.checkpoint_url}")
+    print(f"store_url: {DEFAULT_RUNTIME_SETTINGS.store_url}")
+    print(f"cache_url: {DEFAULT_RUNTIME_SETTINGS.cache_url}")
+    print(f"celery_broker_url: {DEFAULT_RUNTIME_SETTINGS.celery_broker_url}")
+    print(f"celery_backend_url: {DEFAULT_RUNTIME_SETTINGS.celery_backend_url}")
+    print(f"checkpoint prefix: {DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix}")
+    print(f"checkpoint write prefix: {DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix}")
+    print(f"store prefix: {DEFAULT_RUNTIME_SETTINGS.store_prefix}")
+    print(f"vector prefix: {DEFAULT_RUNTIME_SETTINGS.vector_prefix}")
