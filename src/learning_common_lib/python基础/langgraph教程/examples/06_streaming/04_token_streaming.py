@@ -285,6 +285,7 @@ def format_sse_event(event_type: str, data: dict[str, Any]) -> str:
 
 
 async def sse_token_stream(query: str, *, thread_id: str = "token-stream-sse") -> AsyncGenerator[str, None]:
+    """ LangGraph token stream SSE 端点 """
     settings = load_openai_settings()
     if not settings.configured:
         yield format_sse_event(
