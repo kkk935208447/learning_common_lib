@@ -10,8 +10,8 @@
 关键 API:
     ChatOpenAI.astream
     AsyncCallbackHandler.on_llm_new_token
-    app.astream(stream_mode="messages")
-    app.astream_events(version="v2")
+    app.astream(stream_mode="messages")     # 聊天界面流式输出 优先使用该方法
+    app.astream_events(version="v2")        # 事件流实现流式输出，仅做演示，生产级不推荐，详情见：pitfalls.md 
     FastAPI StreamingResponse
 
 目录导航:
@@ -48,9 +48,6 @@
 生产提醒:
     - token stream 只适合实时渲染，不适合 durable replay
     - replay 真理源应该是结构化业务事件，而不是 token chunk
-    - provider/base_url 切换时，优先传 API base，不要把完整 /chat/completions URL 直接塞给 SDK
-    - 用 curl 测试中文 query 时，必须走 `--data-urlencode` 或自行百分号编码
-    - 本文件使用异步 API，需要 asyncio 运行
 """
 from __future__ import annotations
 
@@ -76,7 +73,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 # ── 1. OpenAI 配置与模型构建 ───────────────────────────────
-@dataclass(frozen=True)
+@dataclass(frozen=True)    # frozen=True 表示不可变数据类，更安全
 class OpenAISettings:
     api_key: str | None
     base_url: str | None
@@ -103,6 +100,7 @@ def normalize_base_url(value: str | None) -> str | None:
 
 
 def load_openai_settings() -> OpenAISettings:
+    """ 加载 OpenAI 配置，支持从环境变量或 .env 文件中读取。"""
     api_key = (
         os.getenv("LANGGRAPH_TUTORIAL_OPENAI_API_KEY")
         or os.getenv("OPENAI_API_KEY")
@@ -134,8 +132,9 @@ def missing_config_message() -> str:
 def build_chat_model(
     settings: OpenAISettings,
     *,
-    callbacks: list[AsyncCallbackHandler] | None = None,
+    callbacks: list[AsyncCallbackHandler] | None = None,   # langchain 回调函数，用于处理 LLM 的中间状态
 ) -> ChatOpenAI:
+    """ 构建 ChatOpenAI 模型实例，支持回调函数。"""
     if not settings.configured:
         raise RuntimeError(missing_config_message())
 
@@ -171,21 +170,23 @@ def content_to_text(content: Any) -> str:
 
 
 class TokenStreamCallback(AsyncCallbackHandler):
-    """收集真实 token 流，便于接到 SSE / WebSocket / 指标系统。"""
+    """ langchain 回调函数，用于处理 LLM 的中间状态 """
 
     def __init__(self) -> None:
         self.tokens: list[str] = []
 
     async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+        """ 收到新 token 时的回调函数 """
         self.tokens.append(token)
-        print(token, end="", flush=True)
+        print(token, end="", flush=True)    # 流式打印 token
 
     async def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """ 收到 LLM 结束时的回调函数 """
         print()
 
 
 # ── 2. 构建最小 LangGraph ─────────────────────────────────
-def build_token_graph(llm: ChatOpenAI):
+def build_token_graph(llm: ChatOpenAI) -> CompiledStateGraph:
     async def llm_node(state: MessagesState) -> dict:
         # 这里故意保留最小节点，只聚焦 token streaming 本身。
         response = await llm.ainvoke(state["messages"])
@@ -208,7 +209,8 @@ async def demo_direct_astream(llm: ChatOpenAI, *, prompt: str) -> None:
         if not text:
             continue
         collected.append(text)
-        print(text, end="", flush=True)
+        # 流式打印 token
+        print(text, end="", flush=True)   
     print(f"\n完整输出长度: {len(''.join(collected))} 字符")
 
 
@@ -227,13 +229,13 @@ async def demo_callback_stream(settings: OpenAISettings, *, prompt: str) -> None
             continue
         collected.append(text)
 
-    print(f"callback token 数: {len(callback.tokens)}")
+    print(f"callback token 数: {len(callback.tokens)}")   # tokens 是上文自定义的回调函数中收集的 参数
     print(f"callback 拼接长度: {len(''.join(callback.tokens))}")
     print(f"stream 拼接长度: {len(''.join(collected))}")
 
 
 async def demo_graph_message_stream(app: CompiledStateGraph, *, prompt: str) -> None:
-    """ StateGraph.astream(stream_mode='messages') """
+    """ StateGraph.astream(stream_mode='messages'), langgraph 的流式输出 """
     print("\n=== 3. StateGraph.astream(stream_mode='messages') ===")
     token_buffer: list[str] = []
     async for chunk, metadata in app.astream(
@@ -245,6 +247,7 @@ async def demo_graph_message_stream(app: CompiledStateGraph, *, prompt: str) -> 
         if not text:
             continue
         token_buffer.append(text)
+        # 流式打印 token
         print(
             f"[{metadata.get('langgraph_node', 'unknown')}] {text}",
             end="",
@@ -254,7 +257,7 @@ async def demo_graph_message_stream(app: CompiledStateGraph, *, prompt: str) -> 
 
 
 async def demo_graph_event_stream(app: CompiledStateGraph, *, prompt: str) -> None:
-    """ astream_events(version='v2') / on_chat_model_stream """
+    """ astream_events(version='v2') / on_chat_model_stream, langgraph 的事件流 """
     print("\n=== 4. astream_events(version='v2') / on_chat_model_stream ===")
     event_count = 0
     token_buffer: list[str] = []
@@ -273,6 +276,7 @@ async def demo_graph_event_stream(app: CompiledStateGraph, *, prompt: str) -> No
             continue
         event_count += 1
         token_buffer.append(text)
+        # 流式打印 token
         print(text, end="", flush=True)
     print(f"\non_chat_model_stream 事件数: {event_count}")
     print(f"拼接后长度: {len(''.join(token_buffer))} 字符")
@@ -322,6 +326,10 @@ async def sse_token_stream(query: str, *, thread_id: str = "token-stream-sse") -
                 "token": text,
             },
         )
+        # 并不是“睡一会儿”，而是挂起当前协程并把控制权还给事件循环，下一次调度会尽快继续执行（零实际延时意义上的“可中断点”）:
+        # 1. 协作式调度：若在一个 async for 里连续、极快地 yield，中间没有任何 await，当前协程会一直占着事件循环，其它协程（同进程其它请求、心跳等）难以及时运行。sleep(0) 是最轻量的让出点。
+        # 2. 配合 StreamingResponse：每次 yield 之后给 ASGI/传输层一次调度机会，有利于把已产出的 SSE 片段更早送出去，减轻“多条 token 被攒成一大块再发”的主观感受（最终仍受 uvicorn、Nginx 缓冲等配置影响）。
+        # 3. 与“完全无 await 的紧循环”对比：没有这类让出时，在 token 极快时客户端更容易感觉批量到达；加上 sleep(0) 是常见写法，代价很小。
         await asyncio.sleep(0)
 
     yield format_sse_event(
@@ -351,7 +359,7 @@ def create_app() -> FastAPI:
     async def stream(query: str = Query(..., description="用户输入")) -> StreamingResponse:
         return StreamingResponse(
             sse_token_stream(query),
-            media_type="text/event-stream",
+            media_type="text/event-stream",   # SSE 响应头
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
