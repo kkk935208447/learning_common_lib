@@ -33,6 +33,13 @@ from typing import Annotated, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
 # ---------------------------------------------------------------------------
 # 全局状态
 # ---------------------------------------------------------------------------
@@ -94,7 +101,7 @@ def subtask_route(state: SubtaskState) -> Literal["execute", "__end__"]:
 # 编译子任务图
 sub_builder = StateGraph(SubtaskState)
 sub_builder.add_node("execute", subtask_execute)
-sub_builder.add_conditional_edges("execute", subtask_route)
+sub_builder.add_conditional_edges("execute", subtask_route, {"execute": "execute", "__end__": END})  # 这里显示给定路由映射防止出错
 sub_builder.add_edge(START, "execute")
 subtask_graph = sub_builder.compile()
 
@@ -168,7 +175,7 @@ global_builder.add_node("evaluator", evaluator)
 global_builder.add_edge(START, "planner")
 global_builder.add_edge("planner", "executor")
 global_builder.add_edge("executor", "evaluator")
-global_builder.add_conditional_edges("evaluator", global_route)
+global_builder.add_conditional_edges("evaluator", global_route, {"planner": "planner", "__end__": END})  # 这里显示给定路由映射防止出错
 
 global_graph = global_builder.compile()
 
@@ -178,6 +185,8 @@ global_graph = global_builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    get_langgraph_png(global_graph, "04_nested_dual_graph.png")    # 导出图
+
     async def main() -> None:
         initial_state: GlobalState = {
             "task_id": 1,

@@ -32,6 +32,14 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 默认 get_graph() 的 xray=False：嵌套的已编译子图在图中只显示为一个节点，不展开内部。xray=True 会递归收集子图并交给 draw_graph，导出的 PNG 才能看到 step1/step2 等内部结构。
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
 # ---------------------------------------------------------------------------
 # 状态定义
 # ---------------------------------------------------------------------------
@@ -113,6 +121,8 @@ graph = parent_builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    get_langgraph_png(graph, "01_subgraph_as_node.png")    # 导出图
+
     result = graph.invoke({"items": []})
     print(f"\n最终状态: {result}")
     print(f"摘要: {result.get('summary', '')}")

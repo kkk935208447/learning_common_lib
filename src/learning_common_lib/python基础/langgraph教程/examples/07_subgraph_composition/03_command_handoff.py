@@ -5,7 +5,15 @@
     使用 Command 原语实现子图间控制权移交 (handoff)
 
 关键概念:
-    见本文件目标、代码注释与状态/路由设计
+    Command vs 条件路由边 (add_conditional_edges) 的核心区别:
+    1. 原子性：Command 将"跳转目标"与"状态更新"合二为一，条件边需要节点返回状态、
+       再由独立 router 函数决定跳转，两步分离。
+    2. 跨子图边界：Command 可从子图内部直接跳到父图节点，条件边只能在同一图层级内路由。
+    3. 动态目标：Command.goto 在运行时决定，无需在构建时穷举所有目标节点；
+       条件边必须预先声明完整的 {返回值: 节点名} 映射。
+    4. 类型安全：Command[Literal["a", "b"]] 让 LangGraph 在编译期验证 goto 目标合法性。
+    适用场景：需要"跳转+状态变更原子化"或"跨子图 handoff/escalation"时优先用 Command；
+    简单静态分支用条件边即可。
 
 关键 API:
     Command(goto=..., update=...)
@@ -32,6 +40,12 @@ from typing import Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 # ---------------------------------------------------------------------------
 # 状态定义
@@ -94,7 +108,7 @@ def escalation_handler(state: MainState) -> Command[Literal["post_process"]]:
 # 分流节点
 # ---------------------------------------------------------------------------
 
-def triage(state: MainState) -> Command[Literal["simple", "complex", "escalate"]]:
+def triage(state: MainState) -> Command[Literal["simple", "complex", "escalate"]]:  # Literal["simple", "complex", "escalate"] 表示 Command 的 goto 只能是这三种, langgraph 根据图中的节点名进行路由
     """根据查询类型分流到不同处理器"""
     query = state.get("query", "")
     # 简单的分类逻辑
@@ -143,6 +157,8 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    get_langgraph_png(graph, "03_command_handoff.png")    # 导出图
+
     for q in ["简单问题", "复杂分析任务", "未知类型请求"]:
         print(f"\n{'='*50}")
         print(f"查询: {q}")

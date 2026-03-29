@@ -134,6 +134,9 @@ async def main() -> None:
     parent.add_edge("finalize", END)
     app = parent.compile()
 
+    # 图导出
+    get_langgraph_png(app, "05_command_parent_handoff.png")
+
     print("=== 场景 1：子图自行完成 ===")
     completed = await app.ainvoke({"query": "普通知识检索请求"})
     print(f"final_result={completed['final_result']}\n")
@@ -141,6 +144,23 @@ async def main() -> None:
     print("=== 场景 2：子图交回父图 ===")
     handoff = await app.ainvoke({"query": "高风险变更，需要人工审批"})
     print(f"final_result={handoff['final_result']}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    """导出父图 PNG。
+
+    说明：xray=True 会把子图交给 langgraph.pregel._draw.draw_graph 做「节点替换」，
+    但替换条件要求子图 Graph 同时满足 first_node() 与 last_node() 非空（用于对齐父图
+    连入/连出边）。子图里若大量依赖 Command 动态跳转、静态分析画出的边不形成单一入口/
+    唯一出口链，则 first/last 会为 None，合并被跳过，父图里子图仍显示为单个节点。
+
+    需要单独看子图结构时：可对 build_child_graph().compile() 再 get_graph().draw_mermaid_png(...)。
+    """
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":
