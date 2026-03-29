@@ -88,6 +88,7 @@ def to_sse(record: dict) -> str:
 
 
 async def stream_events(*, request_id: str, last_event_id: int | None = None):
+    """ SSE 事件流，支持 replay 和 heartbeat。"""
     records = [
         record for record in EVENT_LOG
         if record["data"].get("request_id") == request_id

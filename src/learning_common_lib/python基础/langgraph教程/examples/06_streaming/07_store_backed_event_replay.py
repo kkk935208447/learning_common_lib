@@ -38,10 +38,12 @@ from langgraph.store.memory import InMemoryStore
 
 
 def event_namespace(thread_id: str) -> tuple[str, ...]:
+    """ 生成事件命名空间。"""
     return ("threads", thread_id, "events")
 
 
 async def next_event_id(store: InMemoryStore, thread_id: str) -> int:
+    """ 生成下一个事件 ID，并更新 store 中的元数据。"""
     ns = event_namespace(thread_id)
     meta = await store.aget(ns, "__meta__")
     current = 1 if meta is None else int(meta.value.get("last_event_id", 0)) + 1
@@ -50,6 +52,7 @@ async def next_event_id(store: InMemoryStore, thread_id: str) -> int:
 
 
 async def append_progress_event(store: InMemoryStore, thread_id: str, event: str, data: dict) -> dict:
+    """ 追加结构化业务事件，并更新 store 中的元数据。"""
     record = {
         "id": await next_event_id(store, thread_id),
         "event": event,
@@ -61,6 +64,7 @@ async def append_progress_event(store: InMemoryStore, thread_id: str, event: str
 
 
 async def replay_progress_events(store: InMemoryStore, thread_id: str, last_event_id: int | None) -> list[dict]:
+    """ 回放结构化业务事件。"""
     items = await store.asearch(event_namespace(thread_id), limit=100)
     records = [item.value for item in items if item.key != "__meta__"]
     records.sort(key=lambda item: item["id"])
@@ -77,6 +81,7 @@ async def replay_progress_events(store: InMemoryStore, thread_id: str, last_even
 
 
 def format_event(record: dict) -> str:
+    """ 格式化结构化业务事件。"""
     return (
         f"id: {record['id']}\n"
         f"event: {record['event']}\n"
