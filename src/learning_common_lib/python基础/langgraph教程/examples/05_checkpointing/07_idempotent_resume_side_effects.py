@@ -49,12 +49,14 @@ class SideEffectState(TypedDict, total=False):
 
 
 def prepare_request(state: SideEffectState) -> dict:
+    """ 准备阶段：生成 execution_id"""
     execution_id = state.get("execution_id", "exec-side-effect-001")
     print(f"[prepare] execution_id={execution_id}")
     return {"execution_id": execution_id}
 
 
 def wait_for_approval(state: SideEffectState) -> dict:
+    """ 等待审批：中断等待审批者输入"""
     approval = interrupt(
         {
             "kind": "approval",
@@ -66,6 +68,7 @@ def wait_for_approval(state: SideEffectState) -> dict:
 
 
 def emit_once(execution_id: str, payload: dict) -> str:
+    """ 发送 webhook：幂等检查"""
     if execution_id in OUTBOX:
         print(f"[emit] 检测到重复回放，跳过 execution_id={execution_id}")
         return "duplicate_skipped"
@@ -75,6 +78,7 @@ def emit_once(execution_id: str, payload: dict) -> str:
 
 
 def send_webhook(state: SideEffectState) -> dict:
+    """ 发送 webhook：幂等发送"""
     status = emit_once(
         state["execution_id"],
         {"request": state.get("request", ""), "approval": state.get("approval", "")},
@@ -93,6 +97,7 @@ async def main() -> None:
     graph.add_edge("wait", "send")
     graph.add_edge("send", END)
     app = graph.compile(checkpointer=saver)
+    get_langgraph_png(app, "07_idempotent_resume_side_effects.png")  # 导出图
 
     config = {"configurable": {"thread_id": "idempotent-side-effect"}}
 
@@ -112,6 +117,15 @@ async def main() -> None:
     replay_result = send_webhook(replay_state.values)
     print(f"重复回放结果: {replay_result}")
     print(f"OUTBOX 条数: {len(OUTBOX)}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    # 画图 png
+    app.get_graph().draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":
