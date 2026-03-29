@@ -23,7 +23,7 @@
         cd src/learning_common_lib/python基础/langgraph教程
         uv run python examples/06_streaming/04_token_streaming.py
     - 如需启动服务:
-        uvicorn src.learning_common_lib.python基础.langgraph教程.examples.06_streaming.04_token_streaming:app --reload
+        uv run uvicorn src.learning_common_lib.python基础.langgraph教程.examples.06_streaming.04_token_streaming:app --reload
     - 健康检查:
         curl http://127.0.0.1:8000/health
     - SSE token 流:
@@ -68,6 +68,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.outputs import LLMResult
 from langgraph.graph import END, MessagesState, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langchain_openai import ChatOpenAI
 
 
@@ -199,6 +200,7 @@ def build_token_graph(llm: ChatOpenAI):
 
 # ── 3. 三种异步 token 流演示 ──────────────────────────────
 async def demo_direct_astream(llm: ChatOpenAI, *, prompt: str) -> None:
+    """ ChatOpenAI.astream 直接流式输出 """
     print("=== 1. ChatOpenAI.astream 直接流式输出 ===")
     collected: list[str] = []
     async for chunk in llm.astream([HumanMessage(content=prompt)]):
@@ -211,14 +213,13 @@ async def demo_direct_astream(llm: ChatOpenAI, *, prompt: str) -> None:
 
 
 async def demo_callback_stream(settings: OpenAISettings, *, prompt: str) -> None:
+    """ AsyncCallbackHandler 收到真实 token """
     print("\n=== 2. AsyncCallbackHandler 收到真实 token ===")
     callback = TokenStreamCallback()
     llm = build_chat_model(settings, callbacks=[callback])
 
-    # 不使用 ainvoke():
-    # ainvoke 会在内部聚合完整结果后才返回，虽然底层可能仍在流式拉取，
-    # 但教学演示里容易让人误以为“卡住了”。这里显式走 astream，
-    # 把 callback 与流式消费路径绑定到同一条语义清晰的代码路径上。
+    # 不使用 ainvoke(): ainvoke 会在内部聚合完整结果后才返回，虽然底层可能仍在流式拉取。
+    # 这里显式走 astream，把 callback 与流式消费路径绑定到同一条语义清晰的代码路径上。
     collected: list[str] = []
     async for chunk in llm.astream([HumanMessage(content=prompt)]):
         text = content_to_text(getattr(chunk, "content", ""))
@@ -231,7 +232,8 @@ async def demo_callback_stream(settings: OpenAISettings, *, prompt: str) -> None
     print(f"stream 拼接长度: {len(''.join(collected))}")
 
 
-async def demo_graph_message_stream(app, *, prompt: str) -> None:
+async def demo_graph_message_stream(app: CompiledStateGraph, *, prompt: str) -> None:
+    """ StateGraph.astream(stream_mode='messages') """
     print("\n=== 3. StateGraph.astream(stream_mode='messages') ===")
     token_buffer: list[str] = []
     async for chunk, metadata in app.astream(
@@ -251,7 +253,8 @@ async def demo_graph_message_stream(app, *, prompt: str) -> None:
     print(f"\ngraph token 数: {len(token_buffer)}")
 
 
-async def demo_graph_event_stream(app, *, prompt: str) -> None:
+async def demo_graph_event_stream(app: CompiledStateGraph, *, prompt: str) -> None:
+    """ astream_events(version='v2') / on_chat_model_stream """
     print("\n=== 4. astream_events(version='v2') / on_chat_model_stream ===")
     event_count = 0
     token_buffer: list[str] = []
