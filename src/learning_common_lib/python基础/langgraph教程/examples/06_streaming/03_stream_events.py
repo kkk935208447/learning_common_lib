@@ -83,7 +83,7 @@ async def main() -> None:
     graph.add_node("llm", fake_llm)
     graph.add_node("tools", ToolNode(tools))
     graph.set_entry_point("llm")
-    graph.add_conditional_edges("llm", should_continue)
+    graph.add_conditional_edges("llm", should_continue, {"tools": "tools", END: END})  # 需要显示执行路由节点，以免出现错误
     graph.add_edge("tools", "llm")
 
     app = graph.compile()

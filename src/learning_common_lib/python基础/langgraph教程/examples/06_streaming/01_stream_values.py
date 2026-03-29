@@ -89,7 +89,8 @@ async def main() -> None:
         print(f"--- 步骤 {step} (共 {len(messages)} 条消息) ---")
         for msg in messages:
             role = "用户" if isinstance(msg, HumanMessage) else "助手"
-            print(f"  [{role}] {msg.content}")
+            # print(f"  [{role}] {msg.content}")
+            print(f"  [{role}] {msg}")
         print()
 
     print(f"总共 {step} 个状态快照")
