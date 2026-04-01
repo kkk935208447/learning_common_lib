@@ -125,7 +125,7 @@ builder.add_node("evaluator", evaluator)
 builder.add_edge(START, "planner")
 builder.add_edge("planner", "executor")
 builder.add_edge("executor", "evaluator")
-builder.add_conditional_edges("evaluator", eval_route)
+builder.add_conditional_edges("evaluator", eval_route, {"planner": "planner", "__end__": END})  # 显示路由映射
 
 graph = builder.compile()
 

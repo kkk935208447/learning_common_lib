@@ -8,7 +8,7 @@
     见本文件目标、代码注释与状态/路由设计
 
 关键 API:
-    StateGraph 嵌套、Command 跨图通信
+    StateGraph 嵌套、跨图通信
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
@@ -126,7 +126,7 @@ def planner(state: GlobalState) -> dict:
 
 
 async def executor(state: GlobalState) -> dict:
-    """全局执行器：依次运行子任务图"""
+    """全局执行器：依次运行子任务图。两种情况：1. 状态共享，将子图当做父图的节点 2. 状态不共享，将子图当做黑箱，构建辅助函数执行子图。本文使用第二种。"""
     results: list[dict] = []
     for task in TASK_PLAN:
         sub_input: SubtaskState = {

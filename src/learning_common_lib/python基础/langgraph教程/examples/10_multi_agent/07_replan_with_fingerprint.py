@@ -195,9 +195,11 @@ async def main() -> None:
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "executor")
     graph.add_edge("executor", "evaluator")
-    graph.add_conditional_edges("evaluator", route)
+    graph.add_conditional_edges("evaluator", route, {"planner": "planner", "finalize": "finalize"})
     graph.add_edge("finalize", END)
     app = graph.compile()
+
+    get_langgraph_png(app, "07_replan_with_fingerprint.png")  # 导出图
 
     result = await app.ainvoke(
         {
@@ -210,6 +212,13 @@ async def main() -> None:
     )
     print(f"\n{result['final_summary']}")
 
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 if __name__ == "__main__":
     asyncio.run(main())

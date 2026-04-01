@@ -100,7 +100,7 @@ async def main() -> None:
     graph.add_node("reject", reject)
     graph.add_edge(START, "submit")
     graph.add_edge("submit", "review")
-    graph.add_conditional_edges("review", route_after_review)
+    graph.add_conditional_edges("review", route_after_review, {"execute": "execute", "reject": "reject"})
     graph.add_edge("execute", END)
     graph.add_edge("reject", END)
     app = graph.compile(checkpointer=saver)

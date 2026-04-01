@@ -204,16 +204,24 @@ builder.add_node("dispatcher", dispatcher)
 builder.add_node("handle_escalations", handle_escalations)
 builder.add_edge(START, "dispatcher")
 builder.add_edge("dispatcher", "handle_escalations")
-builder.add_conditional_edges("handle_escalations", global_route)
+builder.add_conditional_edges("handle_escalations", global_route, {"dispatcher": "dispatcher", "__end__": END})
 
 graph = builder.compile()
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    get_langgraph_png(graph, "04_escalation_protocol.png") # 导出图
+
     initial: GlobalState = {
         "subtasks": [
             {"code": "S1", "description": "正常任务", "dependency_met": True},

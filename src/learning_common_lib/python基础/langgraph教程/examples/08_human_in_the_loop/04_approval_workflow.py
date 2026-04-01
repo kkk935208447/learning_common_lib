@@ -132,7 +132,7 @@ builder.add_node("reject", reject)
 
 builder.add_edge(START, "submit")
 builder.add_edge("submit", "review")
-builder.add_conditional_edges("review", route_after_review)
+builder.add_conditional_edges("review", route_after_review, {"clarify": "clarify", "execute": "execute", "reject": "reject"})  # 需要显示执行路由节点，以免出现错误
 builder.add_edge("clarify", "submit")  # 澄清后重新提交
 builder.add_edge("execute", END)
 builder.add_edge("reject", END)
@@ -141,11 +141,26 @@ memory = MemorySaver()
 graph = builder.compile(checkpointer=memory)
 
 
+
+# ---------------------------------------------------------------------------
+# 图导出
+# ---------------------------------------------------------------------------
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # 图导出
+    get_langgraph_png(graph, "04_approval_workflow.png")
+
     config = {"configurable": {"thread_id": "approval-1"}}
 
     # 提交请求 → 在 review 中断

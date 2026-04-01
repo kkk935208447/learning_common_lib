@@ -105,11 +105,19 @@ builder.add_node("fallback", fallback_handler)
 builder.add_node("safety_net", safety_net)
 
 builder.add_edge(START, "primary")
-builder.add_conditional_edges("primary", after_primary)
-builder.add_conditional_edges("fallback", after_fallback)
+builder.add_conditional_edges("primary", after_primary, {"fallback": "fallback", "__end__": END})
+builder.add_conditional_edges("fallback", after_fallback, {"safety_net": "safety_net", "__end__": END})
 builder.add_edge("safety_net", END)
 
 graph = builder.compile()
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +125,8 @@ graph = builder.compile()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    get_langgraph_png(graph, "03_fallback_chain.png") # 导出图
+
     for q in ["简单问题", "中等难度", "极端复杂场景"]:
         print(f"\n{'='*50}")
         result = graph.invoke({"query": q})

@@ -203,10 +203,12 @@ async def main() -> None:
     graph.add_node("researcher", run_researcher)
     graph.add_node("reviewer", run_reviewer)
     graph.add_edge(START, "supervisor")
-    graph.add_conditional_edges("supervisor", route)
+    graph.add_conditional_edges("supervisor", route, {"researcher": "researcher", "reviewer": "reviewer", "__end__": END})  # 显示路由映射
     graph.add_edge("researcher", "supervisor")
     graph.add_edge("reviewer", "supervisor")
     app = graph.compile()
+
+    get_langgraph_png(app, "06_supervisor_with_subgraphs.png")  # 导出图
 
     tasks: list[WorkerTask] = [
         {
@@ -240,6 +242,14 @@ async def main() -> None:
         print(f"  - {item['worker_name']} [{item['status']}] {item['summary']}")
     print(f"  latest_result={result.get('latest_result')}")
     print(f"  task_cursor={result.get('task_cursor')}")
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

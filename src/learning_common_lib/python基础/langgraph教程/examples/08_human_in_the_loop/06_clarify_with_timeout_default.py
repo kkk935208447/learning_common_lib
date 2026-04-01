@@ -147,8 +147,8 @@ async def main() -> None:
     graph.add_node("wait", wait_for_clarify)
     graph.add_node("finalize", finalize)
     graph.add_edge(START, "planner")
-    graph.add_conditional_edges("planner", route_after_planner)
-    graph.add_conditional_edges("wait", route_after_wait)
+    graph.add_conditional_edges("planner", route_after_planner, {"wait": "wait", "finalize": "finalize"})
+    graph.add_conditional_edges("wait", route_after_wait, {"finalize": "finalize", "__end__": END})
     graph.add_edge("finalize", END)
     app = graph.compile(checkpointer=saver)
 

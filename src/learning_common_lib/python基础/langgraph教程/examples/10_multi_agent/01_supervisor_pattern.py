@@ -109,12 +109,22 @@ builder.add_node("researcher", researcher)
 builder.add_node("coder", coder)
 
 builder.add_edge(START, "supervisor")
-builder.add_conditional_edges("supervisor", route_worker)
+builder.add_conditional_edges("supervisor", route_worker, {"researcher": "researcher", "coder": "coder", "__end__": END})
 # Worker 完成后回到 Supervisor
 builder.add_edge("researcher", "supervisor")
 builder.add_edge("coder", "supervisor")
 
 graph = builder.compile()
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
+get_langgraph_png(graph, "01_supervisor_pattern.png") # 导出图
 
 
 # ---------------------------------------------------------------------------

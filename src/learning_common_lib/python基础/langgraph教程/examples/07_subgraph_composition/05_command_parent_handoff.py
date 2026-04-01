@@ -129,7 +129,7 @@ async def main() -> None:
     parent.add_node("finalize", parent_finalize)
     parent.add_edge(START, "dispatch")
     parent.add_edge("dispatch", "child_graph")
-    parent.add_conditional_edges("child_graph", route_after_child)
+    parent.add_conditional_edges("child_graph", route_after_child, {"manual_review": "manual_review", "finalize": "finalize"})  # 需要显示执行路由节点，以免出现错误
     parent.add_edge("manual_review", END)
     parent.add_edge("finalize", END)
     app = parent.compile()
@@ -149,11 +149,7 @@ async def main() -> None:
 def get_langgraph_png(app: StateGraph, file_name: str) -> None:
     """导出父图 PNG。
 
-    说明：xray=True 会把子图交给 langgraph.pregel._draw.draw_graph 做「节点替换」，
-    但替换条件要求子图 Graph 同时满足 first_node() 与 last_node() 非空（用于对齐父图
-    连入/连出边）。子图里若大量依赖 Command 动态跳转、静态分析画出的边不形成单一入口/
-    唯一出口链，则 first/last 会为 None，合并被跳过，父图里子图仍显示为单个节点。
-
+    说明：xray=True 会把子图交给 langgraph.pregel._draw.draw_graph 做「节点替换」
     需要单独看子图结构时：可对 build_child_graph().compile() 再 get_graph().draw_mermaid_png(...)。
     """
     from pathlib import Path

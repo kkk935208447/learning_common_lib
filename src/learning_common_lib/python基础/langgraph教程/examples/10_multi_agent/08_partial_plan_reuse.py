@@ -30,7 +30,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict
+from typing import TypedDict, Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -88,7 +88,7 @@ def executor(state: ReuseState) -> dict:
     }
 
 
-def route(state: ReuseState):
+def route(state: ReuseState) -> Literal["planner", "finalize"]:
     return state.get("next_action", "finalize")
 
 
@@ -98,14 +98,23 @@ async def main() -> None:
     graph.add_node("executor", executor)
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "executor")
-    graph.add_conditional_edges("executor", route)
+    graph.add_conditional_edges("executor", route, {"planner": "planner", "finalize": "finalize"})  # 显示路由映射
     graph.add_edge("finalize", END)
     graph.add_node("finalize", lambda state: {"final_result": state["final_result"]})
     app = graph.compile()
 
+    get_langgraph_png(app, "08_partial_plan_reuse.png")  # 导出图
+
     result = await app.ainvoke({"completed_codes": [], "reused_codes": [], "plan_version": 0})
     print(f"\n{result['final_result']}")
 
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -123,7 +123,7 @@ builder.add_node("review", review_agent)
 builder.add_edge(START, "research")
 builder.add_edge("research", "code")
 builder.add_edge("code", "review")
-builder.add_conditional_edges("review", phase_route)
+builder.add_conditional_edges("review", phase_route, {"research": "research", "code": "code", "review": "review", "__end__": END})  # 显示路由映射
 
 graph = builder.compile()
 

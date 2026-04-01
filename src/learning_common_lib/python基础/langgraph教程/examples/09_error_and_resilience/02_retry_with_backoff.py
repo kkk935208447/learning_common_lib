@@ -138,7 +138,7 @@ builder.add_node("degrade", degrade)
 builder.add_node("fail", fail)
 
 builder.add_edge(START, "execute")
-builder.add_conditional_edges("execute", error_route)
+builder.add_conditional_edges("execute", error_route, {"backoff": "backoff", "degrade": "degrade", "fail": "fail", "__end__": END})
 builder.add_edge("backoff", "execute")  # 退避后重试
 builder.add_edge("degrade", END)
 builder.add_edge("fail", END)
@@ -146,11 +146,21 @@ builder.add_edge("fail", END)
 graph = builder.compile()
 
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
 async def main() -> None:
+    get_langgraph_png(graph, "02_retry_with_backoff.png") # 导出图
+
     random.seed(42)
     result = await graph.ainvoke({
         "task": "调用外部 API",
