@@ -27,9 +27,8 @@ Store 管理器：Redis-first，失败时降级为内存 Store。
 """
 from __future__ import annotations
 
-from contextlib import suppress
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langgraph.store.memory import InMemoryStore
 
@@ -39,6 +38,9 @@ try:
 except ImportError:  # pragma: no cover - 允许直接运行模板文件
     from checkpoint_manager import diagnose_redis_error
     from runtime_settings import DEFAULT_RUNTIME_SETTINGS, RedisRuntimeSettings
+
+if TYPE_CHECKING:
+    from langgraph.store.redis.aio import AsyncRedisStore
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ class ResilientStore:
 class StoreManager:
     """Redis-first Store 管理器。
 
-    默认优先连接 RedisStore；初始化失败时回退到 InMemoryStore，
+    默认优先连接 AsyncRedisStore；初始化失败时回退到 InMemoryStore，
     同时明确打印降级原因，避免“假成功”。
     """
 
@@ -98,25 +100,58 @@ class StoreManager:
         self._store_cm: Any | None = None
         self._store: ResilientStore | None = None
 
+    def _build_async_store(self, store_cls: type["AsyncRedisStore"]) -> "AsyncRedisStore":
+        return store_cls(
+            redis_url=self._settings.store_url,
+            store_prefix=self._settings.store_prefix,
+            vector_prefix=self._settings.vector_prefix,
+        )
+
+    async def _close_failed_store(self, store: "AsyncRedisStore", exc: BaseException | None = None) -> None:
+        try:
+            await store.__aexit__(
+                type(exc) if exc is not None else None,
+                exc,
+                exc.__traceback__ if exc is not None else None,
+            )
+        except Exception:
+            logger.debug("关闭失败的 Redis store 时再次出错", exc_info=True)
+
+    async def _create_index_allow_existing(self, index: Any) -> None:
+        try:
+            await index.create(overwrite=False)
+        except Exception as exc:
+            if "index already exists" not in str(exc).lower():
+                raise
+
+    async def _setup_store_allow_existing_indexes(self, store: "AsyncRedisStore") -> None:
+        if getattr(store, "cluster_mode", None) is None:
+            await store._detect_cluster_mode()
+        await self._create_index_allow_existing(store.store_index)
+        if getattr(store, "index_config", None):
+            await self._create_index_allow_existing(store.vector_index)
+
     async def get_store(self) -> ResilientStore:
         if self._store is not None:
             return self._store
 
         if self._prefer_redis:
             try:
-                from langgraph.store.redis import RedisStore  # type: ignore[import-untyped]
+                from langgraph.store.redis.aio import AsyncRedisStore  # type: ignore[import-untyped]
 
-                self._store_cm = RedisStore.from_conn_string(
-                    self._settings.store_url,
-                    store_prefix=self._settings.store_prefix,
-                    vector_prefix=self._settings.vector_prefix,
-                )
+                store = self._build_async_store(AsyncRedisStore)
+                self._store_cm = store
                 try:
-                    store = self._store_cm.__enter__()
-                    store.setup()
-                except Exception:
-                    with suppress(Exception):
-                        self._store_cm.__exit__(None, None, None)
+                    await store.__aenter__()
+                    try:
+                        await store.setup()
+                    except Exception as exc:
+                        if "index already exists" not in str(exc).lower():
+                            raise
+                        await self._setup_store_allow_existing_indexes(store)
+                    await store.aset_client_info()
+                except Exception as exc:
+                    await self._close_failed_store(store, exc)
                     self._store_cm = None
                     raise
                 logger.info("使用 Redis store: %s", self._settings.store_url)
@@ -153,7 +188,7 @@ class StoreManager:
 
     async def aclose(self) -> None:
         if self._store_cm is not None:
-            self._store_cm.__exit__(None, None, None)
+            await self._store_cm.__aexit__(None, None, None)
             self._store_cm = None
         self._store = None
 
@@ -168,20 +203,21 @@ async def get_store(
 
 
 async def _demo() -> None:
-    mgr = StoreManager(prefer_redis=False)
+    mgr = StoreManager(prefer_redis=False)    # 内存模式
     store = await mgr.get_store()
     print(
         f"store backend: {store.backend}, degraded={store.degraded} "
         f"last_error={store.last_error}"
     )
-    mgr_redis = StoreManager()
+    await mgr.aclose()                        # 关闭内存模式
+
+    mgr_redis = StoreManager()                # Redis 模式
     store_redis = await mgr_redis.get_store()
     print(
         f"redis-first store backend: {store_redis.backend}, degraded={store_redis.degraded} "
         f"last_error={store_redis.last_error}"
     )
-    await mgr_redis.aclose()
-    await mgr.aclose()
+    await mgr_redis.aclose()                  # 关闭 Redis 模式
 
 
 if __name__ == "__main__":

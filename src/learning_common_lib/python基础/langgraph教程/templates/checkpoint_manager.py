@@ -28,15 +28,17 @@ Checkpoint 管理器：Redis / 内存自动切换，为 LangGraph 图提供持�
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.redis.aio import AsyncKeyRegistry
 
 try:
     from .runtime_settings import DEFAULT_RUNTIME_SETTINGS, RedisRuntimeSettings
 except ImportError:  # pragma: no cover - 允许直接运行模板文件
     from runtime_settings import DEFAULT_RUNTIME_SETTINGS, RedisRuntimeSettings
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.redis.aio import AsyncKeyRegistry, AsyncRedisSaver
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,10 @@ def _attach_helper_state(saver: Any, manager: "CheckpointManager") -> Any:
     saver.close_manager = manager.aclose
     return saver
 
+
+def _is_existing_index_error(exc: Exception) -> bool:
+    return "index already exists" in str(exc).lower()
+
 class CheckpointManager:
     """Checkpoint 管理器，支持 Redis / 内存自动切换。
 
@@ -106,27 +112,57 @@ class CheckpointManager:
         self.backend = "memory"
         self.degraded = False
         self.last_error: str | None = None
-        self._checkpointer_cm: Any | None = None
-        self._checkpointer: Any | None = None
+        self._checkpointer_cm: Any | None = None     # 当前由 manager 持有并负责关闭的 checkpointer 实例
+        self._checkpointer: Any | None = None        # 当前可供 graph.compile 使用的 checkpointer 实例
 
-    async def _reuse_existing_indexes(self, saver_cls: type[Any]) -> Any:
-        """复用已存在的 RediSearch 索引，避免重复运行时误判为不可用。"""
-        saver = saver_cls(
+    def _build_redis_saver(self, saver_cls: type["AsyncRedisSaver"]) -> "AsyncRedisSaver":
+        return saver_cls(
             redis_url=self._redis_url,
             checkpoint_prefix=self._settings.checkpoint_prefix,
             checkpoint_write_prefix=self._settings.checkpoint_write_prefix,
         )
-        self._checkpointer_cm = saver
-        saver.create_indexes()
-        await saver._detect_cluster_mode()
-        saver._key_registry = AsyncKeyRegistry(saver._redis)
-        await saver.aset_client_info()
-        logger.info(
-            "Redis checkpoint 索引已存在，复用现有索引: prefix=%s write_prefix=%s",
-            self._settings.checkpoint_prefix,
-            self._settings.checkpoint_write_prefix,
-        )
-        return saver
+
+    async def _close_failed_saver(self, saver: "AsyncRedisSaver", exc: BaseException | None = None) -> None:
+        """确保 enter/setup 失败的 saver 也会释放 Redis 连接。"""
+        try:
+            await saver.__aexit__(
+                type(exc) if exc is not None else None,
+                exc,
+                exc.__traceback__ if exc is not None else None,
+            )
+        except Exception:
+            logger.debug("关闭失败的 Redis saver 时再次出错", exc_info=True)
+
+    async def _create_index_allow_existing(self, index: Any) -> None:
+        """单个索引逐一创建：已存在则忽略，缺失则补齐。"""
+        try:
+            await index.create(overwrite=False)
+        except Exception as exc:
+            if not _is_existing_index_error(exc):
+                raise
+
+    async def _open_redis_saver_allow_existing_indexes(
+        self,
+        saver_cls: type["AsyncRedisSaver"],
+        key_registry_cls: type["AsyncKeyRegistry"],
+    ) -> "AsyncRedisSaver":
+        """兼容“索引已存在”场景，同时补齐缺失索引并完成运行时初始化。"""
+        saver = self._build_redis_saver(saver_cls)
+        try:
+            await self._create_index_allow_existing(saver.checkpoints_index)
+            await self._create_index_allow_existing(saver.checkpoint_writes_index)
+            await saver._detect_cluster_mode()
+            saver._key_registry = key_registry_cls(saver._redis)
+            await saver.aset_client_info()
+            logger.info(
+                "Redis checkpoint 索引已存在，复用/补齐现有索引: prefix=%s write_prefix=%s",
+                self._settings.checkpoint_prefix,
+                self._settings.checkpoint_write_prefix,
+            )
+            return saver
+        except Exception as exc:
+            await self._close_failed_saver(saver, exc)
+            raise
 
     async def get_checkpointer(self) -> Any:
         """获取 checkpointer 实例，Redis 不可用时自动降级为内存。"""
@@ -135,19 +171,21 @@ class CheckpointManager:
 
         if self._redis_url:
             try:
-                from langgraph.checkpoint.redis.aio import AsyncRedisSaver  # type: ignore[import-untyped]
+                from langgraph.checkpoint.redis.aio import AsyncKeyRegistry, AsyncRedisSaver  # type: ignore[import-untyped]
 
-                self._checkpointer_cm = AsyncRedisSaver.from_conn_string(
-                    self._redis_url,
-                    checkpoint_prefix=self._settings.checkpoint_prefix,
-                    checkpoint_write_prefix=self._settings.checkpoint_write_prefix,
-                )
+                saver = self._build_redis_saver(AsyncRedisSaver)
+                self._checkpointer_cm = saver
                 try:
-                    saver = await self._checkpointer_cm.__aenter__()
+                    saver = await saver.__aenter__()
                 except Exception as exc:
-                    if "index already exists" not in str(exc).lower():
+                    await self._close_failed_saver(saver, exc)
+                    if not _is_existing_index_error(exc):
                         raise
-                    saver = await self._reuse_existing_indexes(AsyncRedisSaver)
+                    saver = await self._open_redis_saver_allow_existing_indexes(
+                        AsyncRedisSaver,
+                        AsyncKeyRegistry,
+                    )
+                    self._checkpointer_cm = saver
                 logger.info("使用 Redis checkpointer: %s", self._redis_url)
                 self.backend = "redis"
                 self.degraded = False
@@ -209,6 +247,7 @@ async def _demo() -> None:
         f"内存 checkpointer: {type(cp).__name__} | "
         f"backend={mgr.backend} degraded={mgr.degraded}"
     )
+    await mgr.aclose()
 
     # 2. Redis 模式（可能降级）
     mgr_redis = CheckpointManager()
