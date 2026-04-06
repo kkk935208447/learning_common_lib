@@ -22,8 +22,53 @@ FastAPI + LangGraph SSE 流式端点（store-backed replay 版）。
     - 从项目根目录:
         cd src/learning_common_lib/python基础/langgraph教程
         env LANGGRAPH_STRICT_REDIS=1 uv run python examples/15_production_deployment/01_fastapi_sse_integration.py
-    - 如需启动服务:
-        uvicorn src.learning_common_lib.python基础.langgraph教程.examples.15_production_deployment.01_fastapi_sse_integration:app --reload
+
+FastAPI + curl 测试流程:
+    1. 启动服务（终端 A）
+        env LANGGRAPH_STRICT_REDIS=1 \
+          uvicorn src.learning_common_lib.python基础.langgraph教程.examples.15_production_deployment.01_fastapi_sse_integration:app --reload
+
+    2. 健康检查（终端 B）
+        curl http://127.0.0.1:8000/health
+
+    3. 非流式调用：普通 chat invoke（终端 B）
+        curl -X POST -G \
+          --data-urlencode "query=介绍一下 LangGraph 的 checkpoint 和 thread_id 语义" \
+          http://127.0.0.1:8000/chat/invoke
+
+    4. 流式调用：SSE token + progress 事件（终端 B）
+        curl -N -X POST -G \
+          -H "Accept: text/event-stream" \
+          --data-urlencode "query=介绍一下 LangGraph 的 token streaming，不少于3000字" \
+          http://127.0.0.1:8000/chat/stream
+
+    5. 指定 thread_id，便于后续 replay（终端 B）
+        curl -N -X POST -G \
+          -H "Accept: text/event-stream" \
+          --data-urlencode "query=继续讲讲 checkpoint 和 replay" \
+          --data-urlencode "thread_id=tenant:demo:task:sse-manual-001" \
+          http://127.0.0.1:8000/chat/stream
+
+    6. 使用同一 thread_id 做非流式调用（终端 B）
+        curl -X POST -G \
+          --data-urlencode "query=再总结一下上面的重点" \
+          --data-urlencode "thread_id=tenant:demo:task:sse-manual-001" \
+          http://127.0.0.1:8000/chat/invoke
+
+    7. 用 Last-Event-ID 做断线回放（终端 B）
+        先记住上一次 SSE 输出里的最新 id，例如 2，然后执行：
+        curl -N -X POST -G \
+          -H "Accept: text/event-stream" \
+          -H "Last-Event-ID: 2" \
+          --data-urlencode "query=继续讲讲 checkpoint" \
+          --data-urlencode "thread_id=tenant:demo:task:sse-manual-001" \
+          http://127.0.0.1:8000/chat/stream
+
+    8. 预期能看到的 SSE 事件类型
+        - event: task.accepted
+        - event: heartbeat
+        - event: token
+        - event: task.completed
 
 预期现象:
     运行后可观察本文件对应的状态推进、输出或集成行为
@@ -66,6 +111,7 @@ STRICT_REDIS = DEFAULT_RUNTIME_SETTINGS.strict_redis
 
 
 def emit_runtime_status() -> None:
+    """ 输出运行时状态，便于 smoke / 排障判断是否真的用了 Redis """
     checkpoint_backend = getattr(checkpoint_mgr, "backend", "none")
     checkpoint_degraded = getattr(checkpoint_mgr, "degraded", False)
     store_backend = getattr(store_instance, "backend", "none")
@@ -82,6 +128,10 @@ def emit_runtime_status() -> None:
 
 
 def require_real_redis_runtime() -> None:
+    """ 
+    要求真实 Redis backend，否则抛出异常：
+    checkpoint=redis, store=redis, degraded=False, strict=True last_error=None
+    """
     emit_runtime_status()
     checkpoint_backend = getattr(checkpoint_mgr, "backend", "none")
     checkpoint_degraded = getattr(checkpoint_mgr, "degraded", False)
@@ -103,20 +153,24 @@ def require_real_redis_runtime() -> None:
 
 
 def resolve_thread_id(thread_id: str | None, *, label: str) -> str:
+    """ 解析线程 ID, 不给定则自动生成。 """
     return thread_id or DEFAULT_RUNTIME_SETTINGS.demo_thread_id(label)
 
 
 def event_namespace(thread_id: str) -> tuple[str, str, str]:
+    """ 事件命名空间。 """
     return ("threads", thread_id, "events")
 
 
 async def store_get(namespace: tuple[str, ...], key: str):
+    """ 获取 store 实例的属性，方便调用真实的 store 实例的属性。"""
     if hasattr(store_instance, "aget"):
         return await store_instance.aget(namespace, key)
     return store_instance.get(namespace, key)
 
 
 async def store_put(namespace: tuple[str, ...], key: str, value: dict) -> None:
+    """ 写入 store 实例的属性，方便调用真实的 store 实例的属性。"""
     if hasattr(store_instance, "aput"):
         await store_instance.aput(namespace, key, value)
         return
@@ -130,6 +184,7 @@ async def store_search(namespace: tuple[str, ...]):
 
 
 async def next_event_id(thread_id: str) -> int:
+    """ 获取下一个事件 ID """
     namespace = event_namespace(thread_id)
     meta = await store_get(namespace, "__meta__")
     current = 1
@@ -140,6 +195,7 @@ async def next_event_id(thread_id: str) -> int:
 
 
 async def append_event(thread_id: str, event: str, data: dict) -> dict:
+    """ 追加事件 """
     record = {
         "id": await next_event_id(thread_id),
         "event": event,
@@ -150,6 +206,7 @@ async def append_event(thread_id: str, event: str, data: dict) -> dict:
 
 
 def format_sse_event(record: dict) -> str:
+    """ 格式化 SSE 事件 """
     lines = []
     if record.get("id") is not None:
         lines.append(f"id: {record['id']}")
@@ -159,6 +216,7 @@ def format_sse_event(record: dict) -> str:
 
 
 async def replay_events(thread_id: str, last_event_id: int | None) -> list[dict]:
+    """ 回放事件 """
     if last_event_id is None:
         return []
     items = await store_search(event_namespace(thread_id))
@@ -173,20 +231,21 @@ async def replay_events(thread_id: str, last_event_id: int | None) -> list[dict]
 
 
 def build_chat_graph(store, checkpointer):
+    """ 构建聊天图 """
     llm = FakeListChatModel(
         responses=[
             "这是一个流式回复的模拟内容，用于演示 heartbeat、回放和 Last-Event-ID。",
         ]
     )
 
-    def chat_node(state: MessagesState) -> dict:
+    async def chat_node(state: MessagesState) -> dict:
         query = state["messages"][-1].content if state["messages"] else ""
         namespace = DEFAULT_RUNTIME_SETTINGS.chat_namespace("sse-demo")
-        stats_item = store.get(namespace, "stats")
+        stats_item = await store.aget(namespace, "stats")
         request_count = 0
         if stats_item is not None:
             request_count = int(stats_item.value.get("request_count", 0))
-        store.put(
+        await store.aput(
             namespace,
             "stats",
             {
@@ -203,13 +262,13 @@ def build_chat_graph(store, checkpointer):
     return graph.compile(checkpointer=checkpointer, store=store)
 
 
-MAX_CONCURRENT = 10
-HEARTBEAT_INTERVAL_S = 0.02
-semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-graph_app = None
-checkpoint_mgr = None
-store_mgr = None
-store_instance = None
+MAX_CONCURRENT = 10                                 # 最大并发数
+HEARTBEAT_INTERVAL_S = 0.02                         # 心跳间隔时间
+semaphore = asyncio.Semaphore(MAX_CONCURRENT)       # 并发限制
+graph_app = None                                    # 图实例
+checkpoint_mgr = None                               # 检查点管理器
+store_mgr = None                                    # 存储管理器
+store_instance = None                               # 存储实例
 
 
 @asynccontextmanager
@@ -236,10 +295,11 @@ async def event_generator(
     thread_id: str | None = None,
     last_event_id: int | None = None,
 ) -> AsyncGenerator[str, None]:
-    async with semaphore:
+    """ 事件生成器 """
+    async with semaphore:                               # 并发限制
         effective_thread_id = resolve_thread_id(thread_id, label="stream")
 
-        for record in await replay_events(effective_thread_id, last_event_id):
+        for record in await replay_events(effective_thread_id, last_event_id):    # 回放事件
             yield format_sse_event(record)
 
         accepted = await append_event(
