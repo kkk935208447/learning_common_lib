@@ -91,7 +91,7 @@ def build_order_graph(checkpointer=None):
     graph.add_node("handle_unknown", handle_unknown)
 
     graph.set_entry_point("parse")
-    graph.add_conditional_edges("parse", route_action)
+    graph.add_conditional_edges("parse", route_action, {"handle_query": "handle_query", "handle_cancel": "handle_cancel", "handle_unknown": "handle_unknown"})
     graph.add_edge("handle_query", END)
     graph.add_edge("handle_cancel", END)
     graph.add_edge("handle_unknown", END)

@@ -9,10 +9,10 @@ Redis-first Store 实现跨线程长期记忆。
     见本文件目标、代码注释与状态/路由设计
 
 关键 API:
-    - RedisStore / InMemoryStore —— 长期记忆后端
-    - store.put(namespace, key, value) —— 写入
-    - store.get(namespace, key) —— 读取
-    - store.search(namespace_prefix) —— 搜索
+    - AsyncRedisStore / InMemoryStore —— 长期记忆后端
+    - await store.aput(namespace, key, value) —— 写入
+    - await store.aget(namespace, key) —— 读取
+    - await store.asearch(namespace_prefix) —— 搜索
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
@@ -43,6 +43,11 @@ from typing import TypedDict
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langgraph.graph import END, StateGraph
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from langgraph.store.redis.aio import AsyncRedisStore
+    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+
 try:
     from ...templates import (
         CheckpointManager,
@@ -64,11 +69,11 @@ class State(TypedDict):
     user_id: str
 
 
-def build_store_graph(store, checkpointer):
-    def load_preferences(state: State) -> dict:
+def build_store_graph(store: type["AsyncRedisStore"], checkpointer: type["AsyncRedisSaver"]):
+    async def load_preferences(state: State) -> dict:
         user_id = state["user_id"]
         namespace = DEFAULT_RUNTIME_SETTINGS.preference_namespace(user_id)
-        items = store.search(namespace)
+        items = await store.asearch(namespace)
 
         if items:
             prefs = {item.key: item.value for item in items}
@@ -77,19 +82,19 @@ def build_store_graph(store, checkpointer):
             print(f"[load] 用户 {user_id} 暂无偏好记录")
         return {}
 
-    def process_and_learn(state: State) -> dict:
+    async def process_and_learn(state: State) -> dict:
         user_id = state["user_id"]
         query = state["query"]
         namespace = DEFAULT_RUNTIME_SETTINGS.preference_namespace(user_id)
 
         if "喜欢" in query:
             preference = query.split("喜欢")[-1].strip()
-            store.put(namespace, key="favorite_topic", value={"topic": preference})
+            await store.aput(namespace, key="favorite_topic", value={"topic": preference})
             print(f"[learn] 记住用户偏好: favorite_topic = {preference}")
 
         if "用" in query and "语言" in query:
             lang = query.split("用")[-1].split("语言")[0].strip()
-            store.put(namespace, key="language", value={"lang": lang})
+            await store.aput(namespace, key="language", value={"lang": lang})
             print(f"[learn] 记住编程语言偏好: {lang}")
 
         llm = FakeListChatModel(responses=["好的，我已经记住了你的偏好！"])
@@ -141,7 +146,7 @@ if __name__ == "__main__":
         print(f"\n回复: {result['response']}")
 
         print("\n=== Store 内容检查 ===")
-        items = store.search(DEFAULT_RUNTIME_SETTINGS.preference_namespace(user_id))
+        items = await store.asearch(DEFAULT_RUNTIME_SETTINGS.preference_namespace(user_id))
         for item in items:
             print(f"  {item.key}: {item.value}")
 

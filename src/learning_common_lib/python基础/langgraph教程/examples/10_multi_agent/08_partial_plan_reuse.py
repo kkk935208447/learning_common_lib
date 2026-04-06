@@ -36,15 +36,18 @@ from langgraph.graph import END, START, StateGraph
 
 
 class ReuseState(TypedDict, total=False):
-    plan_version: int
-    plan: list[dict]
-    completed_codes: list[str]
-    reused_codes: list[str]
-    next_action: str
-    final_result: str
+    plan_version: int               # 计划版本
+    plan: list[dict]                # 计划列表
+    completed_codes: list[str]      # 已完成代码列表
+    reused_codes: list[str]         # 复用代码列表
+    next_action: str                # 下一步动作
+    final_result: str               # 最终结果
 
 
 def planner(state: ReuseState) -> dict:
+    """ 
+    规划器节点，负责生成计划，并计算复用代码。
+    """
     version = state.get("plan_version", 0) + 1
     completed = set(state.get("completed_codes", []))
 
@@ -67,6 +70,9 @@ def planner(state: ReuseState) -> dict:
 
 
 def executor(state: ReuseState) -> dict:
+    """ 
+    执行器节点，负责执行计划。
+    """
     completed = list(state.get("completed_codes", []))
     reused = set(state.get("reused_codes", []))
     print(f"[executor] completed(before)={completed}")
@@ -89,6 +95,9 @@ def executor(state: ReuseState) -> dict:
 
 
 def route(state: ReuseState) -> Literal["planner", "finalize"]:
+    """ 
+    路由节点，负责根据下一步动作决定下一步执行。
+    """
     return state.get("next_action", "finalize")
 
 

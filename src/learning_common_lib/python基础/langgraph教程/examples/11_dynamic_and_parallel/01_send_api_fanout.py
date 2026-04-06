@@ -48,9 +48,9 @@ class WorkerState(TypedDict):
 
 class MainState(TypedDict):
     """主图状态：tasks 是待处理列表，results 通过 reducer 聚合"""
-    tasks: list[str]
-    queued_tasks: list[str]
-    batch: int
+    tasks: list[str]                             # 待处理任务列表
+    queued_tasks: list[str]                      # 已分发任务列表
+    batch: int                                   # 批次号
     results: Annotated[list[str], operator.add]  # 多个 worker 的结果自动合并
 
 
@@ -98,10 +98,20 @@ def build_fanout_graph() -> StateGraph:
     return graph.compile()
 
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
+
 # ── 入口 ──────────────────────────────────────────────
 if __name__ == "__main__":
     async def main() -> None:
         app = build_fanout_graph()
+
+        get_langgraph_png(app, "01_send_api_fanout.png")  # 导出图
 
         initial_state: MainState = {
             "tasks": ["翻译文档", "生成摘要", "提取关键词"],

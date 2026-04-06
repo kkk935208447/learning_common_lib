@@ -46,16 +46,19 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import MessagesState, StateGraph
-from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
 try:
     from ...templates import DEFAULT_RUNTIME_SETTINGS
 except ImportError:  # pragma: no cover - 允许直接运行脚本
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from templates import DEFAULT_RUNTIME_SETTINGS
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
 # Redis 连接配置
 REDIS_URL = DEFAULT_RUNTIME_SETTINGS.checkpoint_url
@@ -98,35 +101,64 @@ def build_graph() -> StateGraph:
     return graph
 
 
-async def open_async_redis_saver(async_redis_saver_cls: AsyncRedisSaver):
-    """重复运行示例时复用现有索引，避免 `Index already exists` 误判为失败。"""
-    # from_conn_string 返回异步上下文管理器；等价于 async with 里「进入」前拿到的那个对象
-    saver_cm = async_redis_saver_cls.from_conn_string(
-        REDIS_URL,
+def _is_existing_index_error(exc: Exception) -> bool:
+    return "index already exists" in str(exc).lower()
+
+
+async def _close_failed_saver(saver: Any, exc: BaseException | None = None) -> None:
+    try:
+        await saver.__aexit__(
+            type(exc) if exc is not None else None,
+            exc,
+            exc.__traceback__ if exc is not None else None,
+        )
+    except Exception:
+        # 教学示例里不额外中断主流程，关闭失败只作为调试辅助信息。
+        print("[debug] 关闭失败的 Redis saver 时再次出错")
+
+
+async def _create_index_allow_existing(index: Any) -> None:
+    try:
+        await index.create(overwrite=False)
+    except Exception as exc:
+        if not _is_existing_index_error(exc):
+            raise
+
+
+async def open_async_redis_saver(async_redis_saver_cls: type["AsyncRedisSaver"]):
+    """重复运行示例时复用/补齐已存在的索引，并保证失败路径会释放连接。"""
+    saver = async_redis_saver_cls(
+        redis_url=REDIS_URL,
         checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
         checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
     )
     try:
-        saver = await saver_cm.__aenter__()  # __aenter__：建立连接、建索引等；成功则得到可用的 AsyncRedisSaver 实例
-        return saver, saver_cm.__aexit__    # 返回 __aexit__ 供调用方在 finally 里手动「退出」，与 async with 成对释放资源
+        saver = await saver.__aenter__()
+        return saver, saver.__aexit__   # 返回 saver 实例和 __aexit__ 方法
     except Exception as exc:
-        if "index already exists" not in str(exc).lower():
+        await _close_failed_saver(saver, exc)
+        if not _is_existing_index_error(exc):
             raise
 
         from langgraph.checkpoint.redis.aio import AsyncKeyRegistry
 
-        # 索引已存在：跳过 from_conn_string 的建索引路径，手动构造 saver 并补齐初始化：
-        # 上一分支里 __aenter__ → asetup() 会在 Redis 里执行 FT.CREATE；重复跑示例时。索引已存在会报错。此处不再调用 index.create()，只复刻 asetup 里「建连接对象 + 集群检测 + 键注册表」等运行时所需状态（与库内 AsyncRedisSaver.__aenter__ 一致：await asetup() 中除两段 create 外的步骤 + await aset_client_info()）。
+        # 索引已存在：不要直接假设两个索引都齐全，而是逐个 create；
+        # 已存在则忽略，缺失则补齐。然后再复刻 asetup()/__aenter__ 的剩余初始化步骤。
         saver = async_redis_saver_cls(
             redis_url=REDIS_URL,
             checkpoint_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_prefix,
             checkpoint_write_prefix=DEFAULT_RUNTIME_SETTINGS.checkpoint_write_prefix,
         )
-        saver.create_indexes()    # 在内存中挂好 checkpoints_index / checkpoint_writes_index（含 redis 客户端引用），不执行 RediSearch 的建索引 RPC；真正建库侧索引的是 asetup 里的 .create()。
-        await saver._detect_cluster_mode()   # 与 asetup 相同：判断是否 Cluster，影响 pipeline/键路由等行为。
-        saver._key_registry = AsyncKeyRegistry(saver._redis)   # 与 asetup 相同：写入路径用有序集合等加速按 checkpoint 查 writes。
-        await saver.aset_client_info()   # 与 __aenter__ 相同：向 Redis 声明 CLIENT SETINFO（可观测性），不依赖索引是否新建。
-        return saver, saver.__aexit__     # 与上面分支一致：用实例自带的 __aexit__ 作为关闭函数（签名与上下文管理器相同）
+        try:
+            await _create_index_allow_existing(saver.checkpoints_index)
+            await _create_index_allow_existing(saver.checkpoint_writes_index)
+            await saver._detect_cluster_mode()
+            saver._key_registry = AsyncKeyRegistry(saver._redis)
+            await saver.aset_client_info()
+            return saver, saver.__aexit__   # 返回 saver 实例和 __aexit__ 方法
+        except Exception as fallback_exc:
+            await _close_failed_saver(saver, fallback_exc)
+            raise
 
 
 async def main() -> None:

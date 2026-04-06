@@ -43,17 +43,17 @@ from langgraph.types import Send
 # ── 状态定义 ──────────────────────────────────────────────
 class DocState(TypedDict):
     """单个文档的处理状态"""
-    doc_id: str
+    doc_id: str                                            # 文档 ID
     content: str
 
 
 class MainState(TypedDict):
     """主状态：documents 待处理，summaries 通过 reducer 聚合"""
-    documents: list[dict[str, str]]
-    dispatch_docs: list[dict[str, str]]
-    batch: int
-    summaries: Annotated[list[dict], operator.add]
-    final_report: str
+    documents: list[dict[str, str]]                         # 待处理文档列表
+    dispatch_docs: list[dict[str, str]]                     # 已分发文档列表
+    batch: int                                              # 批次号
+    summaries: Annotated[list[dict], operator.add]          # 多个 worker 的结果自动合并
+    final_report: str                                       # 最终报告
 
 
 # ── 节点函数 ──────────────────────────────────────────────

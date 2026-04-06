@@ -43,6 +43,7 @@ from langgraph.types import Command, interrupt
 
 
 class Strategy(str, Enum):
+    """ 处理策略 """
     ENQUEUE = "enqueue"
     REJECT = "reject"
     INTERRUPT = "interrupt"
@@ -50,29 +51,33 @@ class Strategy(str, Enum):
 
 
 class ChatState(TypedDict, total=False):
-    request_id: str
-    incoming_message: str
-    waiting_reason: str
-    worker_summary: str
-    final_answer: str
+    """ 聊天状态 """
+    request_id: str                    # 请求 ID
+    incoming_message: str               # 输入消息
+    waiting_reason: str                 # 等待原因
+    worker_summary: str                 # 总结
+    final_answer: str                   # 最终答案
 
 
-REQUEST_COUNTER = 0
+REQUEST_COUNTER = 0                  # 请求计数器
 
 
 def next_request_id() -> str:
+    """ 获取下一个请求 ID """
     global REQUEST_COUNTER
     REQUEST_COUNTER += 1
     return f"req-{REQUEST_COUNTER:03d}"
 
 
 def start_request(state: ChatState) -> dict:
+    """ 开始处理请求 """
     request_id = next_request_id()
     print(f"[graph] 开始处理 {request_id}: {state['incoming_message']}")
     return {"request_id": request_id, "waiting_reason": "WORKER", "final_answer": ""}
 
 
 def wait_for_worker(state: ChatState) -> dict:
+    """ 等待工人处理请求 """
     payload = interrupt(
         {
             "request_id": state["request_id"],
@@ -84,6 +89,7 @@ def wait_for_worker(state: ChatState) -> dict:
 
 
 def finalize(state: ChatState) -> dict:
+    """ 完成请求 """
     return {
         "final_answer": (
             f"{state['request_id']} 完成："
@@ -96,21 +102,24 @@ class DoubleTextGateway:
     """网关层策略：检查同一 thread_id 是否已有等待中的任务。"""
 
     def __init__(self, app) -> None:
-        self.app = app
+        self.app = app                                             # 图实例
         self.queues: dict[str, deque[tuple[str, str]]] = {}
-        self.idempotency_cache: dict[str, dict] = {}
-        self.cancelled_requests: dict[str, list[str]] = {}
-        self.stale_worker_results: dict[str, list[str]] = {}
+        self.idempotency_cache: dict[str, dict] = {}                # 幂等缓存
+        self.cancelled_requests: dict[str, list[str]] = {}          # 取消请求记录
+        self.stale_worker_results: dict[str, list[str]] = {}        # 过时结果
 
     async def _is_waiting(self, thread_id: str) -> bool:
+        """ 检查线程是否在 """
         state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
         return bool(state.values) and state.values.get("waiting_reason") == "WORKER"
 
     async def _current_request_id(self, thread_id: str) -> str | None:
+        """ 获取当前请求 ID """
         state = await self.app.aget_state({"configurable": {"thread_id": thread_id}})
         return state.values.get("request_id") if state.values else None
 
     async def _start_new(self, thread_id: str, message: str, idempotency_key: str) -> dict:
+        """ 启动新请求 """
         result = await self.app.ainvoke(
             {"incoming_message": message},
             config={"configurable": {"thread_id": thread_id}},
@@ -132,21 +141,23 @@ class DoubleTextGateway:
         strategy: Strategy,
         idempotency_key: str,
     ) -> dict:
-        if idempotency_key in self.idempotency_cache:
+        """ 提交请求 """
+        if idempotency_key in self.idempotency_cache:                    # 幂等缓存命中
             cached = self.idempotency_cache[idempotency_key]
             print(f"[gateway] idempotency hit key={idempotency_key} cached={cached}")
             return {**cached, "status": "idempotent_replay"}
 
         if not await self._is_waiting(thread_id):
+            """ 当前无任务，直接启动 """
             print(f"[gateway] thread_id={thread_id} 当前无等待任务，直接启动")
             return await self._start_new(thread_id, message, idempotency_key)
 
-        current_request_id = await self._current_request_id(thread_id)
+        current_request_id = await self._current_request_id(thread_id)    # 当前请求 ID
         print(
             f"[gateway] thread_id={thread_id} active_request_id={current_request_id} "
             f"strategy={strategy.value}"
         )
-        if strategy == Strategy.REJECT:
+        if strategy == Strategy.REJECT:                                # 拒绝策略
             response = {
                 "status": "rejected_busy",
                 "thread_id": thread_id,
@@ -155,7 +166,7 @@ class DoubleTextGateway:
             self.idempotency_cache[idempotency_key] = response
             return response
 
-        if strategy == Strategy.ENQUEUE:
+        if strategy == Strategy.ENQUEUE:                              # 入队策略
             self.queues.setdefault(thread_id, deque()).append((message, idempotency_key))
             print(f"[gateway] queue[{thread_id}]={list(self.queues[thread_id])}")
             response = {
@@ -167,12 +178,12 @@ class DoubleTextGateway:
             self.idempotency_cache[idempotency_key] = response
             return response
 
-        if strategy == Strategy.INTERRUPT:
+        if strategy == Strategy.INTERRUPT:                             # 中断策略
             self.cancelled_requests.setdefault(thread_id, []).append(current_request_id or "unknown")
             print(f"[gateway] interrupt cancel record={self.cancelled_requests[thread_id]}")
             return await self._start_new(thread_id, message, idempotency_key)
 
-        if strategy == Strategy.ROLLBACK:
+        if strategy == Strategy.ROLLBACK:                              # 回滚策略
             self.cancelled_requests.setdefault(thread_id, []).append(f"rollback:{current_request_id or 'unknown'}")
             self.queues[thread_id] = deque()
             print(f"[gateway] rollback cancel record={self.cancelled_requests[thread_id]}")
@@ -254,9 +265,10 @@ async def main() -> None:
         strategy=Strategy.ENQUEUE,
         idempotency_key="idem-001",
     )
-    print(first_wait)
+    print(f"first_wait: {first_wait}")
 
     print("\n=== 同线程再次发送：reject ===")
+    print("submit:")
     print(
         await gateway.submit(
             thread_id=thread_id,
@@ -267,6 +279,7 @@ async def main() -> None:
     )
 
     print("\n=== 同线程再次发送：enqueue ===")
+    print("submit:")
     print(
         await gateway.submit(
             thread_id=thread_id,
@@ -277,6 +290,7 @@ async def main() -> None:
     )
 
     print("\n=== worker 完成当前请求 ===")
+    print("resume_worker:")
     print(
         await gateway.resume_worker(
             thread_id=thread_id,
@@ -304,6 +318,7 @@ async def main() -> None:
     )
 
     print("\n=== 旧 worker 结果回写：会被 request_id fencing 忽略 ===")
+    print("resume_worker:")
     print(
         await gateway.resume_worker(
             thread_id=interrupt_thread,
@@ -313,6 +328,7 @@ async def main() -> None:
     )
 
     print("\n=== 新请求 worker 完成 ===")
+    print("resume_worker:")
     print(
         await gateway.resume_worker(
             thread_id=interrupt_thread,
@@ -322,6 +338,7 @@ async def main() -> None:
     )
 
     print("\n=== 重复提交同一个 idempotency key ===")
+    print("submit:")
     print(
         await gateway.submit(
             thread_id=interrupt_thread,

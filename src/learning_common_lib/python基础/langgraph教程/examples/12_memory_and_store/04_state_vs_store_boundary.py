@@ -49,7 +49,7 @@ BIG_TEXT = "差旅制度原文|" * 300
 async def main() -> None:
     store = InMemoryStore()
 
-    def bad_node(_: BoundaryState) -> dict:
+    def bad_node(_: BoundaryState) -> dict:  # 参数写成 _ 既符合「必须接收 state」的节点签名，又清楚表达「本节点不依赖当前 state」
         print(f"[bad] 直接把大文本塞进 state，字符数={len(BIG_TEXT)}")
         return {"bad_payload_size": len(BIG_TEXT)}
 

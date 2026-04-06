@@ -38,6 +38,10 @@ from pathlib import Path
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from langgraph.store.redis.aio import AsyncRedisStore
+    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
 try:
     from ...templates import (
@@ -77,7 +81,9 @@ MOCK_COLLECTIVE: dict[str, int] = {
 }
 
 
-def build_multi_layer_graph(store, checkpointer):
+def build_multi_layer_graph(store: type["AsyncRedisStore"], checkpointer: type["AsyncRedisSaver"]):
+    """ 构建系统图。 """
+    
     def l1_working_memory(state: MemoryState) -> dict:
         context = f"用户 {state['user_id']} 询问: {state['query']}"
         print(f"[L1 工作记忆] {context}")
@@ -88,17 +94,17 @@ def build_multi_layer_graph(store, checkpointer):
         print(f"[L2 短期记忆] 恢复历史: {history}")
         return {"l2_history": history}
 
-    def l3_long_term(state: MemoryState) -> dict:
+    async def l3_long_term(state: MemoryState) -> dict:
         user_id = state["user_id"]
         namespace = DEFAULT_RUNTIME_SETTINGS.profile_namespace(user_id)
-        items = store.search(namespace)
+        items = await store.asearch(namespace)
 
         if items:
             prefs = ", ".join(f"{item.key}={item.value}" for item in items)
         else:
             prefs = "暂无偏好记录"
-            store.put(namespace, key="level", value={"v": "intermediate"})
-            store.put(namespace, key="interest", value={"v": "AI框架"})
+            await store.aput(namespace, key="level", value={"v": "intermediate"})
+            await store.aput(namespace, key="interest", value={"v": "AI框架"})
 
         print(f"[L3 长期记忆] 用户偏好: {prefs}")
         return {"l3_preferences": prefs}

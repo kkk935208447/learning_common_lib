@@ -41,30 +41,37 @@ from langgraph.graph import END, START, StateGraph
 
 
 class StepModel(BaseModel):
-    node_code: str
-    worker_name: str
-    objective: str
+    node_code: str                        
+    worker_name: str                      # 执行者名称
+    objective: str                        # 目标
 
 
 class PlanModel(BaseModel):
-    rationale: str
-    steps: list[StepModel]
+    rationale: str                        # 计划理由
+    steps: list[StepModel]                # 步骤列表
 
 
 class ReplanState(TypedDict, total=False):
     query: str
-    plan_json: str
-    fingerprint: str
-    fingerprint_history: list[str]
-    replan_count: int
-    max_replans: int
-    executed_steps: list[str]
-    gap_type: str
-    next_action: str
-    final_summary: str
+    plan_json: str                        # 计划 JSON 字符串
+    fingerprint: str                      # 指纹
+    fingerprint_history: list[str]        # 指纹历史列表
+    replan_count: int                     # 重规划次数
+    max_replans: int                      # 最大重规划次数
+    executed_steps: list[str]             # 已执行步骤列表
+    gap_type: str                         # 缺口类型
+    next_action: str                      # 下一步动作
+    final_summary: str                    # 最终总结
 
 
 def compute_fingerprint(plan: PlanModel) -> str:
+    """ 
+    计算规则：
+    1. 提取 DAG 中所有子任务的 `(node_code, worker_name, objective)` 三元组。
+    2. 按 `node_code` 字典序排序。
+    3. 将排序后的三元组列表序列化为 JSON 字符串。
+    4. 计算 SHA-256 哈希，取前 12 位作为指纹。
+    """
     tuples = [
         (item.node_code, item.worker_name, item.objective)
         for item in plan.steps
@@ -74,6 +81,9 @@ def compute_fingerprint(plan: PlanModel) -> str:
 
 
 def planner_factory() -> FakeListChatModel:
+    """ 
+    返回一个 FakeListChatModel 实例，用于模拟 LLM 的响应。
+    """
     return FakeListChatModel(
         responses=[
             json.dumps(
@@ -125,6 +135,9 @@ async def main() -> None:
     llm = planner_factory()
 
     def planner(state: ReplanState) -> dict:
+        """ 
+        规划器节点，负责生成计划，并计算指纹。
+        """
         print(f"[planner] incoming_query={state['query']}")
         raw = llm.invoke(state["query"]).content
         plan = PlanModel.model_validate_json(raw)
@@ -138,6 +151,9 @@ async def main() -> None:
         }
 
     def executor(state: ReplanState) -> dict:
+        """ 
+        执行器节点，负责执行计划。
+        """
         plan = PlanModel.model_validate_json(state["plan_json"])
         executed = [f"{step.worker_name}:{step.objective}" for step in plan.steps]
         print("[executor]")
@@ -146,6 +162,9 @@ async def main() -> None:
         return {"executed_steps": executed}
 
     def evaluator(state: ReplanState) -> dict:
+        """ 
+        评估器节点，负责评估计划是否需要重规划。
+        """
         history = list(state.get("fingerprint_history", []))
         fingerprint = state["fingerprint"]
         replan_count = state.get("replan_count", 0)
@@ -176,6 +195,9 @@ async def main() -> None:
         }
 
     def finalize(state: ReplanState) -> dict:
+        """ 
+        最终节点，负责总结最终结果。
+        """
         return {
             "final_summary": (
                 f"最终 plan fingerprint={state['fingerprint']} "

@@ -123,6 +123,60 @@ class GracefulShutdownManager:
     3. 等待进行中任务完成（带超时）
     4. 保存 checkpoint
     5. 清理资源
+
+    关于 asyncio.Event（shutdown_event）：
+    ─────────────────────────────────────
+    asyncio.Event 是 asyncio 提供的协程间通信原语，本质是一个"布尔标志 + 等待队列"。
+
+    内部状态：
+        - 初始为 unset（False）
+        - 调用 .set()  → 置为 True，唤醒所有正在 await event.wait() 的协程
+        - 调用 .clear() → 重置为 False
+        - 调用 .is_set() → 查询当前状态，不阻塞
+
+    在本类中的具体作用：
+        self.shutdown_event = asyncio.Event()
+
+        1. 信号触发（_handle_signal）：
+               self.shutdown_event.set()
+           收到 SIGTERM/SIGINT 时，信号处理器调用 .set()，
+           将事件置为"已触发"，同时唤醒所有等待该事件的协程。
+
+        2. 外部等待（调用方）：
+               await manager.shutdown_event.wait()
+           任何协程都可以挂起在此处，零 CPU 占用地等待关闭信号。
+           一旦 .set() 被调用，所有等待者立即恢复执行，开始执行清理逻辑。
+
+        3. 状态查询（非阻塞）：
+               if manager.shutdown_event.is_set(): ...
+           用于在同步代码或循环中快速判断是否已触发关闭，无需 await。
+
+    与其他同步原语的对比：
+        - asyncio.Event   → 一次性广播，适合"关闭"这类一对多通知场景
+        - asyncio.Lock    → 互斥锁，同一时刻只有一个协程持有
+        - asyncio.Queue   → 生产者/消费者，传递数据而非信号
+        - threading.Event → 线程版本，不能在 async 代码中 await
+
+    典型使用模式（生产环境）：
+        async def main():
+            manager = GracefulShutdownManager()
+            manager.setup_signal_handlers()
+
+            # 主循环：持续处理任务，直到收到关闭信号
+            while not manager.shutdown_event.is_set():
+                await process_next_task()
+
+            # 或者：同时等待"有任务"和"要关闭"两个事件
+            done, _ = await asyncio.wait(
+                [asyncio.create_task(manager.shutdown_event.wait()),
+                 asyncio.create_task(task_queue.get())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+    为什么不用普通布尔变量：
+        普通 bool 标志只能轮询（while not flag: await asyncio.sleep(0.1)），
+        浪费 CPU 且响应有延迟。asyncio.Event 利用事件循环的等待机制，
+        在信号到来前协程完全挂起，信号到来后立即唤醒，既高效又精确。
     """
 
     def __init__(self, timeout: float = 25.0):

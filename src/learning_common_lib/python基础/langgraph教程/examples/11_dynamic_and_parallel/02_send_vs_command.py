@@ -44,14 +44,14 @@ from langgraph.types import Command, Send
 # ══════════════════════════════════════════════════════════
 
 class SendState(TypedDict):
-    items: list[str]
-    batch: int
-    dispatched_items: list[str]
-    results: Annotated[list[str], operator.add]
+    items: list[str]                                  # 待处理任务列表
+    batch: int                                        # 批次号
+    dispatched_items: list[str]                       # 已分发任务列表
+    results: Annotated[list[str], operator.add]       # 多个 worker 的结果自动合并 
 
 
 class ItemState(TypedDict):
-    item: str
+    item: str                                         # 单个任务名称
 
 
 def send_dispatcher(state: SendState) -> dict:
@@ -88,9 +88,9 @@ def build_send_graph() -> StateGraph:
 # ══════════════════════════════════════════════════════════
 
 class CmdState(TypedDict):
-    query: str
-    category: str
-    answer: str
+    query: str                                         # 用户查询
+    category: str                                      # 分类
+    answer: str                                        # 回答
 
 
 def classifier(state: CmdState) -> Command:

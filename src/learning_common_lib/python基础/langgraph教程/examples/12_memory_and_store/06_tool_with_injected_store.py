@@ -130,7 +130,7 @@ async def main() -> None:
     graph.add_node("agent", agent)
     graph.add_node("tools", ToolNode(TOOLS))
     graph.add_edge("tools", "agent")
-    graph.add_conditional_edges("agent", should_continue)
+    graph.add_conditional_edges("agent", should_continue, {"__end__": END, "tools": "tools"})
     graph.set_entry_point("agent")
     app = graph.compile(store=store)
 
