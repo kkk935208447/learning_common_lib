@@ -27,6 +27,7 @@ dependencies = [
     "llama-index>=0.14.16",
     "celery-types>=0.26.0",
     "langgraph-checkpoint-redis>=0.4.0",
+    "networkx>=3.6.1",
 ]
 [build-system]
 requires = ["hatchling>=1.17.1"]

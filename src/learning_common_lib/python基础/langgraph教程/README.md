@@ -222,7 +222,7 @@ llm = FakeListChatModel(responses=["模拟回复"])
 - `07_subgraph_composition/05_command_parent_handoff.py`
 - `09_error_and_resilience/05_retry_policy_and_cache_policy.py`
 - `12_memory_and_store/07_store_lifecycle_management.py`
-- `16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py`
+- `16_agentic_rag_patterns/06_control_plane_vs_runtime_state.py`
 
 ## Async-First 教程约定
 
@@ -347,11 +347,13 @@ thread_id 命名约定（参考 AgenticRAG）：
   - dispatch -> waiting -> accepted/stale -> resume
 - `16_agentic_rag_patterns/04_dag_dispatch_pattern.py`
   - READY batch dispatch + fan-out
-- `16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py`
+- `16_agentic_rag_patterns/05_networkx_plan_graph.py`
+  - plan 节点内部使用 networkx 编译 DAG spec
+- `16_agentic_rag_patterns/06_control_plane_vs_runtime_state.py`
   - 控制面真理源 vs runtime state
-- `16_agentic_rag_patterns/06_resume_orchestrator_contract.py`
+- `16_agentic_rag_patterns/07_resume_orchestrator_contract.py`
   - result accepted -> resume graph
-- `16_agentic_rag_patterns/07_stale_result_fencing.py`
+- `16_agentic_rag_patterns/08_stale_result_fencing.py`
   - current_execution_id 防旧结果污染
 
 ## 阅读建议

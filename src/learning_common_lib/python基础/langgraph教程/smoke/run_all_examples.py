@@ -57,9 +57,9 @@ RESUME_RECOVERY_EXAMPLES = {
     "12_memory_and_store/07_store_lifecycle_management.py",
     "14_testing_and_debugging/05_resume_and_replay_tests.py",
     "15_production_deployment/03_double_texting.py",
-    "16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py",
-    "16_agentic_rag_patterns/06_resume_orchestrator_contract.py",
-    "16_agentic_rag_patterns/07_stale_result_fencing.py",
+    "16_agentic_rag_patterns/06_control_plane_vs_runtime_state.py",
+    "16_agentic_rag_patterns/07_resume_orchestrator_contract.py",
+    "16_agentic_rag_patterns/08_stale_result_fencing.py",
 }
 
 

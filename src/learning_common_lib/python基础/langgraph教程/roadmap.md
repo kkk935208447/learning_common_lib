@@ -168,9 +168,10 @@ docker exec <redis容器名> redis-cli -a 123456 ping  # → PONG
 | 80 | `examples/16_agentic_rag_patterns/02_subtask_graph_skeleton.py` | SubtaskState + WorkerResultEnvelope | 检索/生成子图 |
 | 81 | `examples/16_agentic_rag_patterns/03_celery_bridge.py` | dispatch + waiting + accepted/stale + duplicate resume | 异步任务卸载 |
 | 82 | `examples/16_agentic_rag_patterns/04_dag_dispatch_pattern.py` | READY batch dispatch | 多步检索 DAG 编排 |
-| 83 | `examples/16_agentic_rag_patterns/05_control_plane_vs_runtime_state.py` | 控制面 vs runtime state | checkpoint 不是业务真理源 |
-| 84 | `examples/16_agentic_rag_patterns/06_resume_orchestrator_contract.py` | result accepted -> resume | 薄恢复器契约 |
-| 85 | `examples/16_agentic_rag_patterns/07_stale_result_fencing.py` | stale result fencing | execution_id 防旧结果污染 |
+| 83 | `examples/16_agentic_rag_patterns/05_networkx_plan_graph.py` | networkx 计划图编译 + topo layers | plan 节点内部图算法 |
+| 84 | `examples/16_agentic_rag_patterns/06_control_plane_vs_runtime_state.py` | 控制面 vs runtime state | checkpoint 不是业务真理源 |
+| 85 | `examples/16_agentic_rag_patterns/07_resume_orchestrator_contract.py` | result accepted -> resume | 薄恢复器契约 |
+| 86 | `examples/16_agentic_rag_patterns/08_stale_result_fencing.py` | stale result fencing | execution_id 防旧结果污染 |
 
 > 16 章是全教程的综合实战，建议前 15 章全部完成后再进入。直接对应 `案例/用户AgenticRAG检索/技术拆解.md`。
 

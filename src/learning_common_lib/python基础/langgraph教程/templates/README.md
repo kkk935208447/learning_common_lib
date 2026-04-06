@@ -164,7 +164,7 @@ app = create_graph_app(title="My LangGraph API")
 - `05_checkpointing/*` → `checkpoint_manager.py`
 - `12_memory_and_store/*` → `store_manager.py`
 - `10_multi_agent/06_supervisor_with_subgraphs.py` → `multi_agent_orchestrator.py`
-- `16_agentic_rag_patterns/03_celery_bridge.py` / `06_resume_orchestrator_contract.py` → `celery_graph_bridge.py`
+- `16_agentic_rag_patterns/03_celery_bridge.py` / `07_resume_orchestrator_contract.py` → `celery_graph_bridge.py`
 
 注意：
 

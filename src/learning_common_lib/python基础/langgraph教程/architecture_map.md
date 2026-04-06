@@ -319,7 +319,7 @@ node_A → node_B → [暂停] → END
 | 函数式 API | `13_functional_api/01-03` | — |
 | 测试调试 / resume/replay 测试 | `14_testing_and_debugging/01-05` | — |
 | 生产部署 | `15_production_deployment/01-04` | `templates/fastapi_graph_app.py` |
-| AgenticRAG / 控制面恢复 / stale fencing | `16_agentic_rag_patterns/01-07` | `templates/celery_graph_bridge.py` |
+| AgenticRAG / 控制面恢复 / stale fencing | `16_agentic_rag_patterns/01-08` | `templates/celery_graph_bridge.py` |
 
 ## 10. Graph API vs Functional API 对比
 

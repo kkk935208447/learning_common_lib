@@ -196,11 +196,13 @@ async def main() -> None:
     graph.add_node("evaluate", evaluate_result)
     graph.add_node("finalize", finalize)
     graph.add_edge(START, "dispatch")
-    graph.add_conditional_edges("dispatch", route)
-    graph.add_conditional_edges("wait", route)
-    graph.add_conditional_edges("evaluate", route)
+    graph.add_conditional_edges("dispatch", route, path_map={"wait": "wait"})
+    graph.add_conditional_edges("wait", route, path_map={"evaluate": "evaluate"})
+    graph.add_conditional_edges("evaluate", route, path_map={"finalize": "finalize", "wait": "wait"})
     graph.add_edge("finalize", END)
     app = graph.compile(checkpointer=checkpointer)
+
+    get_langgraph_png(app, "03_celery_bridge.png") # 画图 png
 
     thread_id = DEFAULT_RUNTIME_SETTINGS.demo_thread_id("bridge")
     config = {"configurable": {"thread_id": thread_id}}
@@ -283,6 +285,15 @@ async def main() -> None:
     print(completed["final_result"])
 
     await checkpoint_mgr.aclose()
+
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":

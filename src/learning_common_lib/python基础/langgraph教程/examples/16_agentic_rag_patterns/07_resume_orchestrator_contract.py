@@ -1,5 +1,5 @@
 """
-16_agentic_rag_patterns / 06_resume_orchestrator_contract
+16_agentic_rag_patterns / 07_resume_orchestrator_contract
 
 目标:
     演示 resume_orchestrator 的最小契约。
@@ -12,12 +12,12 @@
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
-    - 当前文件: examples/16_agentic_rag_patterns/06_resume_orchestrator_contract.py
+    - 当前文件: examples/16_agentic_rag_patterns/07_resume_orchestrator_contract.py
 
 运行方式:
     - 从项目根目录:
         cd src/learning_common_lib/python基础/langgraph教程
-        uv run python examples/16_agentic_rag_patterns/06_resume_orchestrator_contract.py
+        uv run python examples/16_agentic_rag_patterns/07_resume_orchestrator_contract.py
 
 预期现象:
     1. 图先进入等待态

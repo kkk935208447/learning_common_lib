@@ -1,5 +1,5 @@
 """
-16_agentic_rag_patterns / 07_stale_result_fencing
+16_agentic_rag_patterns / 08_stale_result_fencing
 
 目标:
     演示 stale result fencing。
@@ -12,12 +12,12 @@
 
 目录导航:
     - 从项目根目录: cd src/learning_common_lib/python基础/langgraph教程
-    - 当前文件: examples/16_agentic_rag_patterns/07_stale_result_fencing.py
+    - 当前文件: examples/16_agentic_rag_patterns/08_stale_result_fencing.py
 
 运行方式:
     - 从项目根目录:
         cd src/learning_common_lib/python基础/langgraph教程
-        uv run python examples/16_agentic_rag_patterns/07_stale_result_fencing.py
+        uv run python examples/16_agentic_rag_patterns/08_stale_result_fencing.py
 
 预期现象:
     1. stale 结果回写后，不推进 finalize
