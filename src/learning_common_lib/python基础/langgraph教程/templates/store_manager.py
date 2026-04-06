@@ -69,6 +69,7 @@ class ResilientStore:
             await self._owner.aclose()
 
     def __getattr__(self, name: str) -> Any:
+        """ 获取 store 实例的属性，方便调用真实的 store 实例的属性。 比如：ResilientStore().aput() 实际上调用的是 _store.aput()"""
         return getattr(self._store, name)
 
     def __repr__(self) -> str:
@@ -101,6 +102,7 @@ class StoreManager:
         self._store: ResilientStore | None = None
 
     def _build_async_store(self, store_cls: type["AsyncRedisStore"]) -> "AsyncRedisStore":
+        """ 构建 AsyncRedisStore 实例。 """
         return store_cls(
             redis_url=self._settings.store_url,
             store_prefix=self._settings.store_prefix,
@@ -108,6 +110,7 @@ class StoreManager:
         )
 
     async def _close_failed_store(self, store: "AsyncRedisStore", exc: BaseException | None = None) -> None:
+        """ 确保 enter/setup 失败的 store 也会释放 Redis 连接。 """
         try:
             await store.__aexit__(
                 type(exc) if exc is not None else None,
@@ -118,6 +121,7 @@ class StoreManager:
             logger.debug("关闭失败的 Redis store 时再次出错", exc_info=True)
 
     async def _create_index_allow_existing(self, index: Any) -> None:
+        """ 单个索引逐一创建：已存在则忽略，缺失则补齐。 """
         try:
             await index.create(overwrite=False)
         except Exception as exc:
@@ -125,6 +129,7 @@ class StoreManager:
                 raise
 
     async def _setup_store_allow_existing_indexes(self, store: "AsyncRedisStore") -> None:
+        """ 兼容“索引已存在”场景，同时补齐缺失索引并完成运行时初始化。 """
         if getattr(store, "cluster_mode", None) is None:
             await store._detect_cluster_mode()
         await self._create_index_allow_existing(store.store_index)
@@ -132,6 +137,7 @@ class StoreManager:
             await self._create_index_allow_existing(store.vector_index)
 
     async def get_store(self) -> ResilientStore:
+        """ 获取 store 实例，Redis 不可用时自动降级为 InMemoryStore。 """
         if self._store is not None:
             return self._store
 
@@ -187,6 +193,7 @@ class StoreManager:
         return self._store
 
     async def aclose(self) -> None:
+        """ 关闭内部维护的异步 store 资源。 """
         if self._store_cm is not None:
             await self._store_cm.__aexit__(None, None, None)
             self._store_cm = None
@@ -198,6 +205,7 @@ async def get_store(
     *,
     prefer_redis: bool | None = None,
 ) -> ResilientStore:
+    """ 获取 store 实例，Redis 不可用时自动降级为 InMemoryStore。 """
     mgr = StoreManager(settings=settings, prefer_redis=prefer_redis)
     return await mgr.get_store()
 

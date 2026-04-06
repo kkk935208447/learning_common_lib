@@ -116,6 +116,7 @@ class CheckpointManager:
         self._checkpointer: Any | None = None        # 当前可供 graph.compile 使用的 checkpointer 实例
 
     def _build_redis_saver(self, saver_cls: type["AsyncRedisSaver"]) -> "AsyncRedisSaver":
+        """构建 Redis checkpointer 实例。"""
         return saver_cls(
             redis_url=self._redis_url,
             checkpoint_prefix=self._settings.checkpoint_prefix,
@@ -149,11 +150,11 @@ class CheckpointManager:
         """兼容“索引已存在”场景，同时补齐缺失索引并完成运行时初始化。"""
         saver = self._build_redis_saver(saver_cls)
         try:
-            await self._create_index_allow_existing(saver.checkpoints_index)
-            await self._create_index_allow_existing(saver.checkpoint_writes_index)
-            await saver._detect_cluster_mode()
-            saver._key_registry = key_registry_cls(saver._redis)
-            await saver.aset_client_info()
+            await self._create_index_allow_existing(saver.checkpoints_index)          # 创建 checkpoints_index 索引，存在则忽略，缺失则补齐。
+            await self._create_index_allow_existing(saver.checkpoint_writes_index)    # 创建 checkpoint_writes_index 索引，存在则忽略，缺失则补齐。
+            await saver._detect_cluster_mode()                                        # 检测 Redis 集群模式
+            saver._key_registry = key_registry_cls(saver._redis)                      # 创建 key_registry，创建 key_registry
+            await saver.aset_client_info()                                            # 设置 client 信息，设置 client 信息
             logger.info(
                 "Redis checkpoint 索引已存在，复用/补齐现有索引: prefix=%s write_prefix=%s",
                 self._settings.checkpoint_prefix,
@@ -174,14 +175,14 @@ class CheckpointManager:
                 from langgraph.checkpoint.redis.aio import AsyncKeyRegistry, AsyncRedisSaver  # type: ignore[import-untyped]
 
                 saver = self._build_redis_saver(AsyncRedisSaver)
-                self._checkpointer_cm = saver
+                self._checkpointer_cm = saver          # 上下文管理器
                 try:
-                    saver = await saver.__aenter__()
+                    saver = await saver.__aenter__()   # 进入上下文管理器
                 except Exception as exc:
-                    await self._close_failed_saver(saver, exc)
-                    if not _is_existing_index_error(exc):
+                    await self._close_failed_saver(saver, exc)   # 关闭失败的 Redis saver
+                    if not _is_existing_index_error(exc):        # 如果不是索引已存在错误，则抛出异常
                         raise
-                    saver = await self._open_redis_saver_allow_existing_indexes(
+                    saver = await self._open_redis_saver_allow_existing_indexes(   # 兼容“索引已存在”场景，同时补齐缺失索引并完成运行时初始化。
                         AsyncRedisSaver,
                         AsyncKeyRegistry,
                     )
