@@ -52,13 +52,13 @@ class GlobalState(TypedDict, total=False):
     task_id: int
     request_id: str
     original_query: str
-    resolved_query: str
-    waiting_reason: Literal["NONE", "CLARIFICATION", "SUBTASKS"]
-    clarification_question: str
-    current_execution_id: str
-    latest_result_ref: dict | None
-    next_action: Literal["clarify", "schedule", "wait_subtasks", "step_gate", "finalize", "output", "fallback"]
-    final_answer: str
+    resolved_query: str                                                # 解决的查询
+    waiting_reason: Literal["NONE", "CLARIFICATION", "SUBTASKS"]       # 等待原因,NONE: 无等待,CLARIFICATION: 澄清,SUBTASKS: 子任务
+    clarification_question: str                                        # 澄清问题
+    current_execution_id: str                                          # 当前执行 ID
+    latest_result_ref: dict | None                                     # 最近一次回写结果的轻量引用
+    next_action: Literal["clarify", "schedule", "wait_subtasks", "step_gate", "finalize", "output", "fallback"]  # 下一步动作
+    final_answer: str                                                    # 最终答案
 
 
 def planner_node(state: GlobalState) -> dict:
@@ -182,15 +182,24 @@ def build_global_graph(checkpointer):
     graph.add_node("fallback", fallback_node)
     graph.add_node("output", output_node)
     graph.set_entry_point("planner")
-    graph.add_conditional_edges("planner", route_by_action)
-    graph.add_conditional_edges("clarify", route_by_action)
-    graph.add_conditional_edges("scheduler", route_by_action)
-    graph.add_conditional_edges("wait_subtasks", route_by_action)
-    graph.add_conditional_edges("step_gate", route_by_action)
-    graph.add_conditional_edges("finalize", route_by_action)
-    graph.add_conditional_edges("fallback", route_by_action)
+    # 必须显式声明每个节点的可达目标，让 LangGraph 能正确绘制图结构
+    graph.add_conditional_edges("planner",    route_by_action, path_map={"clarify": "clarify", "scheduler": "scheduler"})
+    graph.add_conditional_edges("clarify",    route_by_action, path_map={"scheduler": "scheduler"})
+    graph.add_conditional_edges("scheduler",  route_by_action, path_map={"wait_subtasks": "wait_subtasks"})
+    graph.add_conditional_edges("wait_subtasks", route_by_action, path_map={"step_gate": "step_gate"})
+    graph.add_conditional_edges("step_gate",  route_by_action, {"finalize": "finalize", "fallback": "fallback"})
+    graph.add_conditional_edges("finalize",   route_by_action, {"output": "output"})
+    graph.add_conditional_edges("fallback",   route_by_action, {"output": "output"})
     graph.add_edge("output", END)
     return graph.compile(checkpointer=checkpointer)
+
+
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
 
 
 if __name__ == "__main__":
@@ -198,6 +207,8 @@ if __name__ == "__main__":
         checkpoint_mgr = CheckpointManager()
         checkpointer = await checkpoint_mgr.get_checkpointer()
         app = build_global_graph(checkpointer)
+
+        get_langgraph_png(app, "01_global_graph_skeleton.png") # 画图 png
 
         print("=== 场景 1：正常查询 -> WAITING_SUBTASKS -> 恢复 ===\n")
         thread_normal = DEFAULT_RUNTIME_SETTINGS.demo_thread_id("global-normal")
