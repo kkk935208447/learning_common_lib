@@ -2,8 +2,8 @@
 16_agentic_rag_patterns / 05_networkx_plan_graph
 
 目标:
-    演示在 plan 节点内部使用 networkx 构建动态任务计划图，
-    再把 JSON-safe 的 dag_spec / topo_layers 交给 LangGraph 执行。
+    演示在 plan 节点内部使用 networkx 构建动态任务 DAG 计划图，
+    再把 JSON-safe 的 DAG spec / topo layers 交给 LangGraph 执行。
 
 关键概念:
     见本文件目标、代码注释与状态/路由设计
@@ -48,21 +48,21 @@ from langgraph.types import Send
 
 
 class PlanDispatchState(TypedDict):
-    query: str
-    dag_spec: dict[str, Any]
-    dag_fingerprint: str
-    batch: int
-    layer_index: int
-    active_codes: list[str]
-    results: Annotated[list[str], operator.add]
-    completed_codes: Annotated[list[str], operator.add]
+    query: str                                                # 用户查询
+    dag_spec: dict[str, Any]                                  # 任务依赖图 nx.DiGraph 的 JSON-safe 规范
+    dag_fingerprint: str                                      # 任务依赖图的指纹
+    batch: int                                                # 当前批次
+    layer_index: int                                          # 当前拓扑层级索引
+    active_codes: list[str]                                   # 当前拓扑层级的活跃任务
+    results: Annotated[list[str], operator.add]               # 当前批次的结果
+    completed_codes: Annotated[list[str], operator.add]       # 已完成任务的代码列表
 
 
 class WorkerInput(TypedDict):
-    code: str
-    batch: int
-    kind: str
-    objective: str
+    code: str                                                # 任务代码
+    batch: int                                               # 当前批次
+    kind: str                                                # 任务类型
+    objective: str                                           # 任务目标
 
 
 def build_dynamic_tasks(query: str) -> list[dict[str, Any]]:
@@ -148,8 +148,9 @@ def compile_dag_spec(query: str) -> tuple[dict[str, Any], str]:
 
     if not nx.is_directed_acyclic_graph(graph):
         raise ValueError("plan 节点产出的任务依赖图不是 DAG")
-
+    # 获取拓扑层级，返回一个列表，每个元素是一个列表，表示一个拓扑层级
     topo_layers = [sorted(list(layer)) for layer in nx.topological_generations(graph)]
+    # 构建 DAG spec，返回一个字典，包含 nodes、edges、topo_layers 三个字段，其中 nodes 是一个列表，每个元素是一个字典，表示一个节点，deps 是该节点的依赖节点列表，kind 是节点类型，objective 是节点目标
     dag_spec = {
         "nodes": [
             {
@@ -190,33 +191,33 @@ def build_networkx_plan_graph():
 
     def dispatch_node(state: PlanDispatchState) -> dict:
         dag_spec = state["dag_spec"]
-        layer_index = state.get("layer_index", 0)
-        batch = state.get("batch", 0) + 1
-        topo_layers = dag_spec["topo_layers"]
+        layer_index = state.get("layer_index", 0)  # 当前拓扑层级索引
+        batch = state.get("batch", 0) + 1            # 当前批次
+        topo_layers = dag_spec["topo_layers"]        # 拓扑层级列表
 
-        if layer_index >= len(topo_layers):
-            print(f"[dispatch] 批次 {batch}: DAG 已无剩余层")
+        if layer_index >= len(topo_layers):            # 如果当前拓扑层级索引大于等于拓扑层级列表长度，则表示 DAG 已无剩余层
+            print(f"[dispatch] 批次 {batch}: DAG 已无剩余层")    # 打印日志
             return {"batch": batch, "active_codes": []}
 
-        active_codes = topo_layers[layer_index]
-        print(f"[dispatch] 批次 {batch}: 分发第 {layer_index} 层 {active_codes}")
+        active_codes = topo_layers[layer_index]        # 当前拓扑层级的活跃任务列表
+        print(f"[dispatch] 批次 {batch}: 分发第 {layer_index} 层 {active_codes}")    # 打印日志
         return {"batch": batch, "active_codes": active_codes}
 
     def dispatch_route(state: PlanDispatchState) -> list[Send]:
-        node_map = build_node_map(state["dag_spec"])
+        node_map = build_node_map(state["dag_spec"])    # 构建节点映射
         sends: list[Send] = []
-        for code in state.get("active_codes", []):
-            node = node_map[code]
+        for code in state.get("active_codes", []):    # 遍历当前拓扑层级的活跃任务列表
+            node = node_map[code]                    # 获取节点
             sends.append(
                 Send(
-                    "worker",
+                    "worker",                           # 发送给 worker 节点
                     {
                         "code": code,
-                        "batch": state["batch"],
-                        "kind": node["kind"],
-                        "objective": node["objective"],
+                        "batch": state["batch"],        # 当前批次
+                        "kind": node["kind"],            # 节点类型
+                        "objective": node["objective"],  # 节点目标
                     },
-                )
+                )                                        # 发送给 worker 节点
             )
         return sends
 

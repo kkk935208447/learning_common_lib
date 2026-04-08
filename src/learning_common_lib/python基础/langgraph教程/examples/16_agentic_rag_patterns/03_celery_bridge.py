@@ -61,6 +61,9 @@ STRICT_REDIS = DEFAULT_RUNTIME_SETTINGS.strict_redis
 
 
 def emit_runtime_status(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    """ 
+    输出运行时状态，便于 smoke / 排障判断是否真的用了 Redis
+    """
     line = f"RUNTIME_STATUS checkpoint={backend} degraded={degraded} strict={STRICT_REDIS}"
     if last_error:
         line += f" last_error={last_error}"
@@ -68,6 +71,9 @@ def emit_runtime_status(*, backend: str, degraded: bool, last_error: str | None 
 
 
 def require_real_redis(*, backend: str, degraded: bool, last_error: str | None = None) -> None:
+    """
+    要求 Redis 连接正常，否则抛出异常
+    """
     emit_runtime_status(backend=backend, degraded=degraded, last_error=last_error)
     if STRICT_REDIS and (backend != "redis" or degraded):
         raise RuntimeError(
@@ -77,40 +83,43 @@ def require_real_redis(*, backend: str, degraded: bool, last_error: str | None =
 
 
 class BridgeState(TypedDict, total=False):
-    task_id: str
-    plan_version: int
-    subtask_code: str
-    query: str
-    thread_id: str
-    current_execution_id: str
-    dispatch_envelope: DispatchEnvelope
-    waiting_reason: str
-    latest_resume: ResumeEnvelope | None
-    accepted_results: list[str]
-    stale_results: list[str]
-    processed_resume_ids: list[str]
-    next_action: str
-    final_result: str
+    task_id: str                                               # 任务 ID
+    plan_version: int                                          # 计划版本
+    subtask_code: str                                          # 子任务代码
+    query: str                                                 # query
+    thread_id: str                                             # 线程 ID
+    current_execution_id: str                                  # 当前执行 ID
+    dispatch_envelope: DispatchEnvelope                        # 调度 envelope
+    waiting_reason: str                                        # 等待原因
+    latest_resume: ResumeEnvelope | None                       # 最新恢复 envelope
+    accepted_results: list[str]                                # 已接受结果列表
+    stale_results: list[str]                                   # 已忽略结果列表
+    processed_resume_ids: list[str]                            # 已处理恢复 ID 列表，避免重复处理
+    next_action: str                                           # 下一步动作
+    final_result: str                                          # 最终结果
 
 
 def dispatch(state: BridgeState) -> dict:
-    execution_id = f"exec-{uuid.uuid4().hex[:8]}"
+    """
+    调度节点，分发 Celery 任务，并返回当前执行 ID 和调度 envelope
+    """
+    execution_id = f"exec-{uuid.uuid4().hex[:8]}"                     # 生成当前执行 ID
     envelope: DispatchEnvelope = {
-        "task_id": f"celery-{uuid.uuid4().hex[:8]}",
-        "thread_id": state["thread_id"],
-        "execution_id": execution_id,
-        "queue": "subtask_jobs",
-        "task_name": "execute_subtask",
-        "status": "DISPATCHED",
-        "plan_version": state["plan_version"],
-        "subtask_code": state["subtask_code"],
+        "task_id": f"celery-{uuid.uuid4().hex[:8]}",                    # 生成任务 ID
+        "thread_id": state["thread_id"],                                # 线程 ID
+        "execution_id": execution_id,                                   # 当前执行 ID
+        "queue": "subtask_jobs",                                        # 子任务队列
+        "task_name": "execute_subtask",                                 # 子任务任务名称
+        "status": "DISPATCHED",                                         # 调度状态
+        "plan_version": state["plan_version"],                           # 计划版本
+        "subtask_code": state["subtask_code"],                           # 子任务代码
     }
-    print(f"[dispatch] envelope={envelope}")
+    print(f"[dispatch] envelope={envelope}")                             # 打印调度 envelope
     return {
-        "current_execution_id": execution_id,
-        "dispatch_envelope": envelope,
-        "waiting_reason": "SUBTASK_RESULT",
-        "next_action": "wait",
+        "current_execution_id": execution_id,                           # 当前执行 ID
+        "dispatch_envelope": envelope,                                  # 调度 envelope
+        "waiting_reason": "SUBTASK_RESULT",                            # 等待原因
+        "next_action": "wait",                                         # 下一步动作
     }
 
 
@@ -184,107 +193,137 @@ def route(state: BridgeState) -> Literal["wait", "evaluate", "finalize"]:
 async def main() -> None:
     checkpoint_mgr = CheckpointManager()
     checkpointer = await checkpoint_mgr.get_checkpointer()
-    require_real_redis(
-        backend=checkpoint_mgr.backend,
-        degraded=checkpoint_mgr.degraded,
-        last_error=checkpoint_mgr.last_error,
-    )
+    
+    try:
+        require_real_redis(
+            backend=checkpoint_mgr.backend,
+            degraded=checkpoint_mgr.degraded,
+            last_error=checkpoint_mgr.last_error,
+        )
 
-    graph = StateGraph(BridgeState)
-    graph.add_node("dispatch", dispatch)
-    graph.add_node("wait", wait_for_result)
-    graph.add_node("evaluate", evaluate_result)
-    graph.add_node("finalize", finalize)
-    graph.add_edge(START, "dispatch")
-    graph.add_conditional_edges("dispatch", route, path_map={"wait": "wait"})
-    graph.add_conditional_edges("wait", route, path_map={"evaluate": "evaluate"})
-    graph.add_conditional_edges("evaluate", route, path_map={"finalize": "finalize", "wait": "wait"})
-    graph.add_edge("finalize", END)
-    app = graph.compile(checkpointer=checkpointer)
+        graph = StateGraph(BridgeState)
+        graph.add_node("dispatch", dispatch)
+        graph.add_node("wait", wait_for_result)
+        graph.add_node("evaluate", evaluate_result)
+        graph.add_node("finalize", finalize)
+        graph.add_edge(START, "dispatch")
+        graph.add_conditional_edges("dispatch", route, path_map={"wait": "wait"})
+        graph.add_conditional_edges("wait", route, path_map={"evaluate": "evaluate"})
+        graph.add_conditional_edges("evaluate", route, path_map={"finalize": "finalize", "wait": "wait"})
+        graph.add_edge("finalize", END)
+        app = graph.compile(checkpointer=checkpointer)
 
-    get_langgraph_png(app, "03_celery_bridge.png") # 画图 png
+        get_langgraph_png(app, "03_celery_bridge.png") # 画图 png
 
-    thread_id = DEFAULT_RUNTIME_SETTINGS.demo_thread_id("bridge")
-    config = {"configurable": {"thread_id": thread_id}}
+        thread_id = DEFAULT_RUNTIME_SETTINGS.demo_thread_id("bridge")
+        config = {"configurable": {"thread_id": thread_id}}
 
-    print("=== 第一次调用：只分发并进入等待态 ===")
-    waiting = await app.ainvoke(
-        {
-            "task_id": "task-001",
-            "plan_version": 1,
-            "subtask_code": "ST-001",
-            "query": "分析近 30 天的差旅制度变化",
-            "thread_id": thread_id,
-            "accepted_results": [],
-            "stale_results": [],
-            "processed_resume_ids": [],
-        },
-        config=config,
-    )
-    print(f"waiting_snapshot={waiting}\n")
-
-    print("\n=== 旧结果回写：不会推进 finalize ===")
-    stale_waiting = await app.ainvoke(
-        Command(
-            resume={
+        print("=== 第一次调用：只分发并进入等待态 ===")
+        waiting = await app.ainvoke(
+            {
+                "task_id": "task-001",
+                "plan_version": 1,
+                "subtask_code": "ST-001",
+                "query": "分析近 30 天的差旅制度变化",
                 "thread_id": thread_id,
-                "execution_id": "exec-stale-old",
-                "task_id": "task-stale",
-                "status": "COMPLETED",
-                "result_ref": "run://2999",
-                "result_payload": {
-                    "summary": "旧 worker 结果",
-                    "plan_version": 0,
-                    "subtask_code": "ST-OLD",
-                },
-            }
-        ),
-        config=config,
-    )
-    print(f"after_stale_snapshot={stale_waiting}\n")
+                "accepted_results": [],
+                "stale_results": [],
+                "processed_resume_ids": [],
+            },
+            config=config,
+        )
+        print(f"waiting_snapshot={waiting}\n")
+        # 打印 state
+        _state = await app.aget_state(config)
+        print(" >> 第一次调用后的 state:")
+        # StateSnapshot 是 NamedTuple，用 _asdict()；业务字段在 .values 里
+        for key, value in _state._asdict().items():
+            if key in ("values", "config", "tasks"):
+                print(f"\t>> {key}: {value}")
 
-    print("\n=== 重复回放同一 stale result：不会再次写 accepted/stale ===")
-    duplicate = await app.ainvoke(
-        Command(
-            resume={
-                "thread_id": thread_id,
-                "execution_id": "exec-stale-old",
-                "task_id": "task-stale",
-                "status": "COMPLETED",
-                "result_ref": "run://2999",
-                "result_payload": {
-                    "summary": "旧 worker 结果",
-                    "plan_version": 0,
-                    "subtask_code": "ST-OLD",
-                },
-            }
-        ),
-        config=config,
-    )
-    print(f"after_duplicate_snapshot={duplicate}\n")
+        print("\n=== 旧结果回写：不会推进 finalize ===")
+        stale_waiting = await app.ainvoke(
+            Command(
+                resume={
+                    "thread_id": thread_id,
+                    "execution_id": "exec-stale-old",
+                    "task_id": "task-stale",
+                    "status": "COMPLETED",
+                    "result_ref": "run://2999",
+                    "result_payload": {
+                        "summary": "旧 worker 结果",
+                        "plan_version": 0,
+                        "subtask_code": "ST-OLD",
+                    },
+                }
+            ),
+            config=config,
+        )
+        print(f"after_stale_snapshot={stale_waiting}\n")
+        # 打印 state
+        _state = await app.aget_state(config)
+        print(" >> 旧结果回写后的 state:")
+        for key, value in _state._asdict().items():
+            if key in ("values", "config", "tasks"):
+                print(f"\t>> {key}: {value}")
 
-    print("\n=== 当前结果回写：accepted 后完成 ===")
-    completed = await app.ainvoke(
-        Command(
-            resume={
-                "thread_id": thread_id,
-                "execution_id": waiting["current_execution_id"],
-                "task_id": waiting["dispatch_envelope"]["task_id"],
-                "status": "COMPLETED",
-                "result_ref": "run://3001",
-                "result_payload": {
-                    "summary": "worker 已完成 evidence merge",
-                    "plan_version": waiting["plan_version"],
-                    "subtask_code": waiting["subtask_code"],
-                },
-            }
-        ),
-        config=config,
-    )
-    print(f"completed_snapshot={completed}")
-    print(completed["final_result"])
+        print("\n=== 重复回放同一 stale result：不会再次写 accepted/stale ===")
+        duplicate = await app.ainvoke(
+            Command(
+                resume={
+                    "thread_id": thread_id,
+                    "execution_id": "exec-stale-old",
+                    "task_id": "task-stale",
+                    "status": "COMPLETED",
+                    "result_ref": "run://2999",
+                    "result_payload": {
+                        "summary": "旧 worker 结果",
+                        "plan_version": 0,
+                        "subtask_code": "ST-OLD",
+                    },
+                }
+            ),
+            config=config,
+        )
+        print(f"after_duplicate_snapshot={duplicate}\n")
+        # 打印 state
+        _state = await app.aget_state(config)
+        print(" >> 重复回放同一 stale result 后的 state:")
+        for key, value in _state._asdict().items():
+            if key in ("values", "config", "tasks"):
+                print(f"\t>> {key}: {value}")
 
-    await checkpoint_mgr.aclose()
+        print("\n=== 当前结果回写：accepted 后完成 ===")
+        completed = await app.ainvoke(
+            Command(
+                resume={
+                    "thread_id": thread_id,
+                    "execution_id": waiting["current_execution_id"],
+                    "task_id": waiting["dispatch_envelope"]["task_id"],
+                    "status": "COMPLETED",
+                    "result_ref": "run://3001",
+                    "result_payload": {
+                        "summary": "worker 已完成 evidence merge",
+                        "plan_version": waiting["plan_version"],
+                        "subtask_code": waiting["subtask_code"],
+                    },
+                }
+            ),
+            config=config,
+        )
+        print(f"completed_snapshot={completed}")
+        print(completed["final_result"])
+        # 打印 state
+        _state = await app.aget_state(config)
+        print(" >> 当前结果回写后的 state:")
+        for key, value in _state._asdict().items():
+            if key in ("values", "config", "tasks"):
+                print(f"\t>> {key}: {value}")
+
+
+    finally:
+        print("执行资源清理：checkpoint_mgr.aclose()，关闭内部维护的异步 checkpointer 资源。")
+        await checkpoint_mgr.aclose()
 
 
 

@@ -147,15 +147,25 @@ def build_subtask_graph():
     graph.add_edge(START, "prepare")
     graph.add_edge("prepare", "retrieve")
     graph.add_edge("retrieve", "evaluate")
-    graph.add_conditional_edges("evaluate", route_after_evaluate)
+    graph.add_conditional_edges("evaluate", route_after_evaluate, path_map={"complete": "complete", "escalate": "escalate"})
     graph.add_edge("complete", END)
     graph.add_edge("escalate", END)
     return graph.compile()
 
 
+def get_langgraph_png(app: StateGraph, file_name: str) -> None:
+    from pathlib import Path
+    PARENT_DIR = Path(__file__).resolve().parent   # 获得当前文件的父目录
+    FILE_PATH = str(PARENT_DIR / file_name)
+    app.get_graph(xray=True).draw_mermaid_png(output_file_path=FILE_PATH)
+    print(f"图已导出到 {FILE_PATH}")
+
+
 if __name__ == "__main__":
     app = build_subtask_graph()
 
+    get_langgraph_png(app, "02_subtask_graph_skeleton.png") # 画图 png
+    
     print("=== 场景 1：正常完成 ===\n")
     completed = app.invoke(
         {
