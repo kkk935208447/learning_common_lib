@@ -2,7 +2,7 @@
 
 ## 目标
 
-在项目目录下创建 `skills/write-library-tutorials/`，作为后续指导 AI 编写各类库学习资料的项目内 skill。该 skill 必须体现教师视角，帮助 AI 为 FastAPI、SQLAlchemy、asyncio、Celery、TaskIQ、LangGraph 等库或主题编写从易到难、覆盖面完整、可独立运行、可验证的学习资料。
+在项目目录下创建 `.agents/skills/write-library-tutorials/`，作为后续指导 AI 编写各类库学习资料的项目内 skill。该 skill 必须体现教师视角，帮助 AI 为 FastAPI、SQLAlchemy、asyncio、Celery、TaskIQ、LangGraph 等库或主题编写从易到难、覆盖面完整、可独立运行、可验证的学习资料。
 
 ## 范围
 
@@ -53,11 +53,11 @@
 
 输出：
 
-- `skills/write-library-tutorials/SKILL.md`
-- `skills/write-library-tutorials/agents/openai.yaml`
-- `skills/write-library-tutorials/references/tutorial-structure.md`
-- `skills/write-library-tutorials/references/example-code-rules.md`
-- `skills/write-library-tutorials/references/verification-checklist.md`
+- `.agents/skills/write-library-tutorials/SKILL.md`
+- `.agents/skills/write-library-tutorials/agents/openai.yaml`
+- `.agents/skills/write-library-tutorials/references/tutorial-structure.md`
+- `.agents/skills/write-library-tutorials/references/example-code-rules.md`
+- `.agents/skills/write-library-tutorials/references/verification-checklist.md`
 - `.codex/verification-report.md`
 
 环境需求：
@@ -73,7 +73,7 @@
 目录结构：
 
 ```text
-skills/write-library-tutorials/
+.agents/skills/write-library-tutorials/
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
@@ -139,7 +139,7 @@ skills/write-library-tutorials/
 实施完成后运行：
 
 ```bash
-/home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/write-library-tutorials
+/home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/write-library-tutorials
 ```
 
 并做以下检查：
@@ -167,7 +167,7 @@ skills/write-library-tutorials/
 
 ## 验收标准
 
-- 项目内存在可用的 `skills/write-library-tutorials/`。
+- 项目内存在可用的 `.agents/skills/write-library-tutorials/`。
 - skill 能清晰触发“编写、补充、重构库学习资料”的任务。
 - skill 明确要求简体中文、教师视角、由浅入深、广覆盖、高阶用法、独立教程和独立示例。
 - skill 明确要求 context7 和 GitHub 代码搜索的使用与记录。
