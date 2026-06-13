@@ -23,3 +23,6 @@ wheels/
 # pycharm .idea
 .idea/
 *.iml
+
+# vibe code
+.worktrees/

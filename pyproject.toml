@@ -28,6 +28,7 @@ dependencies = [
     "celery-types>=0.26.0",
     "langgraph-checkpoint-redis>=0.4.0",
     "networkx>=3.6.1",
+    "pyyaml>=6.0.3",
 ]
 [build-system]
 requires = ["hatchling>=1.17.1"]
