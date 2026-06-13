@@ -1,0 +1,4 @@
+interface:
+  display_name: "编写库学习资料"
+  short_description: "指导 AI 编写独立、渐进、可验证的库教程资料"
+  default_prompt: "使用 $write-library-tutorials 创建渐进式、可独立运行的库教程。"
