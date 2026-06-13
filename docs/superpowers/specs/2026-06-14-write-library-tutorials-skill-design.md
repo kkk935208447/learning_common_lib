@@ -2,7 +2,7 @@
 
 ## 目标
 
-在项目目录下创建 `.agents/skills/write-library-tutorials/`，作为后续指导 AI 编写各类库学习资料的项目内 skill。该 skill 必须体现教师视角，帮助 AI 为 FastAPI、SQLAlchemy、asyncio、Celery、TaskIQ、LangGraph 等库或主题编写从易到难、覆盖面完整、可独立运行、可验证的学习资料。
+在项目目录下创建项目级 `write-library-tutorials` skill，真实源目录为 `.claude/skills/write-library-tutorials/`，并通过 `.agents/skills/write-library-tutorials` symlink 暴露给 Codex。该 skill 作为后续指导 AI 编写各类库学习资料的通用 skill，必须体现教师视角，帮助 AI 为 FastAPI、SQLAlchemy、asyncio、Celery、TaskIQ、LangGraph 等库或主题编写从易到难、覆盖面完整、可独立运行、可验证的学习资料。
 
 ## 范围
 
@@ -53,11 +53,12 @@
 
 输出：
 
-- `.agents/skills/write-library-tutorials/SKILL.md`
-- `.agents/skills/write-library-tutorials/agents/openai.yaml`
-- `.agents/skills/write-library-tutorials/references/tutorial-structure.md`
-- `.agents/skills/write-library-tutorials/references/example-code-rules.md`
-- `.agents/skills/write-library-tutorials/references/verification-checklist.md`
+- `.claude/skills/write-library-tutorials/SKILL.md`
+- `.claude/skills/write-library-tutorials/agents/openai.yaml`
+- `.claude/skills/write-library-tutorials/references/tutorial-structure.md`
+- `.claude/skills/write-library-tutorials/references/example-code-rules.md`
+- `.claude/skills/write-library-tutorials/references/verification-checklist.md`
+- `.agents/skills/write-library-tutorials`：指向 `.claude/skills/write-library-tutorials/` 的 Codex repo 级发现入口。
 - `.codex/verification-report.md`
 
 环境需求：
@@ -73,7 +74,7 @@
 目录结构：
 
 ```text
-.agents/skills/write-library-tutorials/
+.claude/skills/write-library-tutorials/
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
@@ -85,6 +86,9 @@
 
 选择理由：
 
+- Claude Code 的项目级 skill 发现路径是 `.claude/skills/<skill-name>/SKILL.md`。
+- Codex 的 repo 级 skill 发现路径是 `.agents/skills`，且支持跟随 symlink，因此使用 `.agents/skills/write-library-tutorials` 指向真实源目录。
+- 只维护 `.claude/skills/write-library-tutorials/` 一份内容，避免 Claude Code 与 Codex 各自复制后出现分叉。
 - `SKILL.md` 保持短小，主要描述触发条件、流程和强制约束。
 - 教学结构、示例代码规范、验证清单拆分为 reference，避免主文件过长。
 - 当前需求是指导 AI 写学习资料，不需要引入脚手架脚本，避免过早自动化。
@@ -139,7 +143,8 @@
 实施完成后运行：
 
 ```bash
-/home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/write-library-tutorials
+uv run --no-sync --with PyYAML python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/write-library-tutorials
+uv run --no-sync --with PyYAML python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/write-library-tutorials
 ```
 
 并做以下检查：
@@ -167,7 +172,7 @@
 
 ## 验收标准
 
-- 项目内存在可用的 `.agents/skills/write-library-tutorials/`。
+- 项目内存在可用的 `.claude/skills/write-library-tutorials/`，且 `.agents/skills/write-library-tutorials` 作为 symlink 可被 Codex 发现。
 - skill 能清晰触发“编写、补充、重构库学习资料”的任务。
 - skill 明确要求简体中文、教师视角、由浅入深、广覆盖、高阶用法、独立教程和独立示例。
 - skill 明确要求 context7 和 GitHub 代码搜索的使用与记录。

@@ -2,9 +2,9 @@
 
 > **面向代理执行者：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务执行本计划。步骤使用复选框（`- [ ]`）语法跟踪。
 
-**目标：** 创建项目内 `.agents/skills/write-library-tutorials/`，用于指导 AI 编写独立、渐进、覆盖完整且可验证的库学习资料。
+**目标：** 创建项目内 `write-library-tutorials` skill，用于指导 AI 编写独立、渐进、覆盖完整且可验证的库学习资料；真实源目录放在 `.claude/skills/write-library-tutorials/`，并通过 `.agents/skills/write-library-tutorials` symlink 兼容 Codex repo 级发现路径。
 
-**架构：** 使用 `skill-creator` 初始化标准 skill 目录。`SKILL.md` 负责触发条件和工作流程，`references/` 负责教学结构、示例代码规则和验证清单，`.codex/verification-report.md` 记录最终审查结论。
+**架构：** 使用 `skill-creator` 初始化标准 skill 目录。`SKILL.md` 负责触发条件和工作流程，`references/` 负责教学结构、示例代码规则和验证清单，`.codex/verification-report.md` 记录最终审查结论。Claude Code 从 `.claude/skills` 发现项目级 skill，Codex 从 `.agents/skills` 发现 repo 级 skill。
 
 **技术栈：** Codex Skill、Markdown、YAML、`skill-creator` 初始化与校验脚本、Git。
 
@@ -12,37 +12,39 @@
 
 ## 文件结构
 
-- 新建：`.agents/skills/write-library-tutorials/SKILL.md`，定义 skill 触发条件、流程和强制约束。
-- 新建：`.agents/skills/write-library-tutorials/agents/openai.yaml`，提供 UI 元数据。
-- 新建：`.agents/skills/write-library-tutorials/references/tutorial-structure.md`，定义教程目录与教学路线结构。
-- 新建：`.agents/skills/write-library-tutorials/references/example-code-rules.md`，定义 `.py` 示例独立运行与教学说明规则。
-- 新建：`.agents/skills/write-library-tutorials/references/verification-checklist.md`，定义交付前验证和审查清单。
+- 新建：`.claude/skills/write-library-tutorials/SKILL.md`，定义 skill 触发条件、流程和强制约束。
+- 新建：`.claude/skills/write-library-tutorials/agents/openai.yaml`，提供 UI 元数据。
+- 新建：`.claude/skills/write-library-tutorials/references/tutorial-structure.md`，定义教程目录与教学路线结构。
+- 新建：`.claude/skills/write-library-tutorials/references/example-code-rules.md`，定义 `.py` 示例独立运行与教学说明规则。
+- 新建：`.claude/skills/write-library-tutorials/references/verification-checklist.md`，定义交付前验证和审查清单。
+- 新建：`.agents/skills/write-library-tutorials`，指向 `.claude/skills/write-library-tutorials/` 的 symlink。
 - 新建：`.codex/verification-report.md`，记录本次创建 skill 的验证结果和评分。
 - 新建：`docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md`，记录本实现计划。
 
 ### 任务 1：初始化 Skill 骨架
 
 **文件：**
-- 新建：`.agents/skills/write-library-tutorials/SKILL.md`
-- 新建：`.agents/skills/write-library-tutorials/agents/openai.yaml`
-- 新建：`.agents/skills/write-library-tutorials/references/`
+- 新建：`.claude/skills/write-library-tutorials/SKILL.md`
+- 新建：`.claude/skills/write-library-tutorials/agents/openai.yaml`
+- 新建：`.claude/skills/write-library-tutorials/references/`
+- 新建：`.agents/skills/write-library-tutorials` symlink
 
 - [ ] **步骤 1：运行初始化脚本**
 
 运行：
 
 ```bash
-python3 /home/shayuer/.codex/skills/.system/skill-creator/scripts/init_skill.py write-library-tutorials --path .agents/skills --resources references --interface display_name="编写库学习资料" --interface short_description="指导编写独立可验证的库教程" --interface default_prompt="使用 $write-library-tutorials 创建渐进式、可独立运行的库教程。"
+python3 /home/shayuer/.codex/skills/.system/skill-creator/scripts/init_skill.py write-library-tutorials --path .claude/skills --resources references --interface display_name="Write Library Tutorials" --interface short_description="指导编写独立可验证的库教程" --interface default_prompt="使用 $write-library-tutorials 创建渐进式、可独立运行的库教程。"
 ```
 
-预期：创建 `.agents/skills/write-library-tutorials/`，包含 `SKILL.md`、`agents/openai.yaml`、`references/`。
+预期：创建 `.claude/skills/write-library-tutorials/`，包含 `SKILL.md`、`agents/openai.yaml`、`references/`。
 
 - [ ] **步骤 2：检查初始化结果**
 
 运行：
 
 ```bash
-find .agents/skills/write-library-tutorials -maxdepth 3 -type f -o -type d | sort
+find .claude/skills/write-library-tutorials -maxdepth 3 -type f -o -type d | sort
 ```
 
 预期：输出包含 `SKILL.md`、`agents/openai.yaml`、`references`。
@@ -50,7 +52,7 @@ find .agents/skills/write-library-tutorials -maxdepth 3 -type f -o -type d | sor
 ### 任务 2：编写 Skill 主文件
 
 **文件：**
-- 修改：`.agents/skills/write-library-tutorials/SKILL.md`
+- 修改：`.claude/skills/write-library-tutorials/SKILL.md`
 
 - [ ] **步骤 1：将 SKILL.md 替换为最终内容**
 
@@ -68,7 +70,7 @@ find .agents/skills/write-library-tutorials -maxdepth 3 -type f -o -type d | sor
 运行：
 
 ```bash
-sed -n '1,40p' .agents/skills/write-library-tutorials/SKILL.md
+sed -n '1,40p' .claude/skills/write-library-tutorials/SKILL.md
 ```
 
 预期：YAML frontmatter 只含 `name` 和 `description`。
@@ -76,9 +78,9 @@ sed -n '1,40p' .agents/skills/write-library-tutorials/SKILL.md
 ### 任务 3：编写 Reference 文件
 
 **文件：**
-- 新建：`.agents/skills/write-library-tutorials/references/tutorial-structure.md`
-- 新建：`.agents/skills/write-library-tutorials/references/example-code-rules.md`
-- 新建：`.agents/skills/write-library-tutorials/references/verification-checklist.md`
+- 新建：`.claude/skills/write-library-tutorials/references/tutorial-structure.md`
+- 新建：`.claude/skills/write-library-tutorials/references/example-code-rules.md`
+- 新建：`.claude/skills/write-library-tutorials/references/verification-checklist.md`
 
 - [ ] **步骤 1：写入教程结构规范**
 
@@ -119,7 +121,8 @@ sed -n '1,40p' .agents/skills/write-library-tutorials/SKILL.md
 运行：
 
 ```bash
-python3 /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/write-library-tutorials
+uv run --no-sync --with PyYAML python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/write-library-tutorials
+uv run --no-sync --with PyYAML python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/write-library-tutorials
 ```
 
 预期：校验通过。
@@ -129,7 +132,7 @@ python3 /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate
 运行：
 
 ```bash
-rg -n "tutorial-structure|example-code-rules|verification-checklist" .agents/skills/write-library-tutorials/SKILL.md
+rg -n "tutorial-structure|example-code-rules|verification-checklist" .claude/skills/write-library-tutorials/SKILL.md
 ```
 
 预期：三个 reference 文件都被明确引用。
@@ -139,7 +142,7 @@ rg -n "tutorial-structure|example-code-rules|verification-checklist" .agents/ski
 运行：
 
 ```bash
-rg -n "TBD|TODO|FIXME|待定|占位|placeholder" .agents/skills/write-library-tutorials .codex/verification-report.md docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md
+rg -n "TBD|TODO|FIXME|待定|占位|placeholder" .claude/skills/write-library-tutorials .codex/verification-report.md docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md
 ```
 
 预期：无真实占位符命中。
@@ -160,7 +163,8 @@ rg -n "TBD|TODO|FIXME|待定|占位|placeholder" .agents/skills/write-library-tu
 
 **文件：**
 - 暂存：`docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md`
-- 暂存：`.agents/skills/write-library-tutorials/`
+- 暂存：`.claude/skills/write-library-tutorials/`
+- 暂存：`.agents/skills/write-library-tutorials`
 - 暂存：`.codex/verification-report.md`
 
 - [ ] **步骤 1：查看工作区**
@@ -178,8 +182,8 @@ git status --short
 运行：
 
 ```bash
-git add docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md .agents/skills/write-library-tutorials .codex/verification-report.md
-git commit -m "feat: 新增库学习资料编写 skill"
+git add docs/superpowers/plans/2026-06-14-write-library-tutorials-skill.md .claude/skills/write-library-tutorials .agents/skills/write-library-tutorials .codex/verification-report.md
+git commit -m "chore: 兼容 Claude Code 与 Codex skill 发现路径"
 ```
 
 预期：生成一个只包含本任务文件的提交。
