@@ -115,3 +115,110 @@
 ## 结论
 
 本次修正已覆盖 Claude Code 审查建议：补齐 `query_iterator/search_iterator`、`group_by_field`、partition key 和 consistency level；移除真实执行文件的 `_plan.py` 误导命名；5 份核心文档开篇增加定位和交叉引用；全量 smoke 当前结果为 31 通过、0 失败、1 跳过。综合评分 98/100，建议通过。
+
+---
+---
+
+> **说明（给后续 agent）**：本文件按任务追加，上方为 **Milvus 教程** 任务的验证报告，下方为另一个独立任务 **Elasticsearch 教程** 的验证报告。两份报告互不覆盖、各自独立，对应不同的教程目录和交付物。新任务请继续在文件末尾追加，并保留这种分隔。
+
+---
+---
+
+# 验证报告（Elasticsearch 教程）
+
+## 基本信息
+
+- 时间戳：2026-06-14 13:30 CST
+- 任务：在 `src/learning_common_lib/python基础/elasticsearch教程` 编写一份详细的 Elasticsearch 教程，覆盖连接、mapping、CRUD、批量、Query DSL、聚合、分页、错误恢复、生产实践和高级 DSL，针对本地已启动的 Elasticsearch 8.x。
+- 范围：教程入口文档、学习路线、架构映射、最佳实践、坑点清单、19 个 examples、4 个 templates 功能模块、smoke 验证脚本、依赖声明。
+- 交付物：README、roadmap、architecture_map、best_practices、pitfalls、examples、templates、smoke 和本验证报告。
+- 不纳入范围：不部署或管理 ES 服务本身；不实现完整搜索应用；不涉及生产 TLS/认证的真实凭证配置（只给出指引）；不安装中文分词插件（IK）。
+
+## 需求字段完整性
+
+| 字段 | 结论 | 说明 |
+|------|------|------|
+| 目标 | 完整 | 详细 Elasticsearch 教程，按基础到生产递进，全部针对本地 8.x 真实运行验证。 |
+| 范围 | 完整 | 覆盖连接、mapping/分析器、CRUD、bulk、Query DSL、聚合、分页、错误恢复、alias/reindex、异步客户端、DSL。 |
+| 交付物 | 完整 | 5 份核心文档 + templates/README + 19 examples + 4 templates + smoke + 验证报告。 |
+| 运行环境 | 完整 | Python `>=3.11,<3.12`；依赖 `elasticsearch[async]>=8.19,<9`；本地 ES 8.19.14，http://localhost:9200，无认证。 |
+| 外部服务 | 完整 | 依赖本地 ES，已在 README 写清连通性确认和 Docker 启动命令；smoke 先探测连通性。 |
+| 不做内容 | 完整 | 不管理 ES 服务、不做完整应用、不装分词插件。 |
+
+## 交付物映射
+
+| 需求 | 交付物 | 验证方式 |
+|------|--------|----------|
+| 连接与版本对齐 | `examples/01_basics/*` | 真实连 8.19.14，打印 client_major/server_version；并实测 9.x 客户端报 media_type 错误后将依赖固定为 `>=8.19,<9`。 |
+| mapping 与分析器 | `examples/02_mapping_analysis/*` | 真实对比 text/keyword 命中差异，`indices.analyze` 验证分词结果。 |
+| 文档 CRUD 与幂等 | `examples/03_crud/*` | 真实 index/get/update/delete；doc_as_upsert 幂等、script 原子累加。 |
+| 批量写入 | `examples/04_bulk/*` | 真实 helpers.bulk/streaming_bulk，含部分失败收集和退避重试配置。 |
+| Query DSL | `examples/05_query_dsl/*` | 真实 bool/match/match_phrase/multi_match/fuzziness，打印命中与评分。 |
+| 聚合 | `examples/06_aggregations/*` | 真实 terms/range/stats/date_histogram/cumulative_sum。 |
+| 分页 | `examples/07_pagination/*` | 真实复现 from=10000 上限错误，并用 search_after+PIT 完整遍历无重无漏。 |
+| 错误与恢复 | `examples/08_errors_recovery/*` | 真实触发 404/400/409，演示 ignore_status 与乐观并发重试。 |
+| 生产实践 | `examples/09_production/*` | 真实 alias+reindex 蓝绿切换；AsyncElasticsearch 并发查询。 |
+| 高级 DSL | `examples/10_dsl/01_document_orm.py` | 真实用 Document/Search/Q 建模检索，to_dict 对照底层 DSL。 |
+| 可复用骨架 | `templates/*` | settings/client_factory/sync_repository/async_repository，模块与文件两种方式均运行通过。 |
+| 一键验证 | `smoke/run_all_examples.py` | 探测连通性 + 校验必备文档 + 运行全部示例和模板。 |
+
+## 依赖与风险
+
+| 项目 | 结论 | 风险与处理 |
+|------|------|------------|
+| 客户端版本 | 已处理 | 实测 9.4.1 客户端连 8.x 失败，依赖改为 `>=8.19,<9`，uv sync 装到 8.19.3，与 8.19.14 服务端兼容。 |
+| 单节点 ES OOM | 已缓解 | 密集连续请求曾触发容器 OOM 重启；smoke 在用例间留 1s 间隔（`ES_SMOKE_GAP` 可调），README/pitfalls 记录并建议配 1g 堆内存。 |
+| 无认证连接 | 已说明 | 仅本地教学；README 和 best_practices 明确生产必须 TLS + API Key。 |
+| 中文检索 | 已说明 | 标准分析器对中文按单字切分，召回有限；pitfalls/best_practices 指出生产需 IK 等插件，未在教程内安装。 |
+| 数据污染 | 无 | 所有教学索引用 `learning_es_` 前缀，示例 try/finally 清理；运行后 `_cat/indices/learning_es*` 为空。 |
+| 外部资料来源 | 已记录 | context7 查询 `/elastic/elasticsearch-py`；GitHub 搜索 `revjkee/aethernova` 连接器；均记录在 README 来源记录。 |
+
+## 本地验证
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| `curl http://localhost:9200` | 通过 | 确认服务端 8.19.14，无认证可访问。 |
+| `uv sync`（依赖改 `>=8.19,<9` 后） | 通过 | 装到 elasticsearch 8.19.3 + elastic-transport 8.17.1。 |
+| 逐个运行 19 个 examples | 通过 | 全部打印预期可观察输出，自动清理教学索引。 |
+| 4 个 templates 模块运行 + 文件运行 | 通过 | 受控回退路径保证两种方式都能跑。 |
+| `uv run python smoke/run_all_examples.py` | 通过 | 27 通过 / 0 失败 / 1 跳过（__init__.py），耗时约 57s。 |
+| `curl _cat/indices/learning_es*` | 通过 | 运行后无残留教学索引。 |
+
+## 评分
+
+- 技术维度评分：93（文档结构完整、示例独立可重复、命令可复现、smoke 覆盖全量、语言规范、与 milvus 教程风格一致；扣分点：未提供针对中文分词的可运行示例）。
+- 战略维度评分：93（精准匹配“详细 ES 教程 + 本地已启动 ES”的目标，优先复用官方客户端和既有教程结构，准确识别版本对齐和单节点 OOM 两个真实风险并落到文档与脚本）。
+- 综合评分：93。
+- 建议：通过。教程可独立学习、独立运行、独立验证；后续如需可补充 ES|QL、向量检索（kNN）和中文分词插件三个进阶专题。
+
+## 补充更新（2026-06-14 14:10 CST）
+
+基于二次检索（context7 `/elastic/elasticsearch-py` 生产配置与高级检索 + github.search_code 复核）补齐遗漏知识点，聚焦“检索侧 + 索引创建 + 性能优化”，不含认证实操。
+
+新增交付物（均在 8.19.14 上真实运行验证）：
+
+| 主题 | 交付物 | 验证方式 |
+|------|--------|----------|
+| 高亮与字段裁剪 | `examples/11_advanced_search/01_highlight_source.py` | 真实 `highlight`(pre/post_tags、fragment_size)、`_source` includes/excludes |
+| 折叠去重 | `examples/11_advanced_search/02_collapse_dedup.py` | 真实 `collapse` + `inner_hits`，每组返回代表文档 |
+| 向量 kNN 与混合召回 | `examples/11_advanced_search/03_knn_vector.py` | 真实 `dense_vector`(dims/index/similarity) + `knn`，关键词+向量混合 |
+| 按条件批量改删 | `examples/11_advanced_search/04_by_query_ops.py` | 真实 `update_by_query`/`delete_by_query` + `conflicts="proceed"` |
+| 索引设置与导入调优 | `examples/12_index_and_performance/01_index_settings.py` | 真实 shards/replicas/`refresh_interval` 切换 + `forcemerge` |
+| 索引模板 | `examples/12_index_and_performance/02_index_template.py` | 真实 `put_index_template`，新索引自动套 mapping |
+| 慢查询剖析与请求合并 | `examples/12_index_and_performance/03_profile_msearch.py` | 真实 `profile=True` 耗时分解 + `msearch` 合并查询 |
+| 生产客户端可靠性 | `templates/client_factory.py` | 补充 `retry_on_status=(408,429,502,503,504)`、`http_compress=True` |
+
+新增文档更新：README（目录/路线/能力/来源记录）、roadmap（阶段 11-12）、architecture_map（kNN/profile 映射）、best_practices（高级检索、索引与性能两节）、pitfalls（新增第 13-15 条：kNN 维度/相似度、by_query 冲突、活跃索引 force merge）。
+
+补充本地验证：
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| 7 个新示例逐个运行 | 通过 | 全部打印预期输出并自动清理 |
+| `templates/client_factory.py` 模块运行 | 通过 | 新增 retry_on_status/http_compress 后 ping 正常 |
+| `uv run python smoke/run_all_examples.py` | 通过 | **34 通过 / 0 失败 / 1 跳过**（31 个 py 文件），耗时约 72s |
+| `curl _cat/indices/learning_es*` 与 `_index_template/learning_es*` | 通过 | 运行后无残留索引和模板 |
+
+补充来源记录：github.search_code 参考 `strawgate/es-knowledge-base-mcp`（生产客户端 http_compress + retry_on_status 默认组合）、`openai/chatgpt-retrieval-plugin`（dense_vector + knn 写法）、`revjkee/aethernova` oblivionvault（retry_on_status 封装）。
+
+更新后评分：技术维度 95 / 战略维度 95 / 综合 95，建议通过。覆盖面从 19 示例扩展到 26 示例（10→12 个阶段），补齐了高级检索和索引性能两个生产关键维度；剩余可选进阶仍为 ES|QL 和中文分词插件。
