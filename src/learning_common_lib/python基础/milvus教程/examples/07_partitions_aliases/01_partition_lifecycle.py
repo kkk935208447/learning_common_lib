@@ -1,6 +1,6 @@
 """
 目标: 使用 Milvus Lite 真实演示 partition 的创建、写入、限定检索和清理
-关键 API: create_partition, list_partitions, insert(partition_name=...), search(partition_names=...), drop_partition
+关键 API: create_partition, list_partitions, insert(partition_name=...), search(partition_names=...), release_collection, drop_partition
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/07_partitions_aliases/01_partition_lifecycle.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone
@@ -79,6 +79,8 @@ def recreate_collection(client: MilvusClient) -> None:
 def insert_partition_rows(client: MilvusClient) -> None:
     client.create_partition(collection_name=COLLECTION_NAME, partition_name=PARTITION_A)
     client.create_partition(collection_name=COLLECTION_NAME, partition_name=PARTITION_B)
+    # 中间状态：刚建好 partition、还没写数据时，集合里已经能看到三个分区（含默认 _default）
+    print(f"创建分区后 partitions={client.list_partitions(collection_name=COLLECTION_NAME)}")
     client.insert(
         collection_name=COLLECTION_NAME,
         partition_name=PARTITION_A,
@@ -128,6 +130,9 @@ def main() -> None:
         print(f"tenant_a_top_entity={results[0][0]['entity']}")
         print("partition_names 用于物理分区缩小搜索范围，filter 用于业务字段过滤。")
 
+        # Standalone 上 partition 被 load 时不能直接 drop。release_collection 在 Lite 和 Standalone 都支持，
+        # 比 release_partitions（Lite 不支持）更可移植；释放后即可安全删除 partition。
+        client.release_collection(collection_name=COLLECTION_NAME)
         client.drop_partition(collection_name=COLLECTION_NAME, partition_name=PARTITION_B)
         print(f"after_drop_partition={client.list_partitions(collection_name=COLLECTION_NAME)}")
     finally:

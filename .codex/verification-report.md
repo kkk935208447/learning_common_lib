@@ -222,3 +222,73 @@
 补充来源记录：github.search_code 参考 `strawgate/es-knowledge-base-mcp`（生产客户端 http_compress + retry_on_status 默认组合）、`openai/chatgpt-retrieval-plugin`（dense_vector + knn 写法）、`revjkee/aethernova` oblivionvault（retry_on_status 封装）。
 
 更新后评分：技术维度 95 / 战略维度 95 / 综合 95，建议通过。覆盖面从 19 示例扩展到 26 示例（10→12 个阶段），补齐了高级检索和索引性能两个生产关键维度；剩余可选进阶仍为 ES|QL 和中文分词插件。
+
+---
+---
+
+> **说明（给后续 agent）**：以上是 Elasticsearch 教程任务报告。下方是又一个独立任务 **Milvus 教程重构与扩展** 的验证报告。本文件至此包含三段独立报告：Milvus 教程（最早）、Elasticsearch 教程、Milvus 教程重构扩展。新任务继续在末尾追加并保留分隔。
+
+---
+---
+
+# 验证报告（Milvus 教程重构与扩展）
+
+## 基本信息
+
+- 时间戳：2026-06-14 15:10 CST
+- 任务：重构并扩展 `src/learning_common_lib/python基础/milvus教程`，支持“前期 Milvus Lite、后期真实 Milvus Standalone”双模式；用户本地已启动 Standalone（milvus v2.5.6 + etcd + MinIO，密钥 Liukang.kangliU）。
+- 范围：新增 Standalone 运维阶段、修复 Lite→Standalone 迁移暴露的真实 bug、给状态转换类示例补中间态打印、更新 5 份核心文档和 smoke、扩展同步仓储模板。
+- 交付物：`examples/09_standalone_ops/`（4 个新示例）、修复后的 `07_partitions_aliases/01`、补中间态的 `03_filter_and_crud/02` 和 `04_errors_and_recovery/02`、`templates/sync_repository.py`（新增 load/release/get_load_state）、README/roadmap/best_practices/pitfalls/smoke 更新。
+- 不纳入范围：不部署/管理 Milvus 服务本身；不动用户已有的 `company_milvus` 集合；不引入 RBAC、database、replica 等更重的运维专题。
+
+## 需求字段完整性
+
+| 字段 | 结论 | 说明 |
+|------|------|------|
+| 目标 | 完整 | Lite/Standalone 双模式，同一份代码靠 `MILVUS_URI` 切换；新增 Standalone 专属能力教学。 |
+| 范围 | 完整 | 覆盖 load/release 生命周期、flush/compact/stats、异步建索引、search_iterator V2。 |
+| 交付物 | 完整 | 4 个新示例 + 1 个 bug 修复 + 2 个中间态增强 + 模板扩展 + 5 文档 + smoke 双模式。 |
+| 运行环境 | 完整 | pymilvus 3.0.0；Lite 默认；Standalone v2.5.6 @ localhost:19530，本地无 token。 |
+| 外部服务 | 完整 | README 写明 Standalone 由 milvus+etcd+MinIO 组成，给出用户实际 compose 关键环境变量。 |
+| 不做内容 | 完整 | 不碰 company_milvus；不做 RBAC/database/replica。 |
+
+## 交付物映射
+
+| 需求 | 交付物 | 验证方式 |
+|------|--------|----------|
+| 加载生命周期 | `examples/09_standalone_ops/01_load_release_lifecycle.py` | 真实 release 后搜索报 collection not loaded(101)，load 后恢复，打印各阶段 load_state |
+| segment 运维 | `examples/09_standalone_ops/02_flush_compact_stats.py` | 真实 flush/compact/get_collection_stats，删除后 query count(*) 验证 |
+| 异步建索引 | `examples/09_standalone_ops/03_async_index_build.py` | 真实 AsyncMilvusClient 异步建集合+索引+flush+load+search（Lite 不支持） |
+| 流式迭代器 | `examples/09_standalone_ops/04_search_iterator_v2.py` | 真实 search_iterator 分 3 批拉取 120 条（Lite 回退 V1） |
+| 迁移 bug 修复 | `examples/07_partitions_aliases/01_partition_lifecycle.py` | Standalone 上 drop loaded partition 报错；改用 release_collection 后两模式都通过 |
+| 中间态可观察 | `03_filter_and_crud/02`、`04_errors_and_recovery/02`、`07_.../01` | 补打印删除前/upsert 第一次后/建分区后的中间状态 |
+| 模板生产化 | `templates/sync_repository.py` | 新增 load_collection/release_collection/get_load_state，两模式 demo 通过 |
+| 双模式 smoke | `smoke/run_all_examples.py` | standalone_ops 在 Lite 自跳过；加 MILVUS_URI 全量跑 |
+
+## 依赖与风险
+
+| 项目 | 结论 | 风险与处理 |
+|------|------|------------|
+| Lite/Standalone 行为差异 | 已落地 | load/release、flush、异步 DDL、iterator V2 的差异均写入 best_practices 对照表和 pitfalls 第 20-21 条。 |
+| 迁移真实 bug | 已修复 | Standalone smoke 暴露 `07_.../01` drop loaded partition 失败；用可移植的 release_collection 修复，Lite 也兼容（release_partitions 在 Lite 不支持）。 |
+| 用户数据安全 | 无风险 | 全部用 learning_milvus_ 前缀，try/finally drop；运行后 list_collections 中 learning_milvus* 为空，company_milvus 未受影响。 |
+| 预期内异常噪声 | 已处理 | `01` 故意触发 collection not loaded，提高 pymilvus 日志级别避免打印误导性 RPC 栈。 |
+| 外部资料来源 | 已记录 | context7 `/milvus-io/pymilvus` 方法签名；github.search_code 参考 zilliztech/mcp-server-milvus 等 load/release 封装；均记入 README 来源记录。 |
+
+## 本地验证
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| 探测 Standalone 能力 | 通过 | 实测 flush/load_state/search_iterator/compact/async 建索引在 v2.5.6 可用 |
+| 4 个新示例（Standalone） | 通过 | 全部打印预期输出并清理 |
+| `07_.../01` 双模式 | 通过 | 修复后 Lite 和 Standalone 都 after_drop_partition=['_default','tenant_a'] |
+| smoke Lite 模式 | 通过 | 35 通过 / 0 失败 / 1 跳过，耗时约 45s（standalone_ops 自跳过） |
+| smoke Standalone 模式 | 通过 | 35 通过 / 0 失败 / 1 跳过，耗时约 75s（standalone_ops 真实执行） |
+| 残留检查 | 通过 | 运行后无 learning_milvus_* 集合，company_milvus 未被触碰 |
+
+## 评分
+
+- 技术维度评分：95（双模式无缝切换、新示例真实验证、暴露并修复既有迁移 bug、中间态可观察、与原教程风格一致；扣分点：未覆盖 RBAC/database/replica 等更重运维）。
+- 战略维度评分：95（精准匹配“前期 Lite 后期真实 Milvus”的目标，新增内容聚焦 Lite 隐藏而 Standalone 必须面对的能力，复用官方 SDK 和既有模板结构，准确识别并修复迁移风险）。
+- 综合评分：95。
+- 建议：通过。Milvus 教程从 8 阶段扩展到 9 阶段（21→25 示例），补齐 Lite→Standalone 的生产运维断层；后续可选进阶为 RBAC/多 database/replica 和 GPU 索引。

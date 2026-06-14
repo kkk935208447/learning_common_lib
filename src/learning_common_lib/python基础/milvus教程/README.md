@@ -1,10 +1,10 @@
-# Milvus 教程（基础 + 异步客户端 + 高级检索）
+# Milvus 教程（基础 + 异步客户端 + 高级检索 + Standalone 运维）
 
-本教程教你用 Milvus Lite 跑通从文档 chunk、schema/index、写入检索、异步客户端到 hybrid search 的完整 RAG 检索链路。
+本教程教你用 Milvus 跑通从文档 chunk、schema/index、写入检索、异步客户端、hybrid search 到 Standalone 服务端运维的完整 RAG 检索链路。前期用 Milvus Lite 零部署快速上手，后期切换到真实 Milvus Standalone 学习 load/release、flush/compact、异步建索引等只有服务端才有的能力。
 
 这份教程放在 `src/learning_common_lib/python基础/` 下，面向已经掌握 Python 基础、准备学习向量数据库和 RAG 检索链路的开发者。建议先读本文完成环境准备和快速开始，再按 [roadmap.md](roadmap.md) 的顺序逐个运行示例；遇到工程取舍时看 [architecture_map.md](architecture_map.md) 和 [best_practices.md](best_practices.md)，排查问题时看 [pitfalls.md](pitfalls.md)。
 
-教程采用“先同步、后异步、再高级检索”的路线。前几节用同步 `MilvusClient` 建立 collection、schema、index、insert、search、filter、delete 的完整心智模型；基础稳定后，再进入 `AsyncMilvusClient`、索引参数、iterator、grouping search、partition、alias、dense+sparse hybrid search 等高级主题。
+教程采用“先 Lite 后 Standalone、先同步后异步、先基础后高级”的路线。前几节用同步 `MilvusClient` + Milvus Lite 建立 collection、schema、index、insert、search、filter、delete 的完整心智模型；基础稳定后，再进入 `AsyncMilvusClient`、索引参数、iterator、grouping search、partition、alias、dense+sparse hybrid search，最后连真实 Standalone 学习加载生命周期和 segment 运维。
 
 ## 适合人群
 
@@ -18,9 +18,9 @@
 | 项目 | 要求 | 说明 |
 |------|------|------|
 | Python | `>=3.11,<3.12` | 与当前仓库一致 |
-| 依赖 | `pymilvus[milvus-lite]>=3.0.0` | 已写入 `pyproject.toml` |
-| 本地模式 | Milvus Lite | 示例默认使用 `.milvus_tutorial/*.db`，每个真实示例有独立 DB 文件 |
-| 服务模式 | Milvus Standalone 或 Zilliz Cloud | 通过 `MILVUS_URI` 和 `MILVUS_TOKEN` 注入 |
+| 依赖 | `pymilvus[milvus-lite]>=3.0.0` | 已写入 `pyproject.toml`，同一个客户端既连 Lite 也连 Standalone |
+| 本地模式 | Milvus Lite | 示例默认使用 `.milvus_tutorial/*.db`，每个真实示例有独立 DB 文件，零部署 |
+| 服务模式 | Milvus Standalone（本教程在 v2.5.6 上验证） | 通过 `MILVUS_URI` 注入，依赖 etcd + MinIO，本地无 token |
 | 缓存目录 | 建议 `UV_CACHE_DIR=/tmp/uv-cache` | 避免受限环境写用户全局缓存 |
 
 安装依赖：
@@ -29,23 +29,51 @@
 UV_CACHE_DIR=/tmp/uv-cache uv sync
 ```
 
-默认使用 Milvus Lite：
+### 模式一：Milvus Lite（前期上手，零部署）
+
+默认就是 Lite，URI 是本地 `.db` 文件，进程内启动，不需要任何外部服务：
 
 ```bash
 cd src/learning_common_lib/python基础/milvus教程
 UV_CACHE_DIR=/tmp/uv-cache uv run python examples/03_filter_and_crud/01_lite_insert_search.py
 ```
 
-如果使用 Docker Standalone：
+### 模式二：Milvus Standalone（后期进阶，真实服务端）
+
+Standalone 由 milvus + etcd（元数据）+ MinIO（对象存储）三个容器组成。一份最小 `docker-compose.yml` 关键环境变量：
+
+```yaml
+services:
+  standalone:
+    image: milvusdb/milvus:v2.5.6
+    environment:
+      # Milvus 连接 etcd 和 MinIO 的地址
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      # 必须与 MinIO 容器的访问密钥一致
+      MINIO_ACCESSKEYID: Liukang.kangliU
+      MINIO_SECRETACCESSKEY: Liukang.kangliU
+    ports:
+      - "19530:19530"   # gRPC/SDK 端口
+      - "9091:9091"     # 健康检查/metrics
+```
+
+启动后把同一个示例指向 Standalone（本地无认证，token 留空）：
 
 ```bash
 export MILVUS_URI=http://localhost:19530
-export MILVUS_TOKEN=root:Milvus
 cd src/learning_common_lib/python基础/milvus教程
 UV_CACHE_DIR=/tmp/uv-cache uv run python examples/03_filter_and_crud/01_lite_insert_search.py
 ```
 
-> Milvus Lite 会在当前 Python 进程内启动本机 gRPC 服务，不需要额外部署 Milvus。若你的环境设置了 HTTP/HTTPS 代理，请确保 `NO_PROXY` 和 `no_proxy` 包含 `127.0.0.1,localhost`；教程示例和 smoke 已自动补齐这两个变量。
+`09_standalone_ops/` 下的示例只在 Standalone 才有意义（load/release、flush/compact、异步建索引、search_iterator），在 Lite 模式下会打印提示并直接退出：
+
+```bash
+export MILVUS_URI=http://localhost:19530
+UV_CACHE_DIR=/tmp/uv-cache uv run python examples/09_standalone_ops/01_load_release_lifecycle.py
+```
+
+> Milvus Lite 在当前 Python 进程内启动本机 gRPC 服务，不需要额外部署。无论 Lite 还是 Standalone，若环境设置了 HTTP/HTTPS 代理，都要确保 `NO_PROXY` 和 `no_proxy` 包含 `127.0.0.1,localhost`；教程示例和 smoke 已自动补齐。教程所有集合都用 `learning_milvus_` 前缀并在结束时清理，不会动你已有的集合。
 
 ## 示例独立性约定
 
@@ -95,9 +123,14 @@ milvus教程/
 │   │   ├── 01_partition_lifecycle.py
 │   │   ├── 02_alias_switching.py
 │   │   └── 03_partition_key.py
-│   └── 08_hybrid_search/
-│       ├── 01_hybrid_request.py
-│       └── 02_bm25_schema.py
+│   ├── 08_hybrid_search/
+│   │   ├── 01_hybrid_request.py
+│   │   └── 02_bm25_schema.py
+│   └── 09_standalone_ops/
+│       ├── 01_load_release_lifecycle.py
+│       ├── 02_flush_compact_stats.py
+│       ├── 03_async_index_build.py
+│       └── 04_search_iterator_v2.py
 ├── templates/
 │   ├── README.md
 │   ├── __init__.py
@@ -141,10 +174,19 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/04_
 UV_CACHE_DIR=/tmp/uv-cache uv run python examples/08_hybrid_search/01_hybrid_request.py
 ```
 
-一键 smoke：
+切到真实 Standalone 学习服务端运维（load/release、flush/compact、异步建索引、迭代器）：
+
+```bash
+export MILVUS_URI=http://localhost:19530
+UV_CACHE_DIR=/tmp/uv-cache uv run python examples/09_standalone_ops/01_load_release_lifecycle.py
+UV_CACHE_DIR=/tmp/uv-cache uv run python examples/09_standalone_ops/02_flush_compact_stats.py
+```
+
+一键 smoke（Lite 模式下 standalone_ops 自动跳过；加 `MILVUS_URI` 则全量跑）：
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
+MILVUS_URI=http://localhost:19530 UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 ```
 
 ## 学习路线概览
@@ -161,6 +203,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 | 6 | 索引与搜索参数 | `FLAT`、`IVF_FLAT`、`HNSW`、`DISKANN`、`SCANN`、`SPARSE_INVERTED_INDEX`、`nprobe`、`ef`、`radius`、iterator、grouping search |
 | 7 | partition 与 alias | `create_partition`、`partition_names`、`partition key`、`create_alias`、`alter_alias`、蓝绿切换 |
 | 8 | 混合检索 | `AnnSearchRequest`、`RRFRanker`、`WeightedRanker`、BM25 schema/function |
+| 9 | Standalone 运维 | `load_collection`/`release_collection`、`get_load_state`、`flush`、`compact`、`get_collection_stats`、异步建索引、`search_iterator` |
 
 ## 核心原则
 
@@ -189,16 +232,19 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 - 能判断 `insert`、`upsert`、`delete`、`drop_collection`、iterator、grouping search 和 consistency level 的生产风险。
 - 能把同步仓储迁移到异步仓储，并在服务生命周期内正确创建和关闭客户端。
 - 能为 RAG 检索链路设计基础的向量数据协议、错误恢复策略、索引参数和 hybrid search 方案。
+- 能在真实 Standalone 上管理 collection 加载生命周期（load/release）、segment（flush/compact）和异步建索引，理解这些为什么 Lite 上看不到。
 
 ## 来源记录
 
 - context7 查询 `/websites/milvus_io_v2_6_x`：确认 `MilvusClient` 基本工作流、schema、index_params、`AUTOINDEX`、`COSINE`、Milvus Lite URI、Standalone URI/token。
-- context7 查询 `/milvus-io/pymilvus`：确认 `MilvusClient` 方法签名、`AsyncMilvusClient` 实验性说明、异步 `search/query/insert/upsert` 形态。
+- context7 查询 `/milvus-io/pymilvus`：确认 `MilvusClient` 方法签名、`AsyncMilvusClient` 实验性说明、异步 `search/query/insert/upsert` 形态，以及 `load_collection`/`release_collection`/`get_load_state`/`flush`/`compact`/`create_database` 等服务端方法签名。
 - context7 查询 Milvus 2.6 索引和搜索参数：确认 `FLAT`、`IVF_FLAT`、`HNSW`、`DISKANN`、`SCANN`、`SPARSE_INVERTED_INDEX`、`nlist`、`nprobe`、`M`、`efConstruction`、`ef`、`radius`、`range_filter`、BM25 等参数。
 - context7 查询 Milvus 2.6 iterator、grouping search、partition key、consistency、partition、alias、hybrid search：确认 `query_iterator`、`search_iterator`、`group_by_field`、`is_partition_key=True`、`Strong/Bounded/Eventually/Session`、`create_partition`、`partition_names`、`create_alias`、`alter_alias`、`AnnSearchRequest`、`RRFRanker`、`WeightedRanker` 和 BM25 Function 结构。
+- 本地实测真实 Milvus Standalone v2.5.6：确认 `load_collection`/`release_collection`/`get_load_state` 生命周期、release 后搜索报 `collection not loaded`(code=101)、`flush`/`compact`/`get_collection_stats`、`search_iterator` 完整 V2、`AsyncMilvusClient` 异步建索引（这些在 Milvus Lite 上不可用或回退），据此设计 `09_standalone_ops/`。
 - GitHub 代码搜索参考 `open-webui/open-webui`：学习向量库适配器中 collection 前缀、metadata、filter、delete 的封装方式。
 - GitHub 代码搜索参考 `serengil/deepface`：学习按模型参数生成集合名、批量写入、`COSINE/L2` 度量选择。
 - GitHub 代码搜索参考 `milvus-io/pymilvus` 的 `examples/simple_async.py`：学习 `AsyncMilvusClient` 的 `async with`、并行插入和并行搜索模式。
 - GitHub 代码搜索参考 `milvus-io/pymilvus` 的 `examples/hybrid_search.py`：学习多向量字段、`AnnSearchRequest`、`RRFRanker`、`WeightedRanker` 的真实 SDK 写法。
 - GitHub 代码搜索参考 `milvus-io/pymilvus`、`milvus-io/milvus-doc-examples`、`huangjia2019/rag-in-action`、`zilliztech/VectorDBBench`：学习 iterator、grouping search 和 partition key 的实际使用模式。
+- GitHub 代码搜索参考 `zilliztech/mcp-server-milvus`、`yarikama/Agentic-Advanced-RAG`、`NIL-zhuang/HistoryRAG`：学习生产 RAG 服务中 `load_collection`/`release_collection` 的封装方式。
 - GitHub 代码搜索参考 `vstorm-co/full-stack-ai-agent-template`：学习异步 RAG vector store 中 `_ensure_collection`、文档级删除和查询结果映射模式。

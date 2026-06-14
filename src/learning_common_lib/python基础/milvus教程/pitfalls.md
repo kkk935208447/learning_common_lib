@@ -266,3 +266,29 @@
 - `examples/` 尽量自包含，不依赖模板模块。
 - `templates/` 优先使用包内相对导入，直接运行文件时再回退到 `templates.*` 绝对导入。
 - smoke 同时覆盖模板的 `python -m` 模块运行和直接文件运行。
+
+## 20. 从 Lite 切到 Standalone 后搜不到数据
+
+**现象**：同一份代码在 Milvus Lite 跑得好好的，换成 `MILVUS_URI=http://localhost:19530` 后，写入成功但搜索返回空，或直接报 `collection not loaded`(code=101)。
+
+**根因**：Milvus Lite 隐藏了加载生命周期，建好集合就能搜。Standalone 上数据放对象存储，必须先 `load_collection` 进 query node 内存才能检索；异步写入后还可能因为没 `flush` 而搜不到刚写的数据。
+
+**修复方式**：
+
+- Standalone 上检索前确认集合处于 `Loaded` 状态，必要时显式 `load_collection`。
+- 写入后若要立刻搜到，先 `flush` 让数据落盘成 sealed segment，再 `load`。
+- 用 `get_load_state` 排查到底是没 load 还是没 flush。
+- 参见 `examples/09_standalone_ops/01_load_release_lifecycle.py` 和 `03_async_index_build.py`。
+
+## 21. 在写入热路径里频繁 flush / compact
+
+**现象**：批量导入很慢，或 Standalone 的 data node CPU/IO 持续打满。
+
+**根因**：把 `flush`（强制封口 segment）或 `compact`（后台合并回收）放进了每条/每小批写入的循环里。两者都是有成本的服务端操作，不是用来保证可见性的常规手段。
+
+**修复方式**：
+
+- 正常写入靠 Milvus 自动的 segment 管理；只在“导入完成、需要立刻全量可见”这种节点显式 `flush` 一次。
+- `compact` 在大量删除/更新后、低峰期触发，不要常态化调用。
+- 可见性需求用 consistency level 表达，而不是狂刷 flush。
+- 参见 `examples/09_standalone_ops/02_flush_compact_stats.py`。

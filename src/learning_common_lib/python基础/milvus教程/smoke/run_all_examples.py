@@ -4,8 +4,16 @@ Milvus 教程 smoke 测试
 自动检查教程入口文档，并运行 examples/ 与 templates/ 下所有 Python 文件。
 Milvus Lite 示例默认走本地 .db，不需要额外部署；smoke 会补齐 NO_PROXY/no_proxy。
 
+09_standalone_ops/ 下的示例针对真实 Milvus Standalone：
+- 默认（Lite）模式下这些示例会打印提示并直接退出（exit 0），smoke 视为通过；
+- 设置 MILVUS_URI=http://localhost:19530 后，它们会真正连接 Standalone 执行 load/release、
+  flush/compact、异步建索引和 search_iterator。
+
 运行方式（从 milvus教程/ 目录）：
+    # 仅跑 Lite 可用部分（standalone_ops 自动跳过）
     UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
+    # 连真实 Standalone 全量跑
+    MILVUS_URI=http://localhost:19530 UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 """
 
 import os

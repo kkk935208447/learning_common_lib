@@ -79,12 +79,15 @@ def main() -> None:
         recreate_collection(client)
         rows_to_write = build_rows()
         first_result = client.upsert(collection_name=COLLECTION_NAME, data=rows_to_write)
+        # 中间状态：第一次写入后行数，应等于第二次写入后行数，证明 upsert 幂等
+        rows_after_first = client.query(COLLECTION_NAME, filter='source == "milvus-guide"', output_fields=["id"], limit=100)
         second_result = client.upsert(collection_name=COLLECTION_NAME, data=rows_to_write)
         rows = client.query(COLLECTION_NAME, filter='source == "milvus-guide"', output_fields=["id"], limit=100)
 
         print(f"first_upsert_count={first_result.get('upsert_count') or first_result.get('insert_count')}")
+        print(f"milvus_rows_after_first_run={len(rows_after_first)}")
         print(f"second_upsert_count={second_result.get('upsert_count') or second_result.get('insert_count')}")
-        print(f"milvus_rows_after_two_runs={len(rows)}")
+        print(f"milvus_rows_after_two_runs={len(rows)}（与第一次相同说明没有重复写入）")
     finally:
         if client.has_collection(COLLECTION_NAME):
             client.drop_collection(COLLECTION_NAME)

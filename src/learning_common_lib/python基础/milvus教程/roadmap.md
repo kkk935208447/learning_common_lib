@@ -120,6 +120,21 @@
 
 **关键收获**：能看懂 Milvus hybrid search 的请求结构，并知道 BM25 schema 不是查询时临时参数。
 
+## 阶段九：Standalone 运维（09_standalone_ops/）
+
+**学什么**：真实 Milvus Standalone 才有的加载生命周期、segment 管理和异步 DDL。
+
+**为什么在这里**：前八个阶段用 Milvus Lite 建立心智模型，Lite 把很多服务端概念隐藏了。真正上生产用 Standalone 时，load/release、flush/compact、异步建索引这些是绕不开的运维基本功。本阶段必须连真实 Standalone（`MILVUS_URI=http://localhost:19530`），Lite 模式下示例会提示并跳过。
+
+| 顺序 | 文件 | 核心概念 | 观察重点 |
+|------|------|----------|----------|
+| 22 | `01_load_release_lifecycle.py` | `load_collection`、`release_collection`、`get_load_state` | release 后搜索报 collection not loaded，load 后恢复 |
+| 23 | `02_flush_compact_stats.py` | `flush`、`compact`、`get_collection_stats` | flush 落盘成 sealed segment，删除后 compact 回收 |
+| 24 | `03_async_index_build.py` | `AsyncMilvusClient` 异步建集合+索引 | 这条路径在 Lite 触发未实现 RPC，Standalone 才支持 |
+| 25 | `04_search_iterator_v2.py` | `search_iterator`、`batch_size`、`limit`、`close` | Lite 回退 V1，Standalone 完整 V2，分批拉取大结果 |
+
+**关键收获**：理解“Lite 上能搜不代表 Standalone 上能搜”——数据必须 load 进 query node 内存；知道 flush/compact 与对象存储 segment 的关系；能用异步客户端在服务端并发初始化集合。
+
 ## 学完示例后
 
 阅读 `templates/`：

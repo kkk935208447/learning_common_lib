@@ -133,6 +133,18 @@ class SyncMilvusRepository:
         if self.client.has_collection(collection_name):
             self.client.drop_collection(collection_name)
 
+    def load_collection(self, collection_name: str) -> None:
+        """把集合加载进 query node 内存。Standalone 上搜索前必须 load。"""
+        self.client.load_collection(collection_name=collection_name)
+
+    def release_collection(self, collection_name: str) -> None:
+        """释放集合占用的内存。冷数据 release 省内存，再次搜索前需要重新 load。"""
+        self.client.release_collection(collection_name=collection_name)
+
+    def get_load_state(self, collection_name: str) -> str:
+        """返回集合加载状态（Loaded/NotLoad/Loading），便于运维判断。"""
+        return str(self.client.get_load_state(collection_name=collection_name)["state"])
+
 
 def _demo() -> None:
     try:

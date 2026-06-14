@@ -104,11 +104,14 @@ def main() -> None:
             search_params={"metric_type": "COSINE"},
         )
         rows = client.query(COLLECTION_NAME, filter='source == "milvus-guide"', output_fields=["id", "text"], limit=100)
+        # 中间状态：删除前先看 python-guide 有多少行，便于和删除后对比
+        python_before = client.query(COLLECTION_NAME, filter='source == "python-guide"', output_fields=["id"], limit=100)
         delete_result = client.delete(COLLECTION_NAME, filter='source == "python-guide"')
         remaining = client.query(COLLECTION_NAME, filter='source == "python-guide"', output_fields=["id"], limit=100)
 
         print(f"filtered_top_hit={results[0][0]['id']}")
         print(f"milvus_rows={len(rows)}")
+        print(f"python_rows_before_delete={len(python_before)}")
         print(f"deleted_python_rows={delete_count(delete_result)}")
         print(f"remaining_python_rows={len(remaining)}")
         assert len(remaining) == 0

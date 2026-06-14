@@ -11,6 +11,24 @@
 | 云服务 | 使用 Zilliz Cloud 或受管 Milvus，token 通过环境变量注入 | 避免把凭据写进代码 |
 | CI 验证 | 默认运行 Milvus Lite smoke；Standalone/Zilliz Cloud 另设集成验证 | Lite 不需要外部部署，可覆盖真实 SDK 主路径 |
 
+## Lite 与 Standalone 的关键差异
+
+同一份 `MilvusClient` 代码，从 Lite 切到 Standalone 时要注意这些差异（详见 `09_standalone_ops/`）：
+
+| 维度 | Milvus Lite | Milvus Standalone |
+|------|-------------|-------------------|
+| 部署 | 进程内，零依赖 | milvus + etcd（元数据）+ MinIO（对象存储）三件套 |
+| 加载生命周期 | 隐藏，建好即可搜 | 必须 `load_collection` 进内存才能搜，`release` 后报 `collection not loaded` |
+| segment/存储 | 单文件，无独立存储层 | 数据落对象存储，需要 `flush` 封口、`compact` 回收 |
+| 异步建索引 | 不支持（触发未实现 RPC） | `AsyncMilvusClient` 支持异步 DDL |
+| `search_iterator` | 回退到 V1 | 完整 V2 |
+| 适用阶段 | 学习、最小闭环、单测 | 集成、压测、生产 |
+
+实践建议：
+- 写入后若要立刻搜，Standalone 上记得 `flush` + `load`（或确认集合已 load），别假设像 Lite 一样自动可见。
+- 冷集合 `release` 省内存，热集合保持 `load`；用 `get_load_state` 做运维判断。
+- `flush`/`compact` 是有成本的服务端操作，别在写入热路径里频繁调用。
+
 ## schema 设计
 
 - 主键使用稳定 ID，例如 `document_id + chunk_no + version` 的哈希或拼接值。
