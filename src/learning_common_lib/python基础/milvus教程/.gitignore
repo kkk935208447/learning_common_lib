@@ -1,0 +1,3 @@
+.milvus_tutorial/
+__pycache__/
+*.pyc
