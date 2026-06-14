@@ -30,6 +30,7 @@ dependencies = [
     "networkx>=3.6.1",
     "pyyaml>=6.0.3",
     "pymilvus[milvus-lite]>=3.0.0",
+    "elasticsearch[async]>=8.19,<9",
 ]
 [build-system]
 requires = ["hatchling>=1.17.1"]
