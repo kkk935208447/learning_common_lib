@@ -462,3 +462,9 @@
 - `references/example-code-rules.md` 补充 docstring 规则、单文件直观优先、文件顶部配置、关键中间态输出、兼容性边界和相对/绝对导入回退。
 - `references/verification-checklist.md` 补充检查项：API 型 roadmap 是否有流程、速查和示例落点；docstring 是否说明目标、关键 API、重点参数、预期现象和生产提醒；示例是否输出关键中间态。
 - 本地验证：`git diff --check -- .claude/skills/write-library-tutorials` 通过；`uv run python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/write-library-tutorials` 通过，输出 `Skill is valid!`。系统 Python 直接运行同一脚本因缺少 `yaml` 失败，已用项目 `uv run` 环境完成补偿验证。
+
+## 补充更新（2026-06-15 15:51 CST）
+
+- 按用户要求在 `roadmap.md` 的 `Milvus 工程使用流程` 中补充 collection 加载节点：`create_collection(schema, index_params, ...)` 路径通常会自动建索引并 load；检索前仍应确认 collection 已加载，必要时显式执行 `load_collection()` 并用 `get_load_state()` 检查。
+- 来源复核：Context7 查询 Milvus v2.6 文档，确认 `schema + index_params` 创建路径会自动加载，而手动建索引或 release 后检索前需要显式 load。
+- 本地验证：`git diff --check -- src/learning_common_lib/python基础/milvus教程/roadmap.md` 通过。本次只改文档流程说明，不影响示例执行逻辑。

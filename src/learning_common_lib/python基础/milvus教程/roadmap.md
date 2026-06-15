@@ -31,7 +31,7 @@ MilvusClient(uri, token, timeout)
   -> schema.add_field(...)
   -> prepare_index_params()
   -> add_index(field_name, index_type, metric_type, params)
-  -> create_collection(schema, index_params, consistency_level)
+  -> create_collection(schema, index_params, consistency_level) # 传入 schema + index_params 创建时通常会自动建索引并 load
   -> describe_collection() / list_indexes() / describe_index()
 
 数据导入：
@@ -43,6 +43,7 @@ Document / 原始数据
 
 检索时：
 构造 query embedding
+  -> 确认 collection 已加载：自动 load 或显式 load_collection() + get_load_state()，因为有时候可能释放过collection 【release_collection()】 会释放索引，导致检索失败
   -> search(data, anns_field, search_params, filter, limit, output_fields)
   -> 按需加 partition_names / consistency_level
   -> 可选 group_by_field 做文档级去重
