@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 真实演示 BM25 schema、Function、稀疏索引和关键词检索
 关键 API: DataType.SPARSE_FLOAT_VECTOR, Function, FunctionType.BM25, enable_analyzer, search
+本例重点参数:
+- add_field(enable_analyzer=True): 文本字段启用 analyzer 后才能作为 BM25 输入。
+- Function(input_field_names, output_field_names, function_type=FunctionType.BM25): 在 schema 期把文本映射到稀疏向量字段。
+- SPARSE_INVERTED_INDEX(metric_type="BM25"): BM25 稀疏字段需要单独索引，不能临时在 search 中开启。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/08_hybrid_search/02_bm25_schema.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

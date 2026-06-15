@@ -1,6 +1,10 @@
 """
 目标: 演示重复写入同一批文档时使用 upsert 保持幂等
 关键 API: upsert, query
+本例重点参数:
+- upsert(collection_name, data): data 使用稳定主键，重复执行会覆盖同一实体而不是制造重复 chunk。
+- query(filter, output_fields, limit): 用 source 过滤和计数验证导入任务重跑后数据规模不膨胀。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/04_errors_and_recovery/02_idempotent_upsert.py
 环境准备: 默认使用 Milvus Lite；也可设置 MILVUS_URI 和 MILVUS_TOKEN 连接 Standalone

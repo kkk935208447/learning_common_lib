@@ -1,6 +1,12 @@
 """
 目标: 演示 Milvus 向量检索与 scalar filter、query、delete 的组合
 关键 API: search(filter=...), query, delete
+本例重点参数:
+- search(filter, output_fields, limit): 向量相似度检索叠加标量条件，返回 hit、distance 和 entity。
+- query(filter, output_fields, limit): 只按标量条件取实体，不计算向量相似度。
+- delete(ids 或 filter): 按主键或受控过滤条件删除实体，删除前要确认作用范围。
+- filter_params: PyMilvus 支持模板表达式参数绑定；当前 Lite 版本需单独验证兼容性，本例用受控常量 filter 保持可运行。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/03_filter_and_crud/02_scalar_filter_query_delete.py
 环境准备: 默认使用 Milvus Lite；也可设置 MILVUS_URI 和 MILVUS_TOKEN 连接 Standalone

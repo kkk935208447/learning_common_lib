@@ -2,7 +2,7 @@
 
 本教程教你用 Milvus 跑通从文档 chunk、schema/index、写入检索、异步客户端、hybrid search 到 Standalone 服务端运维的完整 RAG 检索链路。前期用 Milvus Lite 零部署快速上手，后期切换到真实 Milvus Standalone 学习 load/release、flush/compact、异步建索引等只有服务端才有的能力。
 
-这份教程放在 `src/learning_common_lib/python基础/` 下，面向已经掌握 Python 基础、准备学习向量数据库和 RAG 检索链路的开发者。建议先读本文完成环境准备和快速开始，再按 [roadmap.md](roadmap.md) 的顺序逐个运行示例；遇到工程取舍时看 [architecture_map.md](architecture_map.md) 和 [best_practices.md](best_practices.md)，排查问题时看 [pitfalls.md](pitfalls.md)。
+这份教程放在 `src/learning_common_lib/python基础/` 下，面向已经掌握 Python 基础、准备学习向量数据库和 RAG 检索链路的开发者。建议先读本文完成环境准备和快速开始，再看 [Milvus 工程使用流程](roadmap.md#milvus-工程使用流程) 建立整体链路，并用 [API 参数速查概览](roadmap.md#api-参数速查概览) 快速定位常用参数；然后按 [roadmap.md](roadmap.md) 的顺序逐个运行示例。遇到工程取舍时看 [architecture_map.md](architecture_map.md) 和 [best_practices.md](best_practices.md)，排查问题时看 [pitfalls.md](pitfalls.md)。
 
 教程采用“先 Lite 后 Standalone、先同步后异步、先基础后高级”的路线。前几节用同步 `MilvusClient` + Milvus Lite 建立 collection、schema、index、insert、search、filter、delete 的完整心智模型；基础稳定后，再进入 `AsyncMilvusClient`、索引参数、iterator、grouping search、partition、alias、dense+sparse hybrid search，最后连真实 Standalone 学习加载生命周期和 segment 运维。
 

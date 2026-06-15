@@ -1,6 +1,11 @@
 """
 目标: 在掌握同步基础后，用 AsyncMilvusClient 对已建好的 Milvus Lite collection 做并发检索
 关键 API: MilvusClient, AsyncMilvusClient, asyncio.gather, asyncio.Semaphore
+本例重点参数:
+- AsyncMilvusClient(uri, token, timeout): 参数与同步客户端一致，但调用需要 await。
+- search(data, limit, output_fields, search_params): 异步 search 不改变 Milvus 查询模型，只改变并发调度方式。
+- asyncio.Semaphore: 控制客户端侧并发上限，避免对 Milvus 发起无界并发请求。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/05_async_client/01_async_search_many.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

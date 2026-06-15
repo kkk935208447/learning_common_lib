@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 真实演示多向量字段 hybrid_search
 关键 API: AnnSearchRequest, WeightedRanker, RRFRanker, hybrid_search
+本例重点参数:
+- AnnSearchRequest(data, anns_field, param, limit, filter): 每个向量字段一条召回请求，param 放该路 metric/search params。
+- hybrid_search(reqs, ranker, limit, output_fields): reqs 是多路请求，limit 是融合后的最终数量。
+- WeightedRanker/RRFRanker: WeightedRanker 需要评估权重，RRFRanker 更适合先建无权重基线。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/08_hybrid_search/01_hybrid_request.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

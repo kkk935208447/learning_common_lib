@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 对比普通 topK 搜索和 range search 参数
 关键 API: search_params, metric_type, radius, range_filter, limit
+本例重点参数:
+- search_params.metric_type: 必须和索引度量一致，本例用 L2 观察距离阈值。
+- search_params.params.radius/range_filter: 用于范围检索；不同 metric type 的阈值方向不同。
+- limit: 仍然限制返回数量，range search 不是无界扫描。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/03_range_search_params.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

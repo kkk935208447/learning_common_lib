@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 演示 query_iterator 和 search_iterator 分批读取大结果集
 关键 API: query_iterator, search_iterator, batch_size, limit, close
+本例重点参数:
+- query_iterator(batch_size, limit, filter, output_fields): 分批遍历标量查询结果，适合导出和巡检。
+- search_iterator(data, batch_size, limit, search_params, output_fields): 分批消费较大的向量检索结果。
+- close(): iterator 是有状态资源，必须放在 finally 中关闭。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/04_iterators_large_results.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

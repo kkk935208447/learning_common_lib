@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 真实演示 alias 蓝绿切换和回滚
-关键 API: create_alias, alter_alias, list_aliases, drop_alias, search
+关键 API: create_alias, alter_alias, list_aliases, describe_alias, drop_alias, search
+本例重点参数:
+- create_alias(collection_name, alias): 创建稳定逻辑名，在线服务应查 alias 而不是物理 collection。
+- alter_alias(collection_name, alias): 原子切换 alias 指向，用于蓝绿发布和回滚。
+- describe_alias(alias): 发布前后确认当前指向，避免服务仍读旧 collection。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/07_partitions_aliases/02_alias_switching.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone
@@ -129,6 +134,7 @@ def main() -> None:
         client.create_alias(collection_name=COLLECTION_V1, alias=ALIAS_NAME)
         before = search_service_alias(client)
         print(f"alias_created={client.list_aliases(collection_name=COLLECTION_V1)}")
+        print(f"alias_target_before_switch={client.describe_alias(alias=ALIAS_NAME)}")
         print(f"service_search_before_switch={before}")
         assert before["version"] == "v1"
 
@@ -139,11 +145,13 @@ def main() -> None:
         client.alter_alias(collection_name=COLLECTION_V2, alias=ALIAS_NAME)
         after_switch = search_service_alias(client)
         print(f"alias_after_switch={client.list_aliases(collection_name=COLLECTION_V2)}")
+        print(f"alias_target_after_switch={client.describe_alias(alias=ALIAS_NAME)}")
         print(f"service_search_after_switch={after_switch}")
         assert after_switch["version"] == "v2"
 
         client.alter_alias(collection_name=COLLECTION_V1, alias=ALIAS_NAME)
         after_rollback = search_service_alias(client)
+        print(f"alias_target_after_rollback={client.describe_alias(alias=ALIAS_NAME)}")
         print(f"service_search_after_rollback={after_rollback}")
         assert after_rollback["version"] == "v1"
     finally:

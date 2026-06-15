@@ -1,6 +1,11 @@
 """
 目标: 演示 Milvus collection 的 schema 与 index_params 如何在客户端构造
 关键 API: MilvusClient.create_schema, DataType, prepare_index_params, add_index
+本例重点参数:
+- create_schema(auto_id, enable_dynamic_field): 控制主键是否自增、是否允许未声明字段进入动态 metadata。
+- schema.add_field(field_name, datatype, is_primary, max_length, dim): 定义字段名、字段类型、主键、字符串长度和向量维度。
+- add_index(field_name, index_type, metric_type, params): 指定向量字段、索引类型、相似度度量和构建参数。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/02_schema_index/01_build_schema_and_index.py
 预期现象: 打印字段名称、向量维度、索引类型和度量方式

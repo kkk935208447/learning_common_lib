@@ -1,6 +1,11 @@
 """
 目标: 在 Standalone 上用 search_iterator 流式遍历大结果集，V2 迭代器在真实服务端完整可用
 关键 API: search_iterator, iterator.next, iterator.close, batch_size, limit
+本例重点参数:
+- search_iterator(data, batch_size, limit, search_params, output_fields): 控制大 topK 检索的单批返回量和总量。
+- iterator.next(): 按批拉取结果，直到返回空批次。
+- iterator.close(): 服务端迭代器需要显式关闭，避免占用资源。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: MILVUS_URI=http://localhost:19530 uv run python examples/09_standalone_ops/04_search_iterator_v2.py
 环境准备: 必须连接真实 Milvus Standalone（localhost:19530）；Lite 上 search_iterator 会回退到 V1

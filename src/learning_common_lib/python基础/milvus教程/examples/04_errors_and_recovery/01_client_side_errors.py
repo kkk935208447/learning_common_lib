@@ -1,6 +1,11 @@
 """
 目标: 演示 Milvus 调用前应优先处理的客户端错误边界
 关键 API: ensure_vector, MilvusSettings.collection_name
+本例重点参数:
+- ensure_vector(vector, dimension): 维度和数值合法性属于客户端输入边界。
+- collection_name(topic, prefix): 集合名前缀和命名规则要在调用 Milvus 前校验。
+- to_milvus_rows(rows): 空批次应直接跳过，不要发起无意义写入请求。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/04_errors_and_recovery/01_client_side_errors.py
 预期现象: 打印维度错误、非法集合名、空写入跳过策略

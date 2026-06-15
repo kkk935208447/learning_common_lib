@@ -1,6 +1,11 @@
 """
 目标: 用 Milvus Lite 演示异步客户端在服务生命周期内复用连接
 关键 API: MilvusClient, AsyncMilvusClient, async context manager, asyncio.Semaphore
+本例重点参数:
+- AsyncMilvusClient(uri, token, timeout): 适合服务启动时创建、关闭时 close，不适合每个请求新建。
+- async context manager: 用 async with 管理连接释放；长期服务也可持有单例并在 shutdown close。
+- asyncio.Semaphore: 为批量检索设置客户端侧并发上限。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/05_async_client/02_async_lifecycle_policy.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

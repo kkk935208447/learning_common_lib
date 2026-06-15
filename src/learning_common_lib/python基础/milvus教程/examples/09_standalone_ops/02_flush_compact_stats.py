@@ -1,6 +1,11 @@
 """
 目标: 理解 Standalone 的 segment 管理：flush 落盘、compact 合并、stats 查看实体数
-关键 API: flush, compact, get_collection_stats, get_load_state
+关键 API: flush, compact, get_collection_stats
+本例重点参数:
+- flush(collection_name): 强制 growing segment 封口落盘，不能每写一条就调用。
+- compact(collection_name, is_clustering, is_l0, target_size, target_size_unit): 后台合并 segment、回收删除空间，是低峰运维操作。
+- get_collection_stats(collection_name): 查看 row_count 等统计信息，键集合受版本和部署模式影响。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: MILVUS_URI=http://localhost:19530 uv run python examples/09_standalone_ops/02_flush_compact_stats.py
 环境准备: 必须连接真实 Milvus Standalone（localhost:19530）；Lite 没有独立的 segment/对象存储层

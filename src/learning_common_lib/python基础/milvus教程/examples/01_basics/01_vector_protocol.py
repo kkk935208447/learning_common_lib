@@ -1,6 +1,11 @@
 """
 目标: 演示用 LangChain Document 表达写入 Milvus 前的向量数据协议
 关键 API: Document, ensure_vector, l2_normalize, to_milvus_rows
+本例重点参数:
+- Document(id, page_content, metadata): id 映射 Milvus 主键，page_content 映射 text，metadata 承载 source、chunk_no、vector。
+- ensure_vector(vector, dimension): 写入前校验 embedding 维度和非法数值。
+- to_milvus_rows(...): 把文档协议转换为 Milvus row dict，字段必须和后续 schema 对齐。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/01_basics/01_vector_protocol.py
 预期现象: 打印文档块数量、Milvus 行字段、归一化后的向量长度

@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 演示 group_by_field 对同一文档的多个 chunk 做检索去重
 关键 API: search(group_by_field=...), group_size, strict_group_size, output_fields
+本例重点参数:
+- group_by_field: 按字段把命中结果分组，RAG 常用 document_id 做文档级去重。
+- group_size: 每个组返回多少个实体；strict_group_size 控制是否尽量满足每组数量。
+- limit: 在 grouping search 中表示返回多少个组，而不是返回多少个 chunk。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/05_grouping_search.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

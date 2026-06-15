@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 创建包含多个向量字段的 collection，并验证每个字段的索引参数
-关键 API: create_schema, prepare_index_params, add_index, create_collection, describe_collection
+关键 API: create_schema, prepare_index_params, add_index, create_collection, describe_collection, list_indexes, describe_index
+本例重点参数:
+- add_field(enable_analyzer=True): 文本字段启用 analyzer 后，才能作为 BM25 Function 的输入。
+- add_index(field_name, index_name, index_type, metric_type, params): 多向量字段要分别建索引，dense/title/sparse 的度量不能混用。
+- describe_index(collection_name, index_name): 观察服务端实际索引类型、度量方式、索引状态和行数。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/02_build_multiple_index_params.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone
@@ -88,6 +93,7 @@ def main() -> None:
         )
         description = client.describe_collection(COLLECTION_NAME)
         field_names = [field["name"] for field in description["fields"]]
+        index_names = client.list_indexes(collection_name=COLLECTION_NAME)
 
         print(f"fields={field_names}")
         for item in index_params:
@@ -99,6 +105,17 @@ def main() -> None:
                 f"type={config['index_type']} "
                 f"metric={config['metric_type']} "
                 f"params={config.get('params', {})}"
+            )
+        print(f"list_indexes={index_names}")
+        for index_name in index_names:
+            detail = client.describe_index(collection_name=COLLECTION_NAME, index_name=index_name)
+            print(
+                "describe_index="
+                f"field={detail['field_name']} "
+                f"name={detail['index_name']} "
+                f"type={detail['index_type']} "
+                f"metric={detail['metric_type']} "
+                f"state={detail.get('state')}"
             )
 
         assert {"dense_vector", "title_vector", "sparse_vector"}.issubset(field_names)

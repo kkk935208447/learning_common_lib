@@ -1,6 +1,11 @@
 """
 目标: 理解 Standalone 上 collection 必须 load 才能搜索的生命周期，Lite 会隐藏这一步
 关键 API: load_collection, release_collection, get_load_state, refresh_load
+本例重点参数:
+- load_collection(collection_name): 把 collection 加载到 query node 内存，Standalone 检索前需要确认 load 状态。
+- release_collection(collection_name): 释放查询内存，冷数据或下线集合可释放。
+- get_load_state(collection_name): 排查搜索报 collection not loaded 时先看这个状态。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: MILVUS_URI=http://localhost:19530 uv run python examples/09_standalone_ops/01_load_release_lifecycle.py
 环境准备: 必须连接真实 Milvus Standalone（localhost:19530）；Milvus Lite 不区分 load/release，本示例无意义

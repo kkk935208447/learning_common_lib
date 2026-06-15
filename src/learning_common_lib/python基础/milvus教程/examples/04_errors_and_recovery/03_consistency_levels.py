@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 演示 collection 级和请求级 consistency_level
 关键 API: create_collection(consistency_level=...), query(consistency_level=...)
+本例重点参数:
+- create_collection(consistency_level): 设置集合默认一致性，影响后续读请求默认行为。
+- query(consistency_level): 单次请求覆盖默认一致性，用来排查“写完立刻读不到”的链路。
+- 常见值: Strong、Bounded、Eventually、Session；生产需在写后读准确性和吞吐之间取舍。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/04_errors_and_recovery/03_consistency_levels.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone

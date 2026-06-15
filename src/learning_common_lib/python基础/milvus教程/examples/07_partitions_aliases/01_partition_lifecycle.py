@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 真实演示 partition 的创建、写入、限定检索和清理
-关键 API: create_partition, list_partitions, insert(partition_name=...), search(partition_names=...), release_collection, drop_partition
+关键 API: create_partition, list_partitions, has_partition, get_partition_stats, insert(partition_name=...), search(partition_names=...), release_collection, drop_partition
+本例重点参数:
+- create_partition(collection_name, partition_name): 创建少量粗粒度物理分区，不适合为每个用户建分区。
+- insert(partition_name): 指定写入目标分区；search(partition_names): 指定查询扫描哪些分区。
+- filter: 仍然用于业务字段过滤；partition_names 不是权限控制。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/07_partitions_aliases/01_partition_lifecycle.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone
@@ -113,6 +118,8 @@ def main() -> None:
         recreate_collection(client)
         insert_partition_rows(client)
         partitions = client.list_partitions(collection_name=COLLECTION_NAME)
+        has_tenant_a = client.has_partition(collection_name=COLLECTION_NAME, partition_name=PARTITION_A)
+        tenant_a_stats = client.get_partition_stats(collection_name=COLLECTION_NAME, partition_name=PARTITION_A)
         results = client.search(
             collection_name=COLLECTION_NAME,
             data=[l2_normalize([0.05, 0.08, 0.90, 0.14, 0.08, 0.04, 0.02, 0.0])],
@@ -125,6 +132,8 @@ def main() -> None:
         all_rows = client.query(COLLECTION_NAME, filter='tenant_id != ""', output_fields=["id", "tenant_id"], limit=10)
 
         print(f"partitions={partitions}")
+        print(f"has_partition_tenant_a={has_tenant_a}")
+        print(f"tenant_a_partition_row_count={tenant_a_stats['row_count']}")
         print(f"all_row_count={len(all_rows)}")
         print(f"tenant_a_top_hit={results[0][0]['id']}")
         print(f"tenant_a_top_entity={results[0][0]['entity']}")

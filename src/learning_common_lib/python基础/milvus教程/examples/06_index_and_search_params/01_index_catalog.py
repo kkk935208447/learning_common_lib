@@ -1,6 +1,12 @@
 """
 目标: 系统展示 Milvus 常见索引类型、构建参数和搜索参数
 关键 API: prepare_index_params, add_index, index_type, metric_type, params
+本例重点参数:
+- index_type: 选择 AUTOINDEX、FLAT、IVF、HNSW、DISKANN、SCANN 或稀疏索引。
+- metric_type: 选择 COSINE、IP、L2 或 BM25，必须和搜索请求保持一致。
+- params: 放索引构建参数，例如 nlist、M、efConstruction、m、nbits、inverted_index_algo。
+- search_params: 放查询期参数，例如 nprobe、ef、search_list、reorder_k、drop_ratio_search。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/06_index_and_search_params/01_index_catalog.py
 预期现象: 打印 AUTOINDEX、FLAT、IVF_FLAT、IVF_PQ、HNSW、DISKANN、SCANN、SPARSE_INVERTED_INDEX 的参数表

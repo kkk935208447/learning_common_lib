@@ -412,3 +412,44 @@
 
 - 任务结束前再次复核 Milvus 官方文档、PyMilvus 本地方法签名和 GitHub 官方源码，补齐仍缺的常用了解项：`use_database`、`truncate_collection`、`add_collection_field/alter_collection_field/drop_collection_field`、`list_aliases/describe_alias`、`has_partition/get_partition_stats`、`create_user/create_role/grant_privilege_v2`。
 - 本地验证：`git diff --check -- roadmap.md` 通过；官方复核 API 关键词覆盖检查 12/12 通过。
+
+## 补充更新（2026-06-15 14:13 CST）
+
+- 按用户要求复查 `roadmap.md` 中列出的 API 是否在教程代码里有教学承接：高频排查 API 已补到现有示例，不新增阶段文件。
+- `examples/03_filter_and_crud/01_lite_insert_search.py` 增加 `get_server_version`、`list_collections`、`describe_collection`、`get_collection_stats` 的可观察输出，用来教学连接自检、集合清单、字段结构和行数。
+- `examples/06_index_and_search_params/02_build_multiple_index_params.py` 增加 `list_indexes`、`describe_index`，用服务端实际索引描述校验 `index_params`。
+- `examples/07_partitions_aliases/01_partition_lifecycle.py` 增加 `has_partition`、`get_partition_stats`；`02_alias_switching.py` 增加 `describe_alias`，用来确认分区存在性、分区统计和 alias 当前指向。
+- 顺手修正 `examples/09_standalone_ops/02_flush_compact_stats.py` 头部关键 API，移除该文件未直接演示的 `get_load_state`；`get_load_state` 仍由 `09_standalone_ops/01_load_release_lifecycle.py` 教学。
+- `database/RBAC/schema 演进/truncate/rename/drop_index` 仍作为了解项保留在 roadmap：这些属于管理、安全或破坏性操作，不放进基础示例主线，避免增加学习噪声和误操作风险。
+- 来源复核：Context7 查询 `/milvus-io/pymilvus` 与 `/websites/milvus_io_v2_6_x`；GitHub code search 参考 `milvus-io/pymilvus`、`langchain-ai/langchain-milvus`、`run-llama/llama_index` 的 Milvus 调用模式；本地 `inspect.signature` 复核 PyMilvus 3.0.0 方法签名。
+- 本地验证：四个修改示例逐个运行通过；`uv run python smoke/run_all_examples.py` 通过，35 通过 / 0 失败 / 1 跳过，耗时 44.6 秒；`git diff --check` 通过；关键词覆盖检查通过；运行产物已清理且 `find ... .milvus_tutorial/__pycache__/*.pyc` 无输出。
+
+## 补充更新（2026-06-15 14:17 CST）
+
+- 按用户反馈，将 `roadmap.md` 的“管理类 API 了解项”恢复为 `API/对象`、`常用参数`、`作用`、`本教程处理方式` 四列表格，展示更直接。
+- 保留本轮新增的教学承接信息：阶段三已演示连接自检和 collection 描述，阶段六已演示索引查看，阶段七已演示 alias/partition 排查 API。
+- 本地验证：`git diff --check -- roadmap.md` 通过；`rg` 确认四列表头和关键管理 API 均存在。本次只调整文档展示，不影响示例运行逻辑。
+
+## 补充更新（2026-06-15 14:32 CST）
+
+- 按用户要求补充教程代码 docstring 的参数教学：关键示例增加“本例重点参数”和 `roadmap.md#api-参数速查索引`，覆盖 schema、collection、CRUD、search、iterator、grouping、partition、alias、hybrid、BM25 和 Standalone 运维 API。
+- `roadmap.md` 新增“API 参数速查索引”，集中说明 `schema.add_field(...)`、`create_collection(...)`、`search(...)`、`search_params`、`AnnSearchRequest(...)`、`hybrid_search(...)` 等常用 API 的参数含义、默认影响和主要示例位置。
+- `README.md` 入口增加 `API 参数速查索引` 链接，读者从入口即可跳到参数索引。
+- 来源复核：Context7 查询 `/websites/milvus_io_v2_6_x` 的 schema 字段类型与参数示例、`/milvus-io/pymilvus` 的客户端方法签名；GitHub code search 参考 `milvus-io/pymilvus`、`langchain-ai/langchain-milvus`、`run-llama/llama_index` 中 schema/index/search 参数的真实使用模式。
+- 本地验证：`git diff --check -- README.md roadmap.md examples` 通过；`rg` 确认 21 个示例包含 `参数索引: roadmap.md#api-参数速查索引`；`uv run python smoke/run_all_examples.py` 通过，35 通过 / 0 失败 / 1 跳过，耗时 45.3 秒；运行产物已清理。
+
+## 补充更新（2026-06-15 14:45 CST）
+
+- 按用户最新反馈调整 `roadmap.md`：保留 `API 参数速查概览`，同时在其前面增加 `Milvus 工程使用流程`，先用链路说明连接自检、索引创建、数据导入、检索、大结果集、混合检索、发布回滚和 Standalone 运维，再进入参数速查表和后续 API 分节。
+- 将示例 docstring 中的旧 `参数索引: roadmap.md#api-参数速查索引` 改为 `流程索引: roadmap.md#milvus-工程使用流程`；参数说明仍保留在每个 `.py` 文件顶部。
+- README 入口改为同时指向 `Milvus 工程使用流程` 和 `API 参数速查概览`。
+- 本地验证：上一轮 `uv run python smoke/run_all_examples.py` 已通过，35 通过 / 0 失败 / 1 跳过，耗时 44.8 秒；本轮为文档结构调整，补充执行 `git diff --check -- README.md roadmap.md examples` 通过；`rg` 确认旧 `API 参数速查索引/api-参数速查索引` 无残留，工程流程和速查概览均存在；运行产物已清理。
+
+## 补充更新（2026-06-15 14:57 CST）
+
+- 按用户要求优化 `roadmap.md` 标题结构：顶层调整为 `Milvus API 全景与学习路线`，下设 `阅读方式与版本要求`、`API 全景`、`学习路线总览`、`学习阶段详解`、`模板与后续阅读`，保留 `Milvus 工程使用流程` 和 `API 参数速查概览` 两个入口锚点。
+- 保留速查概览，并补充官方签名中确认的常见参数：`auto_id`、`is_clustering_key`、`analyzer_params`、`properties`、`filter_params`、`offset`、`round_decimal`、`drop_ratio_search`、`Function.params` 等；示例 docstring 继续承担单文件参数说明。
+- 调试并记录 `filter_params` 边界：PyMilvus 客户端和官方示例支持模板表达式参数绑定，但当前 Milvus Lite 后端会把 `{source}` 直接交给表达式解析并失败；因此 `02_scalar_filter_query_delete.py` 保持受控常量 filter，docstring 和 roadmap 简要提醒 Lite 兼容性需单独验证。
+- 官方复核：Context7 查询 `/milvus-io/pymilvus` 和 `/websites/milvus_io_v2_6_x`；GitHub code search 复核 `milvus-io/pymilvus` 的 `group_by_field`、iterator、BM25、`filter_params` 示例；本地 `inspect.signature` 复核当前安装的 PyMilvus 3.0.0 方法签名。
+- 本地验证：`uv run python examples/03_filter_and_crud/02_scalar_filter_query_delete.py` 通过；`uv run python smoke/run_all_examples.py` 通过，35 通过 / 0 失败 / 1 跳过，耗时 44.9 秒；`git diff --check -- README.md roadmap.md examples` 通过；运行产物 `.milvus_tutorial/`、`__pycache__/`、`.pyc` 已清理，`find ...` 复查无输出。
+- 审查结论：技术维度 97/100，战略维度 98/100，综合评分 98/100，建议通过。扣分项仅为 `filter_params` 在当前 Lite 后端的模板表达式兼容性需要 Standalone 环境再验证。

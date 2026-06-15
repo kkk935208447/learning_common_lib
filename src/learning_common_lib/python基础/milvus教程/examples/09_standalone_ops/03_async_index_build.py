@@ -1,6 +1,11 @@
 """
 目标: 用 AsyncMilvusClient 在 Standalone 上异步建集合、建索引、写入、加载、检索全链路
 关键 API: AsyncMilvusClient, async create_collection, create_index, load_collection, search
+本例重点参数:
+- AsyncMilvusClient(uri, token, timeout): Standalone 上适合并发 DDL/检索，但 Lite 对部分异步 DDL RPC 支持有限。
+- create_collection/create_index: 异步建集合和补建索引适合服务端初始化流程，不建议放在在线请求路径。
+- flush/load_collection/search: 写入后先 flush/load，再 search 验证可见性和加载状态。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: MILVUS_URI=http://localhost:19530 uv run python examples/09_standalone_ops/03_async_index_build.py
 环境准备: 必须连接真实 Milvus Standalone（localhost:19530）；Milvus Lite 不支持异步建索引路径

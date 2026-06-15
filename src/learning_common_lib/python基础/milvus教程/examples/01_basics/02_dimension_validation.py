@@ -1,6 +1,11 @@
 """
 目标: 演示向量维度错误和非法数值应在客户端边界失败
 关键 API: ensure_vector, l2_normalize
+本例重点参数:
+- ensure_vector(vector, dimension): dimension 必须和 collection 的 FLOAT_VECTOR dim 完全一致。
+- l2_normalize(vector, dimension): 归一化前要拒绝空向量、NaN、无穷大和零向量。
+- ValueError: 这些是数据质量错误，应在入库前失败，不应交给 Milvus 或重试逻辑处理。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/01_basics/02_dimension_validation.py
 预期现象: 打印三个可预期的 ValueError 场景，并展示一个合法向量

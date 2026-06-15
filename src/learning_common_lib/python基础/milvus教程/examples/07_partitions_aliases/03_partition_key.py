@@ -1,6 +1,11 @@
 """
 目标: 使用 Milvus Lite 演示 partition key 字段的 schema 声明和租户过滤
 关键 API: add_field(is_partition_key=True), create_collection, query, search(filter=...)
+本例重点参数:
+- schema.add_field(is_partition_key=True): 在 schema 创建期声明自动分区路由字段，不能在查询时临时开启。
+- tenant_id filter: partition key 负责路由和布局，业务隔离仍应显式带租户过滤和权限校验。
+- describe_collection: 用来确认字段是否真的被标记为 partition key。
+流程索引: roadmap.md#milvus-工程使用流程
 Python 版本: 3.11+
 运行命令: UV_CACHE_DIR=/tmp/uv-cache uv run python examples/07_partitions_aliases/03_partition_key.py
 环境准备: 默认使用 Milvus Lite DB；也可设置 MILVUS_URI=http://localhost:19530 连接 Standalone
