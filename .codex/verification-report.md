@@ -453,3 +453,12 @@
 - 官方复核：Context7 查询 `/milvus-io/pymilvus` 和 `/websites/milvus_io_v2_6_x`；GitHub code search 复核 `milvus-io/pymilvus` 的 `group_by_field`、iterator、BM25、`filter_params` 示例；本地 `inspect.signature` 复核当前安装的 PyMilvus 3.0.0 方法签名。
 - 本地验证：`uv run python examples/03_filter_and_crud/02_scalar_filter_query_delete.py` 通过；`uv run python smoke/run_all_examples.py` 通过，35 通过 / 0 失败 / 1 跳过，耗时 44.9 秒；`git diff --check -- README.md roadmap.md examples` 通过；运行产物 `.milvus_tutorial/`、`__pycache__/`、`.pyc` 已清理，`find ...` 复查无输出。
 - 审查结论：技术维度 97/100，战略维度 98/100，综合评分 98/100，建议通过。扣分项仅为 `filter_params` 在当前 Lite 后端的模板表达式兼容性需要 Standalone 环境再验证。
+
+## 补充更新（2026-06-15 15:02 CST）
+
+- 按用户要求将 Milvus 教程优化经验沉淀到现有 `write-library-tutorials` skill，保持简要，不新增技能或额外说明文件。
+- `SKILL.md` 补充：当学习者熟悉业务流程但不熟悉库本身时，路线应优先写成 SDK/API 全景、工程调用链和参数速查；可运行示例必须有关键中间态输出。
+- `references/tutorial-structure.md` 补充 API 型 roadmap 模板：`阅读方式与版本要求`、`API 全景`、`工程使用流程`、`API 参数速查概览`、`学习路线总览`、`学习阶段详解`。
+- `references/example-code-rules.md` 补充 docstring 规则、单文件直观优先、文件顶部配置、关键中间态输出、兼容性边界和相对/绝对导入回退。
+- `references/verification-checklist.md` 补充检查项：API 型 roadmap 是否有流程、速查和示例落点；docstring 是否说明目标、关键 API、重点参数、预期现象和生产提醒；示例是否输出关键中间态。
+- 本地验证：`git diff --check -- .claude/skills/write-library-tutorials` 通过；`uv run python /home/shayuer/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/write-library-tutorials` 通过，输出 `Skill is valid!`。系统 Python 直接运行同一脚本因缺少 `yaml` 失败，已用项目 `uv run` 环境完成补偿验证。
