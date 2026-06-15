@@ -579,3 +579,12 @@
 - 同步优化标题层级：`学习阶段详解` 下的阶段标题由二级标题调整为三级标题，避免和主章节同级。
 - 来源复核：Context7 查询 `/elastic/elasticsearch-py` 官方客户端文档；GitHub code search 参考 `elastic/elasticsearch-labs`、`mozilla/kitsune`、`langgenius/dify` 等项目里的连接认证、bulk、PIT、alias/reindex 模式。
 - 本地验证：`rg -n "新增小节标题" src/learning_common_lib/python基础/elasticsearch教程/roadmap.md` 通过；`git diff --check -- src/learning_common_lib/python基础/elasticsearch教程/roadmap.md` 通过。本次只改 roadmap 文档结构和说明，不影响示例运行逻辑；上一轮完整 smoke 为 35 通过、0 失败、1 跳过。
+
+## 补充更新（2026-06-15 18:01 CST）
+
+- 按用户要求检查 Milvus 教程中 `roadmap.md` 以外的文档：`README.md`、`architecture_map.md`、`best_practices.md`、`pitfalls.md`、`templates/README.md`、`templates/settings.py`。
+- 结论：整体已覆盖 API/参数、示例落点、Lite/Standalone、异步、iterator、partition、alias、hybrid search 和运维边界；本次只做小幅一致性修正。
+- 修正内容：认证说明统一为本地 Standalone 默认通常无 token，云服务或开启认证时使用 `MILVUS_TOKEN`；同时注明 PyMilvus 支持 `user/password`，但教程模板保持 `MILVUS_TOKEN` 单入口。
+- 修正内容：加载生命周期说明统一为检索前确认 collection 已加载，`release` 后必须重新 `load_collection`；`flush` 只用于导入验收或明确边界，不作为常规写后读手段。
+- 来源复核：Context7 查询 `/milvus-io/pymilvus`，确认 `MilvusClient(uri,user,password,db_name,token,timeout)` 签名及 `load_collection`、`get_load_state`、alias、partition、hybrid search 等方法；GitHub code search 参考 `milvus-io/pymilvus`、`zilliztech/mcp-server-milvus`、`langgenius/dify` 等项目的连接认证和加载封装模式。
+- 本地验证：`rg` 确认旧表述 `root:Milvus`、`必须 load_collection`、`写入后若要立刻搜` 无残留；`git diff --check -- src/learning_common_lib/python基础/milvus教程/{README.md,architecture_map.md,best_practices.md,pitfalls.md,templates/README.md,templates/settings.py}` 通过；`python -m compileall -q src/learning_common_lib/python基础/milvus教程/templates/settings.py` 通过；验证产生的 `templates/__pycache__` 已清理。

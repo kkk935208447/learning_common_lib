@@ -271,12 +271,12 @@
 
 **现象**：同一份代码在 Milvus Lite 跑得好好的，换成 `MILVUS_URI=http://localhost:19530` 后，写入成功但搜索返回空，或直接报 `collection not loaded`(code=101)。
 
-**根因**：Milvus Lite 隐藏了加载生命周期，建好集合就能搜。Standalone 上数据放对象存储，必须先 `load_collection` 进 query node 内存才能检索；异步写入后还可能因为没 `flush` 而搜不到刚写的数据。
+**根因**：Milvus Lite 隐藏了加载生命周期，建好集合就能搜。Standalone 上数据放对象存储，检索前要确认集合处于已加载状态；异步写入后还可能因为没 `flush` 而搜不到刚写的数据。
 
 **修复方式**：
 
 - Standalone 上检索前确认集合处于 `Loaded` 状态，必要时显式 `load_collection`。
-- 写入后若要立刻搜到，先 `flush` 让数据落盘成 sealed segment，再 `load`。
+- 写入后若要做导入验收，可先 `flush` 让数据落盘成 sealed segment，再确认集合处于可检索状态。
 - 用 `get_load_state` 排查到底是没 load 还是没 flush。
 - 参见 `examples/09_standalone_ops/01_load_release_lifecycle.py` 和 `03_async_index_build.py`。
 

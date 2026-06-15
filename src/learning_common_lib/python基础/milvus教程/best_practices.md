@@ -8,7 +8,7 @@
 |------|----------|------|
 | 本地学习 | 使用 Milvus Lite URI，例如 `.milvus_tutorial/milvus_lite.db` | 不依赖 Docker，适合最小闭环 |
 | 本地集成 | 使用 Docker Standalone，`MILVUS_URI=http://localhost:19530` | 更接近服务部署形态 |
-| 云服务 | 使用 Zilliz Cloud 或受管 Milvus，token 通过环境变量注入 | 避免把凭据写进代码 |
+| 云服务或开启认证的服务端 | 使用 Zilliz Cloud 或受管 Milvus，token 通过环境变量注入；完整项目也可用 PyMilvus 的 `user/password` 参数 | 避免把凭据写进代码 |
 | CI 验证 | 默认运行 Milvus Lite smoke；Standalone/Zilliz Cloud 另设集成验证 | Lite 不需要外部部署，可覆盖真实 SDK 主路径 |
 
 ## Lite 与 Standalone 的关键差异
@@ -18,14 +18,15 @@
 | 维度 | Milvus Lite | Milvus Standalone |
 |------|-------------|-------------------|
 | 部署 | 进程内，零依赖 | milvus + etcd（元数据）+ MinIO（对象存储）三件套 |
-| 加载生命周期 | 隐藏，建好即可搜 | 必须 `load_collection` 进内存才能搜，`release` 后报 `collection not loaded` |
+| 加载生命周期 | 隐藏，建好即可搜 | 检索前要确认集合已加载；`release` 后必须重新 `load_collection`，否则报 `collection not loaded` |
 | segment/存储 | 单文件，无独立存储层 | 数据落对象存储，需要 `flush` 封口、`compact` 回收 |
 | 异步建索引 | 不支持（触发未实现 RPC） | `AsyncMilvusClient` 支持异步 DDL |
 | `search_iterator` | 回退到 V1 | 完整 V2 |
 | 适用阶段 | 学习、最小闭环、单测 | 集成、压测、生产 |
 
 实践建议：
-- 写入后若要立刻搜，Standalone 上记得 `flush` + `load`（或确认集合已 load），别假设像 Lite 一样自动可见。
+- 用 `create_collection(schema=..., index_params=...)` 创建时通常会自动建索引并加载；但上线或运维脚本仍应在检索前用 `get_load_state` 确认状态。
+- 写入完成后如果要做导入验收，可在批次边界 `flush` 一次并确认集合已 load；不要把 `flush` 当成常规写后读手段。
 - 冷集合 `release` 省内存，热集合保持 `load`；用 `get_load_state` 做运维判断。
 - `flush`/`compact` 是有成本的服务端操作，别在写入热路径里频繁调用。
 

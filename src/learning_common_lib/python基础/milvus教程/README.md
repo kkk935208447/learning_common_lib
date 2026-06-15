@@ -20,7 +20,7 @@
 | Python | `>=3.11,<3.12` | 与当前仓库一致 |
 | 依赖 | `pymilvus[milvus-lite]>=3.0.0` | 已写入 `pyproject.toml`，同一个客户端既连 Lite 也连 Standalone |
 | 本地模式 | Milvus Lite | 示例默认使用 `.milvus_tutorial/*.db`，每个真实示例有独立 DB 文件，零部署 |
-| 服务模式 | Milvus Standalone（本教程在 v2.5.6 上验证） | 通过 `MILVUS_URI` 注入，依赖 etcd + MinIO，本地无 token |
+| 服务模式 | Milvus Standalone（本教程在 v2.5.6 上验证） | 通过 `MILVUS_URI` 注入，依赖 etcd + MinIO；本地默认无认证，开启认证时再传 `MILVUS_TOKEN` |
 | 缓存目录 | 建议 `UV_CACHE_DIR=/tmp/uv-cache` | 避免受限环境写用户全局缓存 |
 
 安装依赖：
@@ -65,6 +65,8 @@ export MILVUS_URI=http://localhost:19530
 cd src/learning_common_lib/python基础/milvus教程
 UV_CACHE_DIR=/tmp/uv-cache uv run python examples/03_filter_and_crud/01_lite_insert_search.py
 ```
+
+如果连接云服务或开启认证的 Standalone，把认证信息放进 `MILVUS_TOKEN`。PyMilvus 也支持 `user/password` 分开传入；教程模板为了保持配置简洁，只暴露 `MILVUS_TOKEN`。
 
 `09_standalone_ops/` 下的示例只在 Standalone 才有意义（load/release、flush/compact、异步建索引、search_iterator），在 Lite 模式下会打印提示并直接退出：
 

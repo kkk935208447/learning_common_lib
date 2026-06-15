@@ -45,11 +45,13 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python src/learning_common_lib/python基础/mi
 UV_CACHE_DIR=/tmp/uv-cache uv run python src/learning_common_lib/python基础/milvus教程/templates/async_repository.py
 ```
 
-如果你使用 Docker Standalone：
+如果你使用 Docker Standalone，本地默认通常不需要 token：
 
 ```bash
-MILVUS_URI=http://localhost:19530 MILVUS_TOKEN=root:Milvus UV_CACHE_DIR=/tmp/uv-cache uv run python -m learning_common_lib.python基础.milvus教程.templates.sync_repository
+MILVUS_URI=http://localhost:19530 UV_CACHE_DIR=/tmp/uv-cache uv run python -m learning_common_lib.python基础.milvus教程.templates.sync_repository
 ```
+
+如果连接云服务或开启认证的服务端，再通过 `MILVUS_TOKEN` 传入认证信息。PyMilvus 也支持 `user/password` 分开传入，本模板为了保持教学配置简洁没有展开。
 
 ## 导入约定
 

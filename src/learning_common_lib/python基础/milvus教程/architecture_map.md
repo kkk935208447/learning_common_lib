@@ -218,7 +218,7 @@ output_fields = ["text", "source", "chunk_no"]
 | 配置 | 默认值 | 用途 |
 |------|--------|------|
 | `MILVUS_URI` | `.milvus_tutorial/milvus_lite.db` | Milvus Lite 文件或 Standalone 地址 |
-| `MILVUS_TOKEN` | 空字符串 | Standalone/Zilliz Cloud 认证 |
+| `MILVUS_TOKEN` | 空字符串 | 云服务或开启认证的 Standalone 使用；本地默认 Standalone 通常留空，完整项目也可改用 PyMilvus 的 `user/password` 参数 |
 | `MILVUS_COLLECTION_PREFIX` | `learning_milvus` | 教程专用集合名前缀 |
 | `MILVUS_DIMENSION` | `8` | 教学向量维度 |
 | `MILVUS_TIMEOUT` | `8` | 单次连接或调用超时 |
