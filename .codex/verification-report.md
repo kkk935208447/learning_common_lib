@@ -292,3 +292,123 @@
 - 战略维度评分：95（精准匹配“前期 Lite 后期真实 Milvus”的目标，新增内容聚焦 Lite 隐藏而 Standalone 必须面对的能力，复用官方 SDK 和既有模板结构，准确识别并修复迁移风险）。
 - 综合评分：95。
 - 建议：通过。Milvus 教程从 8 阶段扩展到 9 阶段（21→25 示例），补齐 Lite→Standalone 的生产运维断层；后续可选进阶为 RBAC/多 database/replica 和 GPU 索引。
+
+---
+---
+
+> **说明（给后续 agent）**：下方是独立任务 **Milvus roadmap API 导向重构** 的验证报告。它只重构 `roadmap.md` 的学习路线表达，不覆盖上方更大范围的 Milvus 教程扩展报告。
+
+---
+---
+
+# 验证报告（Milvus roadmap API 导向重构）
+
+## 基本信息
+
+- 时间戳：2026-06-15 09:53:48 CST
+- 任务：按用户反馈重构 `src/learning_common_lib/python基础/milvus教程/roadmap.md`，减少 RAG 流程铺垫，把重点改为 Milvus 常用 API、参数、作用、边界和对应示例。
+- 范围：只修改 Milvus 教程的 `roadmap.md`，追加本验证报告；不改示例代码、模板代码和其他核心文档。
+- 交付物：API/参数全景表、索引参数表、写入/查询/检索/高级检索/partition/alias/运维/管理 API 映射、按 API 顺序重写后的阶段说明、验证报告。
+- 不纳入范围：不新增示例文件；不补 RBAC、replica、GPU 索引专项；不改变已有 Milvus Lite/Standalone 示例行为。
+
+## 需求字段完整性
+
+| 字段 | 结论 | 说明 |
+|------|------|------|
+| 目标 | 完整 | roadmap 已从 RAG 流程说明改为 Milvus API/参数学习地图。 |
+| 范围 | 完整 | 聚焦 `roadmap.md`；没有无关改动示例和模板。 |
+| 交付物 | 完整 | 新增客户端、schema、索引、写入、查询、iterator、hybrid、partition、alias、运维、管理 API 全景。 |
+| 审查要点 | 完整 | 明确常用 API、常用参数、作用、何时学习、参数边界和对应示例。 |
+| 运行环境 | 完整 | 本地 `pymilvus 3.0.0`；默认 Milvus Lite，smoke 可完整运行。 |
+| 外部服务 | 完整 | 本次未依赖 Standalone；smoke 在 Lite 模式完整通过。 |
+| 不做内容 | 完整 | 不扩大为完整 RAG 应用教程，不新增管理类专项示例。 |
+
+## 交付物映射
+
+| 需求 | 交付物 | 验证方式 |
+|------|--------|----------|
+| 减少 RAG 流程冗余 | `roadmap.md` 顶部改为“Milvus API 与参数全景” | `rg -n "RAG"` 仅剩两处说明性定位，不再有长流程图和索引/检索业务链路铺垫。 |
+| 常用 API 全面了解 | `MilvusClient`、`AsyncMilvusClient`、schema、index、CRUD、search、iterator、hybrid、partition、alias、load/release、flush/compact、database 管理表 | 关键词覆盖检查 31/31 通过。 |
+| 参数和作用说明 | 每个 API 表均包含“常用参数”“作用”“何时重点学习” | 人工审阅 + `git diff --check`。 |
+| 索引类型与搜索参数 | `AUTOINDEX`、`FLAT`、`IVF_*`、`HNSW`、`DISKANN`、`SCANN`、`SPARSE_INVERTED_INDEX` 表 | 对照 Context7 官方文档和本地 PyMilvus 签名。 |
+| 高阶 API 显式展示 | `group_by_field`、`query_iterator`、`search_iterator`、`AnnSearchRequest`、`RRFRanker`、`WeightedRanker`、`FunctionType.BM25` | Context7 官方文档 + GitHub 官方示例 + smoke。 |
+| 管理 API 边界 | 新增“管理类 API 了解项” | 明确 database、describe/list、rename、index inspect/drop、partition load/release 属于了解项或后续专项。 |
+| 示例路线仍可执行 | 阶段表保留 1-9 阶段和 25 个示例 | `uv run python smoke/run_all_examples.py`：35 通过 / 0 失败 / 1 跳过。 |
+
+## 依赖与风险
+
+| 项目 | 结论 | 风险与处理 |
+|------|------|------------|
+| 官方 API 准确性 | 已核对 | 通过 Context7 `/websites/milvus_io_v2_6_x` 和本地 `pymilvus 3.0.0` 方法签名确认。 |
+| 开源模式参考 | 已核对 | 使用 GitHub code search 参考 `milvus-io/pymilvus`、`milvus-io/milvus-doc-examples`、`huangjia2019/rag-in-action` 等项目中的 iterator、grouping、hybrid 写法。 |
+| 文档过度膨胀 | 可接受 | roadmap 增加约 200 行，但换来 API/参数全景；阶段说明仍保持可扫描表格。 |
+| 管理 API 未配示例 | 已记录 | `create_database/list_databases/using_database` 等放入“了解项”，明确不是本轮主线，避免读者误解为已完整教学。 |
+| 示例运行风险 | 无新增 | 本次未改代码；完整 smoke 仍通过。 |
+
+## 来源记录
+
+| 来源 | 查询/项目 | 用途 |
+|------|-----------|------|
+| context7 | `/websites/milvus_io_v2_6_x`，`create_collection/create_schema/add_field/prepare_index_params/insert/upsert/delete/query/search` | 确认基础建模、索引、写入和查询 API。 |
+| context7 | `/websites/milvus_io_v2_6_x`，`search_params nprobe ef radius range_filter group_by_field query_iterator search_iterator` | 确认搜索参数、范围检索、分组检索和迭代器 API。 |
+| context7 | `/websites/milvus_io_v2_6_x`，`partition alias hybrid_search BM25 AsyncMilvusClient load_collection release_collection flush compact` | 确认 partition、alias、hybrid search、BM25 和服务端运维 API。 |
+| GitHub search_code | `AnnSearchRequest WeightedRanker hybrid_search MilvusClient language:Python` | 参考官方 `milvus-io/milvus-doc-examples` 和真实项目的 hybrid search 请求结构。 |
+| GitHub search_code | `group_by_field group_size strict_group_size MilvusClient search language:Python` | 参考 `milvus-io/pymilvus` 官方 grouping 示例和社区教程写法。 |
+| GitHub search_code | `query_iterator search_iterator MilvusClient language:Python` | 参考 `milvus-io/pymilvus` iterator 示例和封装模式。 |
+| 本地 introspection | `inspect.signature(MilvusClient/AsyncMilvusClient/AnnSearchRequest/RRFRanker/WeightedRanker)` | 确认本项目实际安装的 `pymilvus 3.0.0` 方法签名和参数名。 |
+
+## 本地验证
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| `git diff --check -- src/learning_common_lib/python基础/milvus教程/roadmap.md` | 通过 | 无空白错误。 |
+| `uv run python -c "... roadmap API 关键词覆盖检查 ..."` | 通过 | 31 个核心 API/参数关键词全部存在。 |
+| `uv run python -c "from pymilvus import MilvusClient, AsyncMilvusClient; ..."` | 通过 | 输出 `pymilvus 3.0.0`，同步/异步 `search` 方法可导入。 |
+| `uv run python smoke/run_all_examples.py` | 通过 | 35 通过 / 0 失败 / 1 跳过，耗时 45.3 秒。 |
+| `find src/learning_common_lib/python基础/milvus教程 -maxdepth 4 \( -type d -name '.milvus_tutorial' -o -type d -name '__pycache__' -o -type f -name '*.pyc' \) -print` | 通过 | 清理 smoke 运行产物后无输出。 |
+
+## 审查清单
+
+| 检查项 | 结论 | 说明 |
+|--------|------|------|
+| 需求字段完整性 | 通过 | 目标、范围、交付物、依赖、风险均已记录。 |
+| 覆盖原始意图 | 通过 | 用户“熟悉 RAG、不熟悉 Milvus API 参数”的意图已转化为 API/参数导向路线。 |
+| 文档职责 | 通过 | roadmap 仍负责学习顺序，同时承担 API 总览；更细工程取舍仍留给 best_practices。 |
+| 参数覆盖 | 通过 | 覆盖连接、schema、index、CRUD、search、iterator、grouping、hybrid、partition、alias、consistency、运维和管理 API。 |
+| 高阶用法 | 通过 | grouping、iterator、hybrid、BM25、partition key、alias、load/release 都已显式出现。 |
+| 示例独立性 | 通过 | 本次未破坏示例独立性，smoke 全量通过。 |
+| 来源可追溯 | 通过 | Context7、GitHub code search、本地签名检查均已记录。 |
+| 审查结论留痕 | 通过 | 本报告包含时间戳、评分和建议。 |
+
+## 评分
+
+- 技术维度评分：96/100
+- 战略维度评分：97/100
+- 综合评分：97/100
+- 建议：通过
+
+扣分说明：
+
+- database、索引查看/删除、partition 级 load/release 已标为了解项，但还没有独立示例；若后续用户要“管理 API 专题”，应新增独立阶段。
+- roadmap 现在信息量较大，适合已经有 RAG 背景的读者；完全初学者仍需先读 README。
+
+## 结论
+
+本次重构已把 `roadmap.md` 从 RAG 流程型介绍调整为 Milvus API/参数学习地图。常用方法、参数作用、高阶检索、数据布局、发布、运维和管理类了解项均有清晰位置；完整 smoke 通过，建议通过。
+
+## 补充更新（2026-06-15 10:10 CST）
+
+- 按用户要求撤回本轮认证实现展开：不新增 `current_status.md`，不在 README、best_practices、templates README 中保留 user/password 长说明。
+- `templates/settings.py` 仍只读取 `MILVUS_TOKEN`，仅在代码注释中简要注明 PyMilvus 也支持 `user/password` 分开传入。
+- `roadmap.md` 只在客户端参数要点中保留一句简要说明：`user/password` 是 PyMilvus 支持的写法，本教程模板仍以 `MILVUS_TOKEN` 为配置入口。
+- 本地验证：`git diff --check` 通过；`templates.settings` 模块运行通过；`rg` 确认无 `MILVUS_USER/MILVUS_PASSWORD` 配置入口残留；`uv run python smoke/run_all_examples.py` 结果为 35 通过 / 0 失败 / 1 跳过；运行产物已清理。
+
+## 补充更新（2026-06-15 10:30 CST）
+
+- 按用户要求在 `roadmap.md` 的“管理类 API 了解项”中补充轻量自检和元数据查看 API：`get_server_version`、`list_collections`、`has_collection`、`describe_collection`、`get_collection_stats`、`list_indexes/describe_index`、`list_partitions`。
+- 本地验证：`git diff --check -- roadmap.md` 通过；管理/自检 API 关键词覆盖检查 8/8 通过。
+
+## 补充更新（2026-06-15 10:32 CST）
+
+- 任务结束前再次复核 Milvus 官方文档、PyMilvus 本地方法签名和 GitHub 官方源码，补齐仍缺的常用了解项：`use_database`、`truncate_collection`、`add_collection_field/alter_collection_field/drop_collection_field`、`list_aliases/describe_alias`、`has_partition/get_partition_stats`、`create_user/create_role/grant_privilege_v2`。
+- 本地验证：`git diff --check -- roadmap.md` 通过；官方复核 API 关键词覆盖检查 12/12 通过。

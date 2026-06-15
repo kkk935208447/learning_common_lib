@@ -53,7 +53,8 @@ def load_settings() -> MilvusSettings:
 
     支持的环境变量：
     - MILVUS_URI：默认使用教程目录下的 Milvus Lite 文件
-    - MILVUS_TOKEN：连接认证信息，Standalone 默认可留空或使用 root:Milvus
+    - MILVUS_TOKEN：连接认证信息，Standalone 默认可留空或使用 root:Milvus。
+      PyMilvus 也支持 user/password 分开传入，适合更完整的项目配置层。
     - MILVUS_COLLECTION_PREFIX：教程专用集合名前缀
     - MILVUS_DIMENSION：示例向量维度
     - MILVUS_TIMEOUT：单次 Milvus 操作超时时间
