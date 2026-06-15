@@ -1,6 +1,10 @@
 """
 目标: 用 upsert 实现幂等写入，用 script 做原子累加，避免读-改-写竞态
 关键 API: update(doc + doc_as_upsert), update(script + upsert), get
+本例重点参数:
+- update(doc/doc_as_upsert): 文档存在时局部更新，不存在时用 doc 插入，适合可重跑导入。
+- update(script/upsert): script 在服务端执行，适合计数累加；upsert 提供初始文档。
+- script.lang/source/params: 生产脚本应参数化，避免拼接用户输入。
 Python 版本: 3.11+
 运行命令: uv run python examples/03_crud/02_upsert_and_script.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

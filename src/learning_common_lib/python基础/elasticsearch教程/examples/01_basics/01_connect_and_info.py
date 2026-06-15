@@ -1,10 +1,14 @@
 """
 目标: 跑通 Elasticsearch 连接闭环，确认客户端版本与服务端版本兼容
-关键 API: Elasticsearch, ping, info, cluster.health
+关键 API: Elasticsearch, ping, info, cluster.health, cat.indices
+本例重点参数:
+- Elasticsearch(hosts): 服务端地址；本地教学默认 http://localhost:9200，生产通常是多节点或 Elastic Cloud 地址。
+- Elasticsearch(request_timeout): 单次请求超时；生产应显式设置，避免健康检查无限等待。
+- cat.indices(index/format): 查看索引清单；index 可用通配符限定教程索引，format="json" 便于脚本解析。
 Python 版本: 3.11+
 运行命令: uv run python examples/01_basics/01_connect_and_info.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200，无需账号密码
-预期现象: 打印 ping 结果、服务端版本号和集群健康状态
+预期现象: 打印 ping 结果、服务端版本号、集群健康状态和当前教程索引清单
 生产提醒: 客户端大版本必须与服务端大版本一致；本地无认证仅适合教学，生产必须开启 TLS 和 API Key
 """
 
@@ -54,6 +58,11 @@ def report_cluster(client: Elasticsearch, host: str) -> None:
     health = client.cluster.health()
     print(f"cluster_status={health['status']}")
     print(f"number_of_nodes={health['number_of_nodes']}")
+
+    # cat.indices 类似“查看表清单”，排查时先确认索引是否真的存在。
+    indices = client.cat.indices(index="learning_es_*", format="json")
+    names = [item["index"] for item in indices]
+    print(f"learning_indices={names or '暂无 learning_es_ 前缀索引'}")
 
 
 def main() -> None:

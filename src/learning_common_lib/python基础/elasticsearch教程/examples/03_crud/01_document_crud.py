@@ -1,6 +1,10 @@
 """
 目标: 掌握单文档 CRUD：index、get、update（部分更新）、delete 与 exists
 关键 API: index, get, update(doc), exists, delete
+本例重点参数:
+- index(index/id/document/refresh): 指定 id 便于幂等覆盖；refresh 只在教学或强一致场景使用。
+- update(doc): 只更新 doc 中出现的字段，不会替换整篇文档。
+- exists(index/id): 判断文档是否存在，适合替代可预期 404 异常控制流。
 Python 版本: 3.11+
 运行命令: uv run python examples/03_crud/01_document_crud.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

@@ -2,7 +2,7 @@
 解决什么问题: 统一创建同步/异步 Elasticsearch 客户端，注入超时、重试和认证
 输入输出约定: 输入 Settings，输出 Elasticsearch 或 AsyncElasticsearch 实例
 失败策略: 创建时不校验连通性；连通性由调用层 ping 或首个请求暴露
-适用边界: 教程和服务骨架；生产应从配置中心注入 hosts、API Key 和 TLS 证书
+适用边界: 教程和服务骨架；生产应从配置中心注入 hosts、API Key/basic_auth 和 TLS 证书
 """
 
 from __future__ import annotations
@@ -38,9 +38,11 @@ def _common_kwargs(settings: ElasticsearchSettings) -> dict[str, Any]:
         # gzip 压缩请求和响应体，降低大批量/大结果集的网络开销
         "http_compress": True,
     }
-    # 生产用 API Key 认证；本地教学默认无认证
+    # 生产优先用 API Key；用户名密码环境用 basic_auth；本地教学默认无认证。
     if settings.api_key:
         kwargs["api_key"] = settings.api_key
+    elif settings.username and settings.password:
+        kwargs["basic_auth"] = (settings.username, settings.password)
     return kwargs
 
 

@@ -1,6 +1,10 @@
 """
 目标: 用 streaming_bulk 流式写入大数据集，按条处理结果并控制内存
 关键 API: helpers.streaming_bulk, chunk_size, max_retries, initial_backoff
+本例重点参数:
+- streaming_bulk(actions): actions 可以是生成器，适合无法一次性放入内存的大数据集。
+- chunk_size: 控制每批请求条数；过大容易 429，过小浪费网络往返。
+- max_retries/initial_backoff/max_backoff: 遇到可重试状态码时退避重试，仍要统计最终失败条目。
 Python 版本: 3.11+
 运行命令: uv run python examples/04_bulk/02_streaming_bulk.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

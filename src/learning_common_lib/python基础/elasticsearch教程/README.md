@@ -2,7 +2,7 @@
 
 本教程教你用 Python 官方客户端 `elasticsearch` 跑通从连接、mapping、CRUD、批量写入、Query DSL、聚合、分页到错误恢复、索引切换、异步客户端和高级 DSL 的完整检索链路。
 
-这份教程放在 `src/learning_common_lib/python基础/` 下，面向已经掌握 Python 基础、准备学习全文检索和 Elasticsearch 的开发者。建议先读本文完成环境准备和快速开始，再按 [roadmap.md](roadmap.md) 的顺序逐个运行示例；遇到工程取舍时看 [architecture_map.md](architecture_map.md) 和 [best_practices.md](best_practices.md)，排查问题时看 [pitfalls.md](pitfalls.md)。
+这份教程放在 `src/learning_common_lib/python基础/` 下，面向已经掌握 Python 基础、准备学习全文检索和 Elasticsearch 的开发者。建议先读本文完成环境准备和快速开始，再看 [Elasticsearch 工程使用流程](roadmap.md#elasticsearch-工程使用流程) 和 [API 参数速查概览](roadmap.md#api-参数速查概览)，之后按 [roadmap.md](roadmap.md) 的顺序逐个运行示例；遇到工程取舍时看 [architecture_map.md](architecture_map.md) 和 [best_practices.md](best_practices.md)，排查问题时看 [pitfalls.md](pitfalls.md)。
 
 教程采用“先连接、后建模、再检索、最后生产化”的路线。前几节用同步 `Elasticsearch` 客户端建立 index、mapping、document、search、aggregation 的完整心智模型；基础稳定后，再进入 bulk 批量、深度分页、乐观并发、alias 蓝绿切换、`AsyncElasticsearch` 异步客户端和 `elasticsearch.dsl` 面向对象 API 等进阶主题。
 
@@ -103,7 +103,8 @@ elasticsearch教程/
 │   │   ├── 01_highlight_source.py
 │   │   ├── 02_collapse_dedup.py
 │   │   ├── 03_knn_vector.py
-│   │   └── 04_by_query_ops.py
+│   │   ├── 04_by_query_ops.py
+│   │   └── 05_tasks_long_running.py
 │   └── 12_index_and_performance/
 │       ├── 01_index_settings.py
 │       ├── 02_index_template.py
@@ -165,17 +166,17 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 
 | 阶段 | 主题 | 你会学到 |
 |------|------|----------|
-| 1 | 连接与最小闭环 | `Elasticsearch`、`ping`、`info`、`index`、`search`、版本对齐 |
+| 1 | 连接与最小闭环 | `Elasticsearch`、`ping`、`info`、`cluster.health`、`cat.indices`、版本对齐 |
 | 2 | mapping 与分析器 | `text` vs `keyword`、`analyze`、自定义 analyzer、multi-field |
 | 3 | 文档 CRUD | `index`、`get`、`update`、`delete`、`doc_as_upsert`、script 累加 |
 | 4 | 批量写入 | `helpers.bulk`、`streaming_bulk`、错误收集、429 退避重试 |
-| 5 | Query DSL | `bool`(must/filter/should/must_not)、`match`、`match_phrase`、`multi_match`、`fuzziness` |
+| 5 | Query DSL | `bool`(must/filter/should/must_not)、`match`、`match_phrase`、`multi_match`、`fuzziness`、`explain` |
 | 6 | 聚合 | `terms`、`range`、`stats`、`date_histogram`、管道聚合 `cumulative_sum` |
 | 7 | 分页 | `from/size` 上限、`search_after` + Point In Time 深度翻页 |
 | 8 | 错误与恢复 | 异常类型、`ignore_status`、`if_seq_no/if_primary_term` 乐观并发 |
 | 9 | 生产实践 | alias + reindex 零停机切换、`AsyncElasticsearch` 并发 |
 | 10 | 高级 DSL | `elasticsearch.dsl` 的 `Document`、`Search`、`Q` 面向对象 API |
-| 11 | 高级检索 | `highlight`、`_source` 过滤、`collapse` 折叠去重、`dense_vector` kNN 向量检索与混合召回、`update_by_query`/`delete_by_query` |
+| 11 | 高级检索与长任务 | `highlight`、`_source` 过滤、`collapse` 折叠去重、`dense_vector` kNN、`update_by_query`/`delete_by_query`、`tasks.get/list` |
 | 12 | 索引与性能 | shard/replica/`refresh_interval` 调优、`forcemerge`、index template、`profile` 慢查询剖析、`msearch` 合并请求 |
 
 ## 核心原则
@@ -214,8 +215,10 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py
 
 - context7 查询 `/elastic/elasticsearch-py`：确认 `Elasticsearch`/`AsyncElasticsearch` 连接、`index`、`search`、`indices.create(mappings/settings)`、`helpers.bulk`/`streaming_bulk`/`async_bulk`、`elasticsearch.dsl` 的 `Document`/`Search`/`Q`、`update_by_query`、聚合结构等 API 形态。
 - context7 查询 `/elastic/elasticsearch-py`（生产配置与高级检索）：确认 `retry_on_status`/`http_compress`/`sniff_*` 客户端参数、`knn`/`dense_vector`、`highlight`、`collapse`/`inner_hits`、`source` 过滤、index template 等用法。
+- context7 查询 `/elastic/elasticsearch-py`（常用管理与排查 API）：确认 `cat.indices`、`indices.stats`、`indices.validate_query`、`explain`、`mget`、`tasks.get/list/cancel`、`wait_for_completion=False` 等 API 归属和用途。
 - 本地实测确认 8.19.3 客户端与 8.19.14 服务端兼容，9.4.1 客户端连 8.x 报 `media_type_header_exception`，据此把依赖固定为 `>=8.19,<9`。
 - 本地实测验证 kNN（`dense_vector`+`knn`）、`highlight`、`collapse`、`_source` 过滤、`update_by_query`/`delete_by_query`、`forcemerge`、index template、`profile`、`msearch` 在 8.19.14 上的真实行为后再落地为示例。
 - GitHub 代码搜索参考 `revjkee/aethernova` 的 `connectors/elasticsearch.py` 和 `oblivionvault-core` 的 `search_elastic.py`：学习生产连接器中同步/异步客户端复用、`retry_on_status`、`open_point_in_time` + 重试封装的模式。
 - GitHub 代码搜索参考 `strawgate/es-knowledge-base-mcp` 的 `settings.py`：学习生产客户端 `http_compress=True`、`retry_on_status=(408,429,502,503,504)`、`retry_on_timeout=True` 的默认组合。
 - GitHub 代码搜索参考 `openai/chatgpt-retrieval-plugin` 的 `elasticsearch_datastore.py` 和 `elastic/elasticsearch-labs`：学习 `dense_vector` mapping 和 `knn` 检索在 RAG/缓存场景的真实写法。
+- GitHub 代码搜索参考 `mozilla/kitsune`、`langgenius/dify`、`elastic/elasticsearch-labs` 等项目：校准 `basic_auth`、`request_timeout`、`helpers.scan`、`dense_vector`/`knn` 在真实项目中的常见位置。

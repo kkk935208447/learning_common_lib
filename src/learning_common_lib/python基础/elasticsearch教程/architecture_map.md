@@ -11,7 +11,7 @@
 │   FastAPI 路由、Celery/taskiq worker、离线导入脚本             │
 ├─────────────────────────────────────────────────────────────┤
 │ 仓储层 (Repository)            ← templates/sync_repository.py  │
-│   封装 index/get/search/bulk/scan，统一异常透传                │
+│   封装 index/get/mget/search/bulk/scan，统一异常透传           │
 │                                  templates/async_repository.py │
 ├─────────────────────────────────────────────────────────────┤
 │ 客户端层 (Client)              ← templates/client_factory.py   │
@@ -22,6 +22,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │ Elasticsearch 集群                                             │
 │   index → shard → segment；mapping、analyzer、alias           │
+│   cat/health/stats/tasks/profile/explain 支撑排查             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,12 +38,15 @@
 | 08 容错 | 全链路 | 异常分类映射为 HTTP 状态码或重试策略，乐观锁保护并发写 |
 | 09 生产 | 发布流程 | alias 切换纳入 CI/CD，异步客户端接入服务生命周期 |
 | 10 DSL | 检索服务 | 复杂查询用 DSL 提升可维护性，与 dict 互转便于调试 |
+| 11 高级检索 | 检索体验/维护任务 | 高亮、折叠、向量召回、by_query 和 tasks 管理 |
+| 12 索引性能 | 运维排查 | stats/profile/msearch/template 纳入排查与发布工具 |
 
 ## 检索请求的运行链路
 
 ```text
 用户查询
   → 应用构建 query DSL（match/bool/filter）
+  → 可选 validate_query 校验 DSL，explain 排查单文档评分
   → 客户端序列化为 HTTP 请求（带版本协商头）
   → 协调节点接收，分发到各 shard
   → 每个 shard 本地执行：倒排索引匹配 → 打分 → 取 top-K
@@ -53,6 +57,7 @@
 
 **教学映射**：
 - `05_query_dsl/` 对应“构建 query DSL”和“打分”环节。
+- `05_query_dsl/02_full_text.py` 的 `explain` 对应“为什么这个文档拿到这个分数”。
 - `06_aggregations/` 对应 shard 本地聚合 + 协调节点归并。
 - `07_pagination/` 的 `from/size` 代价正源于“每个 shard 都要取 from+size 条”再归并。
 - `search_after + PIT` 用快照固定 segment，避免翻页期间 segment 合并导致的漂移。
@@ -82,12 +87,33 @@ index / bulk 请求
 需求变更（mapping 不可变）：
   1. create index_v2 (mapping B)
   2. reindex index_v1 → index_v2
+     可选 wait_for_completion=False，交给 tasks.get/list 观察
   3. update_aliases 原子地 {remove v1, add v2}
   4. 应用无感知切换到 index_v2
   5. 确认无误后 drop index_v1
 ```
 
 **教学映射**：`09_production/01_alias_reindex.py` 完整演示了这条链路。生产中第 2 步常用 `reindex` 的 `slices` 并行化，第 3 步的原子性是零停机的关键。
+
+## 排查与运维观察链路
+
+```text
+连接/健康:
+  ping -> info -> cluster.health -> cat.indices
+
+索引与数据:
+  indices.get_mapping -> indices.get_settings -> indices.stats -> count
+
+查询问题:
+  indices.analyze -> indices.validate_query -> explain -> search(profile=True)
+
+长任务:
+  reindex/update_by_query/delete_by_query(wait_for_completion=False)
+    -> tasks.get / tasks.list
+    -> 必要时 tasks.cancel
+```
+
+这些 API 不直接替代业务逻辑，而是放在启动自检、管理后台、迁移脚本和故障排查工具里。教程把 `cat.indices`、`explain`、`profile`、`tasks.get/list` 放进示例，其余排查 API 在 `roadmap.md` 做索引。
 
 ## 从示例到生产的替换清单
 

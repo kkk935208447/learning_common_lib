@@ -1,6 +1,10 @@
 """
 目标: 用 index template 让按命名规则自动创建的索引统一套用 mapping 和 settings
 关键 API: indices.put_index_template, index_patterns, template, indices.delete_index_template
+本例重点参数:
+- index_patterns: 决定哪些新索引匹配模板，生产命名必须稳定。
+- template.settings/mappings: 自动套用到新建索引，适合日志/时序索引族。
+- priority: 多个模板同时匹配时用优先级决定覆盖关系。
 Python 版本: 3.11+
 运行命令: uv run python examples/12_index_and_performance/02_index_template.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

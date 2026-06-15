@@ -10,6 +10,9 @@
 | 客户端复用 | 应用生命周期内创建一次，关闭时释放；不要每请求新建 | `templates/client_factory.py` |
 | 设置 `request_timeout` | 避免请求无限挂起；批量操作单独设更长超时 | 各示例 |
 | 配 `retry_on_timeout` + `max_retries` | 应对瞬时网络抖动，配合幂等写入安全 | `templates/client_factory.py` |
+| 配 `retry_on_status` | 常见只对 408/429/502/503/504 做退避重试；4xx 请求错误不要重试 | `templates/client_factory.py` |
+| 开启 `http_compress` | 大响应或批量请求可减少网络传输，CPU 很紧张时再评估关闭 | `templates/client_factory.py` |
+| 单次请求用 `client.options(...)` | 用 `ignore_status`、临时 `request_timeout` 覆盖默认值，不要污染全局客户端 | 多数示例 |
 | 本地绕过代理 | `NO_PROXY`/`no_proxy` 包含 `127.0.0.1,localhost` | 各示例 `ensure_local_no_proxy` |
 
 ## mapping 与字段类型
@@ -38,6 +41,8 @@
 | 容错用 `fuzziness: AUTO` | 处理拼写错误，但有性能代价，慎用 | `05_query_dsl/02` |
 | 只要数量用 `count` | 比 `search` + 读 total 更轻 | `04_bulk/*` |
 | 只要聚合用 `size=0` | 不返回命中文档，省序列化 | `06_aggregations/*` |
+| 先用 `indices.validate_query` 验证 DSL | 复杂查询上线前先确认结构可执行，必要时开 `explain=True` | `roadmap.md` |
+| 用 `explain` 排查单文档评分 | 看某个 `_id` 为什么命中、哪些子句贡献分数 | `05_query_dsl/02` |
 
 ## 写入
 
@@ -51,6 +56,7 @@
 | 存在则更新用 `doc_as_upsert` | 一步完成 insert-or-update | `03_crud/02` |
 | 计数累加用 `script` | 原子操作，避免读-改-写竞态 | `03_crud/02` |
 | 慎用 `refresh="wait_for"` | 仅测试和强一致场景；高频写入会拖慢吞吐 | 各示例 |
+| 长任务用 tasks 观察 | `reindex`、`update_by_query`、`delete_by_query` 可设 `wait_for_completion=False` 后轮询任务 | `11_advanced_search/05` |
 
 ## 分页
 
@@ -81,6 +87,7 @@
 |------|------|----------|
 | 应用读写 alias | 不绑定物理索引名，便于切换 | `09_production/01` |
 | mapping 变更走 reindex + alias | create v2 → reindex → 原子切 alias → drop v1 | `09_production/01` |
+| 长 reindex 用异步任务 | `wait_for_completion=False` 拿 task id，`tasks.get/list` 观察，必要时 `tasks.cancel` | `11_advanced_search/05` |
 | 高并发用 `AsyncElasticsearch` | 配 `async with` 或显式 close，避免连接泄漏 | `09_production/02` |
 | 异步也要限流 | 用 `asyncio.Semaphore` 控制并发，配超时和背压 | `09_production/02` |
 | 索引生命周期用 ILM | 时序数据按大小/时间滚动、降冷、删除 | （超出本教程，生产建议） |
@@ -91,6 +98,8 @@
 |------|------|
 | 生产必须开启认证 | API Key 或用户名密码，本教程无认证仅限本地学习 |
 | 生产必须开启 TLS | `https://` + CA 证书校验 |
+| 认证写法保持一种主线 | `api_key` 适合服务间调用；`basic_auth=(user, password)` 适合账号密码环境，别同时硬编码两套 |
+| 校验证书 | 生产保留 `verify_certs=True`，通过 `ca_certs` 注入 CA；只在本地临时调试时考虑关闭 |
 | 最小权限 | 应用账号只授予所需索引的读写权限 |
 | 不在代码硬编码凭证 | 从环境变量或配置中心注入，见 `templates/settings.py` |
 | 校验用户输入 | 不要把用户输入直接拼进 query，尤其是 script 查询 |
@@ -118,6 +127,7 @@
 | 时序索引用 template | `put_index_template` 让按日期滚动的索引自动套 mapping | `12_index_and_performance/02` |
 | 慢查询用 `profile` | 定位耗时在哪个 query 节点；有开销，排查时才开 | `12_index_and_performance/03` |
 | 多查询用 `msearch` | 首页多组聚合/查询一次取回，减少往返 | `12_index_and_performance/03` |
+| 先看 `cat.indices`/`indices.stats` | 排查文档数、store、segment、search/write 压力，不要只看应用日志 | `01_basics/01`、`roadmap.md` |
 
 ## 性能要点
 

@@ -1,6 +1,10 @@
 """
 目标: 用 update_by_query 和 delete_by_query 按条件批量改/删，避免逐条往返
 关键 API: update_by_query(script), delete_by_query, conflicts="proceed", refresh
+本例重点参数:
+- update_by_query(query/script): 按快照匹配后批量更新，script 在服务端执行。
+- delete_by_query(query): 按条件批量删除；生产必须先用 query/count 验证影响范围。
+- conflicts/refresh: conflicts="proceed" 跳过版本冲突继续；refresh=True 便于示例立即观察。
 Python 版本: 3.11+
 运行命令: uv run python examples/11_advanced_search/04_by_query_ops.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

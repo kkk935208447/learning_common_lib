@@ -1,6 +1,10 @@
 """
 目标: 掌握 bool 查询的 must/filter/should/must_not 四个子句和它们对评分的影响
 关键 API: search(query=bool), match, term, range, minimum_should_match
+本例重点参数:
+- bool.must/filter/should/must_not: must 参与评分，filter 不算分且可缓存，must_not 排除结果。
+- minimum_should_match: 控制 should 至少命中几个条件，避免“可选条件”变成无效约束。
+- search(size/sort): size 控制返回数量，sort 会改变默认按相关性排序的行为。
 Python 版本: 3.11+
 运行命令: uv run python examples/05_query_dsl/01_bool_query.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

@@ -1,6 +1,10 @@
 """
 目标: 用 elasticsearch.dsl 高级 API 以面向对象方式建模文档和查询
 关键 API: Document, Text/Keyword/Integer 字段, Search, Q, save, init
+本例重点参数:
+- Document.Index.name: 绑定物理索引名；生产中通常由配置或 alias 注入。
+- Field 类型参数: Text/Keyword/Integer 对应底层 mapping，仍要遵守 ES 字段类型规则。
+- Search.query/filter/to_dict: 链式构建最终仍会生成普通 Query DSL，排查时先看 to_dict。
 Python 版本: 3.11+
 运行命令: uv run python examples/10_dsl/01_document_orm.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

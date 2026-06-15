@@ -1,6 +1,10 @@
 """
 目标: 自定义分析器，并用 multi-field 让同一字段既能全文检索又能精确聚合
 关键 API: indices.create(settings.analysis), indices.analyze, fields(子字段)
+本例重点参数:
+- settings.analysis.analyzer: 组合 tokenizer、char_filter、filter，决定写入和查询时如何切词。
+- mappings.properties.fields: 为同一字段增加 `.raw` 等子字段，兼顾全文检索和精确聚合。
+- indices.analyze(field/text): 按字段使用实际 analyzer，比只指定 analyzer 更接近生产行为。
 Python 版本: 3.11+
 运行命令: uv run python examples/02_mapping_analysis/02_custom_analyzer.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

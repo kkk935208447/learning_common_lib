@@ -1,6 +1,10 @@
 """
 目标: 用 helpers.bulk 高效批量写入，理解 actions 结构和错误统计
 关键 API: helpers.bulk, _op_type, _index, _id, raise_on_error
+本例重点参数:
+- actions._op_type/_index/_id/_source: 每条 action 声明操作类型、目标索引、文档 ID 和文档内容。
+- helpers.bulk(chunk_size/raise_on_error): chunk_size 控制单批大小；raise_on_error=False 后必须检查 errors。
+- refresh: 教学中用于立即可见，生产批量导入更常在整批完成后统一 refresh。
 Python 版本: 3.11+
 运行命令: uv run python examples/04_bulk/01_bulk_helpers.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

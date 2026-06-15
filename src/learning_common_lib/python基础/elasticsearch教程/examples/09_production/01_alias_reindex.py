@@ -1,6 +1,10 @@
 """
 目标: 用 alias + reindex 实现零停机的 mapping 变更（蓝绿索引切换）
 关键 API: indices.create, reindex, indices.update_aliases, indices.get_alias
+本例重点参数:
+- indices.update_aliases(actions): 在一个请求里 remove/add，保证 alias 切换原子性。
+- reindex(source/dest/refresh): 把旧索引数据重建到新索引；大数据量可用 wait_for_completion=False 转长任务。
+- indices.get_alias(name): 验证 alias 当前指向，是发布后排查的关键 API。
 Python 版本: 3.11+
 运行命令: uv run python examples/09_production/01_alias_reindex.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

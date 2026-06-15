@@ -1,6 +1,10 @@
 """
 目标: 理解 from/size 浅分页的代价和 10000 上限，掌握 sort 的稳定排序
 关键 API: search(from_, size, sort, track_total_hits), index.max_result_window
+本例重点参数:
+- from_/size: 适合浅分页；from 越大，每个 shard 需要取回并丢弃的候选越多。
+- sort: 分页必须有稳定排序，避免同分文档顺序漂移。
+- track_total_hits: 控制 total hits 精确性；精确计数更贵，列表接口要按需开启。
 Python 版本: 3.11+
 运行命令: uv run python examples/07_pagination/01_from_size.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

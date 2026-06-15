@@ -1,6 +1,10 @@
 """
 目标: 用 profile 剖析查询耗时定位慢查询，用 msearch 合并多个查询减少往返
 关键 API: search(profile=True), msearch, request_cache
+本例重点参数:
+- search(profile=True): 返回 shard 内查询树耗时，排查时才开，业务接口不要常开。
+- msearch(searches): header/body 成对组织多个查询，一次请求拿多组结果。
+- request_cache: 适合稳定过滤和聚合场景，实时变化查询收益有限。
 Python 版本: 3.11+
 运行命令: uv run python examples/12_index_and_performance/03_profile_msearch.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

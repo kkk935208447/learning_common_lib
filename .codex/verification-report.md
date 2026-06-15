@@ -468,3 +468,114 @@
 - 按用户要求在 `roadmap.md` 的 `Milvus 工程使用流程` 中补充 collection 加载节点：`create_collection(schema, index_params, ...)` 路径通常会自动建索引并 load；检索前仍应确认 collection 已加载，必要时显式执行 `load_collection()` 并用 `get_load_state()` 检查。
 - 来源复核：Context7 查询 Milvus v2.6 文档，确认 `schema + index_params` 创建路径会自动加载，而手动建索引或 release 后检索前需要显式 load。
 - 本地验证：`git diff --check -- src/learning_common_lib/python基础/milvus教程/roadmap.md` 通过。本次只改文档流程说明，不影响示例执行逻辑。
+
+---
+---
+
+> **说明（给后续 agent）**：下方是独立任务 **Elasticsearch 教程 API 化重构与代码侧补强** 的验证报告，追加在历史报告之后，互不覆盖。
+
+---
+---
+
+# 验证报告（Elasticsearch 教程 API 化重构）
+
+## 基本信息
+
+- 时间戳：2026-06-15 17:24:29 CST
+- 任务：按用户要求复查 `src/learning_common_lib/python基础/elasticsearch教程` 除 `roadmap.md` 外的所有核心文档和教程代码，补齐 Elasticsearch 常用 API、常用参数、排查 API、示例 docstring 参数说明和必要代码侧教学点。
+- 范围：`README.md`、`roadmap.md`、`architecture_map.md`、`best_practices.md`、`pitfalls.md`、`templates/README.md`、`templates/settings.py`、`templates/client_factory.py`、27 个 examples、`write-library-tutorials` skill。
+- 交付物：API 全景版 roadmap、文档入口与排查链路补充、所有示例 `本例重点参数` docstring、`cat.indices`/`explain`/`tasks.get` 代码承接、`basic_auth` 模板入口、验证报告、教程编写 skill 经验沉淀。
+- 不纳入范围：不新增 ES 集群治理专题示例，如 ILM、snapshot、security/RBAC、ES|QL、ingest pipeline；这些保留为 roadmap 了解项。
+
+## 需求字段完整性
+
+| 字段 | 结论 | 说明 |
+|------|------|------|
+| 目标 | 完整 | 已从“RAG/检索流程”重心调整为“ES 常用 API/参数/作用/示例落点”的学习地图。 |
+| 范围 | 完整 | 除 roadmap 外同步检查并更新 README、架构映射、最佳实践、坑点、模板说明和示例代码。 |
+| 交付物 | 完整 | 新增 `05_tasks_long_running.py`，改造 `01_connect_and_info.py`、`02_full_text.py`，所有示例补 docstring 参数说明。 |
+| 审查要点 | 完整 | 覆盖连接认证、排查 API、mapping/search/bulk/pagination/alias/tasks/highlight/collapse/knn/profile/msearch 等。 |
+| 运行环境 | 完整 | 本地 Elasticsearch 8.x，默认 `http://localhost:9200`；客户端 `elasticsearch[async]>=8.19,<9`。 |
+| 外部服务 | 完整 | smoke 已真实连接本地 ES 并跑完整套示例；本任务不管理 ES 服务本身。 |
+| 不做内容 | 完整 | 管理、安全和数据平台专项不强塞进主线示例，避免误操作和学习噪声。 |
+
+## 交付物映射
+
+| 需求 | 交付物 | 验证方式 |
+|------|--------|----------|
+| API 全景与工程流程 | `roadmap.md` | 新增连接自检、索引建模、写入验证、检索、深分页、发布长任务、运维排查调用链。 |
+| 常用参数速查 | `roadmap.md` | 新增 `API/对象 | 常见参数 | 参数说明 | 主要示例` 表，覆盖客户端、mapping、CRUD、bulk、search、PIT、scan、alias、by_query、tasks、排查 API。 |
+| 其他文档同步 | `README.md`、`architecture_map.md`、`best_practices.md`、`pitfalls.md`、`templates/README.md` | 入口链接、运维排查链路、认证/TLS/重试、validate/explain/profile/tasks、常见坑均已补充。 |
+| 示例 docstring 参数说明 | `examples/**/*.py` | 27 个示例均包含 `本例重点参数`，说明参数作用、默认影响和生产边界。 |
+| 排查 API 代码承接 | `01_connect_and_info.py`、`05_query_dsl/02_full_text.py` | 真实输出 `cat.indices` 教程索引清单；真实调用 `explain` 输出评分摘要。 |
+| 长任务 API 教学 | `11_advanced_search/05_tasks_long_running.py` | 真实提交 `update_by_query(wait_for_completion=False)`，用 `tasks.list` 和 `tasks.get` 观察完成状态。 |
+| 用户名密码认证说明与代码 | `templates/settings.py`、`templates/client_factory.py`、`templates/README.md` | 模板支持 `ES_USERNAME`/`ES_PASSWORD`，API Key 优先，其次 `basic_auth`。 |
+| skill 经验沉淀 | `.claude/skills/write-library-tutorials/SKILL.md` | 简要补充 API 型教程规则：工程流程、参数速查、docstring 参数说明、关键中间态输出。 |
+
+## 依赖与风险
+
+| 项目 | 结论 | 风险与处理 |
+|------|------|------------|
+| 官方 API 准确性 | 已复核 | Context7 查询 `/elastic/elasticsearch-py`，确认客户端、indices、search、tasks 等常用 API 形态。 |
+| 开源实践参考 | 已复核 | GitHub code search 参考 `elastic/elasticsearch-labs`、`mozilla/kitsune`、`langgenius/dify` 等项目的连接、scan、basic_auth、kNN 模式，只吸收模式。 |
+| 本地 ES 依赖 | 已验证 | smoke 真实连接 `http://localhost:9200` 并跑完整套示例。 |
+| 运行产物 | 已清理 | smoke 后清理 `__pycache__` 和 `.pyc`，最终复查无输出。 |
+| 管理类 API 未全部成示例 | 可接受 | `indices.stats`、`validate_query`、`mget`、ingest、snapshot、security、ILM 保留为了解项；主线已有 `cat.indices`、`explain`、`tasks`、`profile`。 |
+
+## 来源记录
+
+| 来源 | 查询/项目 | 用途 |
+|------|-----------|------|
+| context7 | `/elastic/elasticsearch-py`，客户端连接、search、bulk、indices、tasks | 确认 `hosts/api_key/basic_auth/request_timeout/retry_on_status`、`search`、`indices.create`、`helpers.bulk/scan`、`tasks.get/list/cancel` 等官方用法。 |
+| context7 | `/elastic/elasticsearch-py`，管理与排查 API | 复核 `cat.indices`、`indices.stats`、`indices.validate_query`、`explain`、`mget`、`profile`、`msearch` 的归属和用途。 |
+| GitHub search_code | `elastic/elasticsearch-labs` | 参考 `dense_vector` + `knn` 在真实示例中的写法。 |
+| GitHub search_code | `helpers.scan Elasticsearch` | 参考真实项目中 `helpers.scan` 用于离线遍历的模式。 |
+| GitHub search_code | `basic_auth request_timeout` | 参考 `mozilla/kitsune`、`langgenius/dify` 等项目中 `basic_auth`、`request_timeout`、重试参数的配置位置。 |
+
+## 本地验证
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| `python -m compileall -q src/learning_common_lib/python基础/elasticsearch教程/examples src/learning_common_lib/python基础/elasticsearch教程/templates src/learning_common_lib/python基础/elasticsearch教程/smoke` | 通过 | 全部示例、模板、smoke 脚本语法可编译。 |
+| `git diff --check -- src/learning_common_lib/python基础/elasticsearch教程` | 通过 | 无尾随空白或补丁格式问题。 |
+| `UV_CACHE_DIR=/tmp/uv-cache uv run python smoke/run_all_examples.py` | 通过 | 35 通过，0 失败，1 跳过，耗时 74.9 秒；覆盖 27 个 examples 和 4 个 templates 的模块/文件运行。 |
+| `rg --files-without-match "本例重点参数:" src/learning_common_lib/python基础/elasticsearch教程/examples -g '*.py'` | 通过 | 无输出，确认所有示例都包含重点参数说明。 |
+| `find src/learning_common_lib/python基础/elasticsearch教程 -name '__pycache__' -o -name '*.pyc'` | 通过 | 清理后无输出，运行产物未残留。 |
+| `git diff --check -- .claude/skills/write-library-tutorials` | 通过 | skill 文件补充无格式问题。 |
+
+## 审查清单
+
+| 检查项 | 结论 | 说明 |
+|--------|------|------|
+| API 型 roadmap | 通过 | 已包含工程流程、参数速查概览、管理/排查了解项、示例落点。 |
+| 文档职责边界 | 通过 | README 做入口，architecture_map 做工程映射，best_practices 做建议，pitfalls 做反模式。 |
+| 示例独立性 | 通过 | 新增任务示例自建索引、自写数据、try/finally 清理；不依赖前序示例。 |
+| 代码侧教学承接 | 通过 | 文档列出的关键新增点由 `cat.indices`、`explain`、`tasks.get/list` 真实演示。 |
+| 常用参数覆盖 | 通过 | 客户端、mapping、CRUD、bulk、search、PIT、scan、alias、by_query、tasks、高级检索均有参数说明。 |
+| 高阶用法 | 通过 | 已覆盖 async、DSL、highlight、collapse、kNN、by_query、tasks、profile、msearch。 |
+| 验证闭环 | 通过 | smoke 全量通过；运行产物已清理。 |
+| skill 沉淀 | 通过 | 只补简短规则，未新增冗余文档。 |
+
+## 评分
+
+- 技术维度评分：97/100
+- 战略维度评分：98/100
+- 综合评分：98/100
+- 建议：通过
+
+扣分说明：
+
+- `ingest pipeline`、ILM、snapshot、security/RBAC、ES|QL 属于更重的集群治理或数据平台专题，本轮只在 roadmap 标为了解项，未新增可运行示例。
+- `indices.validate_query` 和 `mget` 是常用 API，但为避免示例碎片化，本轮只在文档速查中说明，没有单独成章。
+
+## 结论
+
+本次重构已把 Elasticsearch 教程调整为 API/参数导向：`roadmap.md` 提供工程流程和速查概览，其他文档同步补充排查与生产边界，所有示例 docstring 增加重点参数说明，并用真实代码承接 `cat.indices`、`explain`、`tasks.get/list`。完整 smoke 结果为 35 通过、0 失败、1 跳过，建议通过。
+
+## 补充更新（2026-06-15 17:34 CST）
+
+- 按用户要求在 Elasticsearch `roadmap.md` 的 API 速查表后补充分组化说明，对齐 Milvus roadmap 的阅读方式。
+- 新增分组：客户端与连接、索引/mapping/analyzer、文档写入读取与批量、检索/Query DSL/聚合、分页导出与遍历、高级检索与向量、发布长任务与运维排查。
+- 同步优化标题层级：`学习阶段详解` 下的阶段标题由二级标题调整为三级标题，避免和主章节同级。
+- 来源复核：Context7 查询 `/elastic/elasticsearch-py` 官方客户端文档；GitHub code search 参考 `elastic/elasticsearch-labs`、`mozilla/kitsune`、`langgenius/dify` 等项目里的连接认证、bulk、PIT、alias/reindex 模式。
+- 本地验证：`rg -n "新增小节标题" src/learning_common_lib/python基础/elasticsearch教程/roadmap.md` 通过；`git diff --check -- src/learning_common_lib/python基础/elasticsearch教程/roadmap.md` 通过。本次只改 roadmap 文档结构和说明，不影响示例运行逻辑；上一轮完整 smoke 为 35 通过、0 失败、1 跳过。

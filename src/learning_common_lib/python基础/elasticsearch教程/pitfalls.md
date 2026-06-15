@@ -181,3 +181,39 @@ from + size must be less than or equal to: [10000]
 **修复**：只对不再写入的索引（如已滚动的历史索引）做 force merge；活跃索引交给 ES 自动的后台 merge。
 
 **对应示例**：`12_index_and_performance/01_index_settings.py`（演示在导入完成后才 merge）。
+
+## 16. 误解 total hits 的精确性
+
+**现象**：列表接口显示总数和真实数据量不一致，尤其是大结果集只看到 `10000` 附近的上限。
+
+**根因**：`search` 的 `hits.total` 可能受 `track_total_hits` 设置影响；精确计数会增加开销，ES 默认会做性能取舍。
+
+**修复**：
+- 只要数量时用 `count`。
+- 必须展示精确总数时显式设置 `track_total_hits=True`，并评估查询代价。
+- 普通翻页不要依赖深页总数，深遍历用 PIT + `search_after`。
+
+**对应示例**：`07_pagination/01_from_size.py`、`04_bulk/02_streaming_bulk.py`。
+
+## 17. 长任务提交后不观察 tasks
+
+**现象**：`reindex`、`update_by_query`、`delete_by_query` 已返回 task id，但后台是否完成、失败或冲突都没人检查。
+
+**根因**：`wait_for_completion=False` 只表示提交成功，不表示任务执行成功。
+
+**修复**：
+- 用 `tasks.get(task_id=...)` 轮询完成状态和响应。
+- 用 `tasks.list(actions="*reindex,*byquery")` 查看同类任务。
+- 任务误发或耗时异常时再评估 `tasks.cancel`，取消也可能需要等待。
+
+**对应示例**：`11_advanced_search/05_tasks_long_running.py`。
+
+## 18. 把 explain/profile 当普通查询常开
+
+**现象**：排查字段和性能时打开 `explain` 或 `profile=True` 后忘记关闭，线上查询变慢、响应体变大。
+
+**根因**：`explain` 会返回评分细节，`profile` 会收集各查询节点耗时；它们是诊断工具，不是业务响应字段。
+
+**修复**：只在开发、管理后台或短时排障中开启，并限制索引、查询和用户权限。
+
+**对应示例**：`05_query_dsl/02_full_text.py`、`12_index_and_performance/03_profile_msearch.py`。

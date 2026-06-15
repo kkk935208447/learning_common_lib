@@ -1,6 +1,10 @@
 """
 目标: 用 if_seq_no/if_primary_term 实现乐观并发控制，安全处理版本冲突
 关键 API: index(if_seq_no, if_primary_term), get(_seq_no/_primary_term), ConflictError
+本例重点参数:
+- get(...): 响应中的 `_seq_no` 和 `_primary_term` 是文档当前版本凭证。
+- index(if_seq_no/if_primary_term): 只有版本匹配才写入，过期版本触发 409。
+- ConflictError: 捕获后重读最新文档，再基于新版本重试。
 Python 版本: 3.11+
 运行命令: uv run python examples/08_errors_recovery/02_optimistic_concurrency.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

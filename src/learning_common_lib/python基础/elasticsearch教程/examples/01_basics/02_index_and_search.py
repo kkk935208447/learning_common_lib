@@ -1,6 +1,10 @@
 """
 目标: 用最少代码跑通 create index → index doc → refresh → search → delete 完整闭环
 关键 API: indices.create, index, indices.refresh, search, indices.delete
+本例重点参数:
+- indices.create(index/mappings): index 是索引名，mappings 决定字段类型；字段类型创建后不能原地修改。
+- index(index/id/document): id 由业务主键派生可保证幂等；document 字段必须与 mapping 预期一致。
+- search(query/size): query 决定召回，size 控制返回 topN；不设置 size 时默认只返回少量命中。
 Python 版本: 3.11+
 运行命令: uv run python examples/01_basics/02_index_and_search.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

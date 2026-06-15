@@ -1,6 +1,10 @@
 """
 目标: 掌握桶聚合（terms、range、date_histogram）和指标聚合（avg、max、stats）
 关键 API: search(size=0, aggs), terms, range, avg, stats, 嵌套子聚合
+本例重点参数:
+- search(size=0): 只返回聚合结果，不返回 hits，降低响应体积。
+- terms.field/size: field 通常用 keyword；size 默认较小，高基数字段要显式设置或用 composite。
+- aggs 嵌套: 桶聚合内可再放指标聚合，表示“每组内再统计”。
 Python 版本: 3.11+
 运行命令: uv run python examples/06_aggregations/01_metrics_and_buckets.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

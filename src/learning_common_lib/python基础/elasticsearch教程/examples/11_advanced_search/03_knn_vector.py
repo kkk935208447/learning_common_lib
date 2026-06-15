@@ -1,6 +1,10 @@
 """
 目标: 用 dense_vector + kNN 做向量语义检索，并和关键词检索组合成混合召回
 关键 API: dense_vector(dims/index/similarity), search(knn), knn + query 混合
+本例重点参数:
+- dense_vector.dims: 必须等于 embedding 模型输出维度，写错会导致写入失败。
+- dense_vector.similarity: cosine/dot_product/l2_norm 要与向量归一化方式匹配。
+- knn.k/num_candidates/boost: k 是最终近邻数，num_candidates 越大召回越高但越慢，boost 调混合权重。
 Python 版本: 3.11+
 运行命令: uv run python examples/11_advanced_search/03_knn_vector.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

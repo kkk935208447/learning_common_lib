@@ -19,6 +19,20 @@
 - **可预期缺失返回 None**：`get_document` 对 404 返回 `None` 而非抛异常，区别于不可预期错误。
 - **索引命名受控**：`index_name(topic)` 统一加前缀并校验合法性，避免误操作真实索引。
 
+## 模板暴露的常用客户端参数
+
+| 参数/环境变量 | 作用 | 说明 |
+|---------------|------|------|
+| `ES_HOST` | Elasticsearch 地址 | 本地默认 `http://localhost:9200`；生产可扩展为多 hosts 配置 |
+| `ES_API_KEY` | API Key 认证 | 适合 Elastic Cloud 或服务间调用；本地教学可留空 |
+| `ES_USERNAME` / `ES_PASSWORD` | 用户名密码认证 | Py 客户端对应 `basic_auth=(user, password)`；未设置 API Key 时启用 |
+| `ES_REQUEST_TIMEOUT` | 单次请求超时 | 默认 10 秒；bulk/reindex 这类重操作可用 `client.options(request_timeout=...)` 覆盖 |
+| `retry_on_timeout` / `max_retries` | 超时重试 | 模板内置，适合幂等或可安全重试的请求 |
+| `retry_on_status` | 状态码重试 | 模板覆盖 408/429/502/503/504，不对 400/404 这类请求错误重试 |
+| `http_compress` | HTTP 压缩 | 模板默认开启，降低网络传输 |
+
+生产中还常见 `verify_certs`、`ca_certs`。本模板保留 API Key/basic_auth 两种认证入口；如果接入自签 CA，应在项目配置层统一扩展证书路径。
+
 ## 运行方式
 
 作为模块运行（推荐，IDE 可点击进入源码）：

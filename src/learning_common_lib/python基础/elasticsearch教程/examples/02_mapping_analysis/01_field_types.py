@@ -1,6 +1,10 @@
 """
 目标: 理解 text 与 keyword 的本质差别，看清分词如何影响检索和聚合
 关键 API: indices.create(mappings), indices.analyze, search(term/match)
+本例重点参数:
+- mappings.properties.type: text 会分词用于全文检索，keyword 不分词用于过滤、排序和聚合。
+- indices.analyze(index/analyzer/text): 验证文本实际 token，排查“term 查不到”的第一步。
+- search(query): term 要求精确 token，match 会先分析查询文本后再匹配。
 Python 版本: 3.11+
 运行命令: uv run python examples/02_mapping_analysis/01_field_types.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

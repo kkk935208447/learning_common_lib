@@ -1,6 +1,11 @@
 """
 目标: 理解 shard/replica/refresh_interval 等核心索引设置，及批量导入时的调优手法
 关键 API: indices.create(settings), indices.put_settings, number_of_shards/replicas, refresh_interval
+本例重点参数:
+- number_of_shards: 创建后不可改，决定主分片数量和并行边界。
+- number_of_replicas: 单节点教学设 0；生产按可用性和查询压力设置。
+- refresh_interval: 导入期可设 -1 提升吞吐，导入后必须恢复。
+- forcemerge(max_num_segments): 只适合不再写入的只读索引。
 Python 版本: 3.11+
 运行命令: uv run python examples/12_index_and_performance/01_index_settings.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200（单节点）

@@ -1,10 +1,15 @@
 """
 目标: 区分 match、match_phrase、multi_match 的语义，理解全文检索的相关性评分
 关键 API: match(operator/fuzziness), match_phrase(slop), multi_match(fields/type), explain
+本例重点参数:
+- match.operator: 默认 OR 偏召回，operator="and" 偏精确。
+- match.fuzziness: AUTO 可容忍拼写错误，但会增加查询代价。
+- multi_match.fields/type: fields 支持 `title^2` 加权；best_fields 取最佳字段得分。
+- explain(index/id/query): 只解释单个文档的评分原因，适合排查，不适合业务接口常开。
 Python 版本: 3.11+
 运行命令: uv run python examples/05_query_dsl/02_full_text.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200
-预期现象: match 默认 OR、可切 AND；match_phrase 要求词序相邻；multi_match 跨字段；打印 _score 排序
+预期现象: match 默认 OR、可切 AND；match_phrase 要求词序相邻；multi_match 跨字段；打印 _score 排序和 explain 摘要
 生产提醒: fuzziness 容错有性能代价；multi_match 的 best_fields/most_fields 影响多字段加权方式
 """
 
@@ -78,6 +83,16 @@ def main() -> None:
             query={"match": {"body": {"query": "quikc", "fuzziness": "AUTO"}}},
         )
         print(f"match fuzziness 'quikc' 命中={fuzzy['hits']['total']['value']}")
+
+        # explain：对单个文档解释评分来源，排查“为什么排第一/为什么没排第一”。
+        explanation = client.explain(
+            index=INDEX_NAME,
+            id="0",
+            query={"multi_match": {"query": "fox", "fields": ["title^2", "body"], "type": "best_fields"}},
+        )
+        detail = explanation["explanation"]
+        print(f"explain id=0 matched={explanation['matched']} score={detail['value']:.4f}")
+        print(f"explain 顶层说明={detail['description']}")
     finally:
         client.options(ignore_status=404).indices.delete(index=INDEX_NAME)
         client.close()

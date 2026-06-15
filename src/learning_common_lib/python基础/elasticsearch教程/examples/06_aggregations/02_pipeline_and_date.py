@@ -1,6 +1,10 @@
 """
 目标: 在查询上下文里做聚合，并用 date_histogram + 管道聚合做时间序列分析
 关键 API: search(query+aggs), date_histogram, cumulative_sum, bucket 内嵌指标
+本例重点参数:
+- date_histogram.field/calendar_interval: field 必须是 date；calendar_interval 按日历语义切桶。
+- query + aggs: 聚合只统计 query 过滤后的文档。
+- cumulative_sum.buckets_path: 管道聚合引用已有指标桶，依赖前面聚合名称。
 Python 版本: 3.11+
 运行命令: uv run python examples/06_aggregations/02_pipeline_and_date.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

@@ -1,6 +1,10 @@
 """
 目标: 用 collapse 字段折叠按某字段去重，每组只返回 top 1，并保留组内更多命中
 关键 API: search(collapse), inner_hits, field
+本例重点参数:
+- collapse.field: 必须是 keyword 或数值这类可排序/聚合字段，用于按业务键去重。
+- inner_hits.name/size/sort: 取每组内更多文档，适合展示“同组其他结果”。
+- search.limit/size: collapse 后 size 表示返回多少个分组代表，而不是原始文档数。
 Python 版本: 3.11+
 运行命令: uv run python examples/11_advanced_search/02_collapse_dedup.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

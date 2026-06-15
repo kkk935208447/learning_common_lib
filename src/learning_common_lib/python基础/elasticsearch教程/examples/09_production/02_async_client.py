@@ -1,6 +1,10 @@
 """
 目标: 用 AsyncElasticsearch 并发执行多个搜索，理解异步客户端的生命周期
 关键 API: AsyncElasticsearch, await client.search, asyncio.gather, await client.close
+本例重点参数:
+- AsyncElasticsearch(hosts/request_timeout): 异步客户端也要显式超时，并在应用生命周期内复用。
+- async with: 退出时自动关闭连接池，避免 unclosed connector。
+- asyncio.gather: 并发等待多个查询；生产还要配合 Semaphore 做背压。
 Python 版本: 3.11+
 运行命令: uv run python examples/09_production/02_async_client.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

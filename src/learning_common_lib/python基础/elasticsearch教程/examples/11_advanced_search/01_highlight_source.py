@@ -1,6 +1,10 @@
 """
 目标: 用 highlight 高亮命中片段，用 _source 过滤裁剪返回字段，降低响应体积
 关键 API: search(highlight), pre_tags/post_tags/fragment_size, source(includes/excludes)
+本例重点参数:
+- highlight.fields: 指定要高亮的 text 字段；高亮会增加 CPU 和响应体积。
+- pre_tags/post_tags/fragment_size: 控制命中片段包裹标签和长度，前端需统一转义策略。
+- source/includes/excludes: 裁剪 `_source` 返回字段，大文档检索应默认只取必要字段。
 Python 版本: 3.11+
 运行命令: uv run python examples/11_advanced_search/01_highlight_source.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

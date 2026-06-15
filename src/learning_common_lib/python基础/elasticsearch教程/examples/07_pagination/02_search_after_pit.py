@@ -1,6 +1,10 @@
 """
 目标: 用 Point In Time (PIT) + search_after 实现稳定高效的深度翻页
 关键 API: open_point_in_time, search(pit, search_after, sort), close_point_in_time
+本例重点参数:
+- open_point_in_time(index/keep_alive): 打开快照视图；keep_alive 设成够翻下一页的最小时间。
+- search(pit/search_after/sort): search_after 使用上一页最后一条 sort 值，sort 必须稳定且包含唯一兜底字段。
+- close_point_in_time(id): PIT 占用 search context，用完必须关闭。
 Python 版本: 3.11+
 运行命令: uv run python examples/07_pagination/02_search_after_pit.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200

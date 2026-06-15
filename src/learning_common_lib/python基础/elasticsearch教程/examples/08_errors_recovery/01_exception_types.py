@@ -1,6 +1,10 @@
 """
 目标: 认识客户端常见异常类型，写出可区分处理的错误恢复代码
 关键 API: NotFoundError, BadRequestError, ConflictError, ApiError, exists
+本例重点参数:
+- client.options(ignore_status=404): 只用于可预期状态码，避免清理或探测逻辑抛异常。
+- exists(index/id): 轻量判断文档是否存在，替代正常分支里的 404 异常。
+- ApiError.meta.status: 区分 4xx 请求问题和 5xx/超时问题，决定是否重试。
 Python 版本: 3.11+
 运行命令: uv run python examples/08_errors_recovery/01_exception_types.py
 环境准备: 本地 Elasticsearch 8.x 运行在 http://localhost:9200
